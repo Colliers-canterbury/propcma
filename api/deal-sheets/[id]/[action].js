@@ -36,6 +36,7 @@ export default async function handler(req, res) {
       case "process": return await process_(req, res, deal);
       case "invoice": return await invoice(req, res, deal);
       case "return":  return await returnToBroker(req, res, deal);
+      case "receipt": return await setReceiptNo(req, res, deal);
       default: throw new HttpError(404, `Unknown action: ${action}`);
     }
   } catch (e) {
@@ -205,4 +206,34 @@ async function returnToBroker(req, res, deal) {
 
   await transition(deal, { status: "rejected" }, user.oid, `Returned to broker: ${note}`);
   return res.status(200).json({ ok: true, status: "rejected" });
+}
+
+/**
+ * Accounts updates the Trust Deposit Receipt No. Editable at ANY status.
+ * The value lives inside the form JSONB (form.deposit.receiptNo), so we
+ * read-modify-write that object rather than a top-level column.
+ */
+async function setReceiptNo(req, res, deal) {
+  const user = await requireUser(req, ["accounts", "manager"]);
+  const { receiptNo } = req.body || {};
+  const value = String(receiptNo ?? "").trim();
+
+  const form = { ...(deal.form || {}) };
+  form.deposit = { ...(form.deposit || {}), receiptNo: value };
+
+  const { error } = await supabase
+    .from("deal_sheets")
+    .update({ form })
+    .eq("id", deal.id);
+  if (error) throw new HttpError(500, "Could not save receipt number");
+
+  await supabase.from("deal_sheet_events").insert({
+    deal_id: deal.id,
+    actor: user.oid,
+    from_status: deal.status,
+    to_status: deal.status,
+    note: value ? `Trust receipt no. set to ${value}` : "Trust receipt no. cleared",
+  });
+
+  return res.status(200).json({ ok: true, receiptNo: value });
 }
