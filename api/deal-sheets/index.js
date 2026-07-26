@@ -40,6 +40,22 @@ async function list(req, res) {
     return res.status(200).json(data);
   }
 
+  if (scope === "drafts") {
+    // Accounts can VIEW (not edit) all drafts entered by office admins,
+    // so they can see what's coming. Read-only by design — there is no
+    // write path from this scope.
+    await requireUser(req, ["accounts", "manager"]);
+    const { data, error } = await supabase
+      .from("deal_sheets")
+      .select(
+        "id, status, deal_type, salesperson, division, property_address, suburb, vendor_name, total_invoice_ex_gst, deposit_to_trust, confidential, created_by, updated_at"
+      )
+      .eq("status", "draft")
+      .order("updated_at", { ascending: false });
+    if (error) throw new HttpError(500, "Drafts query failed");
+    return res.status(200).json(data);
+  }
+
   // scope=mine — the deals this user filed.
   const user = await requireUser(req);
   const { data, error } = await supabase
