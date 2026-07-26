@@ -35,7 +35,9 @@
     submit: (id) => call(`/${id}/submit`, { method: "POST" }),
     get: (id) => call(`/${id}`),
     getQueue: (status) => call(`?scope=queue${status ? `&status=${status}` : ""}`),
+    getDrafts: () => call(`?scope=drafts`),
     process: (id, nums) => call(`/${id}/process`, { method: "POST", body: nums }),
+    setReceipt: (id, receiptNo) => call(`/${id}/receipt`, { method: "POST", body: { receiptNo } }),
     invoice: (id) => call(`/${id}/invoice`, { method: "POST" }),
     returnToBroker: (id, note) => call(`/${id}/return`, { method: "POST", body: { note } }),
 
@@ -175,6 +177,12 @@
     get: (id) => delay(findDeal(id)),
     getQueue: (status) =>
       delay(demoStore.deals.filter((d) => d.status !== "draft" && (!status || d.status === status))),
+    getDrafts: () => delay(demoStore.deals.filter((d) => d.status === "draft")),
+    setReceipt: (id, receiptNo) => {
+      const d = findDeal(id);
+      d.form = d.form || {}; d.form.deposit = { ...(d.form.deposit || {}), receiptNo };
+      return delay({ ok: true, receiptNo });
+    },
     process: (id, { fileNo, dealNo }) => {
       const d = findDeal(id);
       d.status = "processing"; d.file_no = fileNo; d.deal_no = dealNo;

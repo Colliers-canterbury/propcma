@@ -15,7 +15,7 @@
     rejected:   { label: "Returned",   cls: "rej" },
   };
 
-  const state = { tab: "queue", queue: [], completed: [], selectedId: null, deal: null,
+  const state = { tab: "queue", queue: [], completed: [], drafts: [], selectedId: null, deal: null,
     filter: "all", note: "", pendingNums: {},
     brokers: [], admins: [], userRole: "" };
 
@@ -72,8 +72,11 @@
   }
 
   function render() {
-    const shown = state.queue.filter((d) => d.status !== "invoiced")
-      .filter((d) => state.filter === "all" || d.status === state.filter);
+    const showingDrafts = state.filter === "drafts";
+    const shown = showingDrafts
+      ? state.drafts
+      : state.queue.filter((d) => d.status !== "invoiced")
+          .filter((d) => state.filter === "all" || d.status === state.filter);
 
     $("app").innerHTML = `
       <header class="top">
@@ -93,14 +96,15 @@
           <div class="filters">
             ${["all","submitted","processing","rejected"].map((s) =>
               `<button class="fbtn ${state.filter===s?"on":""}" data-filter="${s}">${s==="all"?"All":META[s].label}</button>`).join("")}
+            <button class="fbtn ${state.filter==="drafts"?"on":""}" data-filter="drafts">Drafts${state.drafts.length?` (${state.drafts.length})`:""}</button>
           </div>
           ${shown.map((d) => `<button class="row ${state.selectedId===d.id?"sel":""}" data-id="${d.id}">
             <div class="rowTop"><strong>${d.deal_type==="lease"?`<span class="typePill lease">Lease</span> `:""}${esc(d.property_address||"—")}</strong>
-              <span class="pill ${META[d.status].cls}">${META[d.status].label}</span></div>
+              <span class="pill ${(META[d.status]||{cls:"pillDraft"}).cls}">${(META[d.status]||{label:"Draft"}).label}</span></div>
             <div class="rowSub">${esc(d.salesperson||"")} · ${esc(d.division||"")} · $${fmt(d.total_invoice_ex_gst)} to invoice
               ${d.deposit_to_trust?'<span class="trustDot"> · TRUST</span>':""}
               ${d.confidential?'<span class="confDot"> · CONFIDENTIAL</span>':""}</div></button>`).join("")
-            || `<p class="empty">No deal sheets in this state.</p>`}
+            || `<p class="empty">${showingDrafts?"No drafts in progress.":"No deal sheets in this state."}</p>`}
         </aside>
         <main id="detail"></main>
       </div>`}`;
@@ -115,7 +119,14 @@
 
     if (state.tab === "queue") {
       $("app").querySelectorAll("[data-filter]").forEach((b) =>
-        b.onclick = () => { state.filter = b.dataset.filter; render(); });
+        b.onclick = async () => {
+          state.filter = b.dataset.filter;
+          if (state.filter === "drafts" && !state.drafts.length) {
+            try { state.drafts = await api.getDrafts(); } catch (e) { /* leave empty */ }
+          }
+          state.selectedId = null; state.deal = null;
+          render();
+        });
       $("app").querySelectorAll("[data-id]").forEach((b) =>
         b.onclick = async () => { await loadDeal(b.dataset.id); render(); });
       renderDetail();
@@ -239,15 +250,18 @@
     const checklistOk = checks.every((c) => c.ok);
 
     el.className = "detail";
+    const meta = META[d.status] || { cls: "pillDraft", label: "Draft" };
+    const isDraft = d.status === "draft";
     el.innerHTML = `
       <div class="detailHead">
         <div><h2>${esc(d.property_address||"—")}</h2>
-          <p class="dim">Submitted ${d.submitted_at?new Date(d.submitted_at).toLocaleString("en-NZ"):"—"} · Broker ${esc(d.salesperson||"")} · ${esc(d.division||"")}</p></div>
+          <p class="dim">${isDraft ? "Draft — not yet submitted" : `Submitted ${d.submitted_at?new Date(d.submitted_at).toLocaleString("en-NZ"):"—"}`} · Broker ${esc(d.salesperson||"")} · ${esc(d.division||"")}</p></div>
         <div style="text-align:right">
-          <span class="pill big ${META[d.status].cls}">${META[d.status].label}</span>
+          <span class="pill big ${meta.cls}">${meta.label}</span>
           <div><button class="linkBtn" id="printDeal" style="margin-top:8px">Print / Save as PDF</button></div>
         </div>
       </div>
+      ${isDraft ? `<div class="draftBanner">View only — this draft is still being prepared by the office admin. It will appear in the queue once submitted.</div>` : ""}
       <div class="cols">
         <section class="panel">
           <h3>Deal</h3>
@@ -269,7 +283,12 @@
           </dl>
           ${d.form && d.form.deposit && d.deposit_to_trust ? `<h3>Trust deposit</h3><dl>
             <div><dt>Amount</dt><dd>$${fmt(d.form.deposit.amount)}</dd></div>
-            <div><dt>Receipt no.</dt><dd>${esc(d.form.deposit.receiptNo||"—")}</dd></div>
+            <div><dt>Receipt no.</dt><dd>
+              ${isDraft ? esc(d.form.deposit.receiptNo||"—") : `<span class="receiptEdit">
+                <input id="receiptNo" value="${esc(d.form.deposit.receiptNo||"")}" placeholder="Enter receipt no." />
+                <button id="receiptSave" class="miniBtn">Save</button>
+                <span id="receiptStatus" class="miniStatus"></span>
+              </span>`}</dd></div>
 </dl>` : ""}
           <h3>Commission split</h3>
           <table class="tbl"><tbody>${splits.map((s) =>
@@ -319,6 +338,24 @@
     if (pb) { toggleProcess(); pb.onclick = doProcess; }
     const ib = $("invoiceBtn"); if (ib) ib.onclick = doInvoice;
     const rb = $("returnBtn"); if (rb) { rb.disabled = !state.note.trim(); rb.onclick = doReturn; }
+
+    const rSave = $("receiptSave");
+    if (rSave) rSave.onclick = async () => {
+      const val = ($("receiptNo").value || "").trim();
+      const rst = $("receiptStatus");
+      rSave.disabled = true;
+      if (rst) rst.textContent = "Saving…";
+      try {
+        await api.setReceipt(state.deal.id, val);
+        state.deal.form = state.deal.form || {};
+        state.deal.form.deposit = { ...(state.deal.form.deposit || {}), receiptNo: val };
+        if (rst) rst.textContent = "Saved ✓";
+      } catch (e) {
+        if (rst) rst.textContent = "Failed — try again";
+      } finally {
+        rSave.disabled = false;
+      }
+    };
 
     el.querySelectorAll(".dlBtn").forEach((b) => {
       b.onclick = async () => {
