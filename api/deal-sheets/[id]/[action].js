@@ -108,15 +108,15 @@ async function process_(req, res, deal) {
   if (deal.status !== "submitted")
     throw new HttpError(409, `Cannot process from status '${deal.status}'`);
 
-  const { fileNo, dealNo } = req.body || {};
-  if (!fileNo || !dealNo)
-    throw new HttpError(400, "fileNo and dealNo are required");
+  const { dealNo } = req.body || {};
+  if (!dealNo)
+    throw new HttpError(400, "dealNo is required");
 
   await transition(
     deal,
-    { status: "processing", file_no: fileNo, deal_no: dealNo, processed_by: user.oid },
+    { status: "processing", deal_no: dealNo, processed_by: user.oid },
     user.oid,
-    `File ${fileNo} / Deal ${dealNo} assigned`
+    `Deal ${dealNo} assigned`
   );
   return res.status(200).json({ ok: true, status: "processing" });
 }
