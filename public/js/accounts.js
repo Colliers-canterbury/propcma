@@ -21,6 +21,9 @@
 
   async function loadQueue() {
     state.queue = await api.getQueue();
+    // Drafts are shown at the bottom of the "All" filter, so load them up
+    // front. Non-fatal — if it fails the queue still renders.
+    try { state.drafts = await api.getDrafts(); } catch (e) { state.drafts = []; }
     // Deep-link from the notification email: ?id=<dealId> preselects it.
     const linkedId = new URLSearchParams(location.search).get("id");
     if (linkedId && state.queue.some((d) => d.id === linkedId)) {
@@ -73,10 +76,15 @@
 
   function render() {
     const showingDrafts = state.filter === "drafts";
+    const queueItems = state.queue.filter((d) => d.status !== "invoiced")
+      .filter((d) => state.filter === "all" || d.status === state.filter);
+    // "All" shows the active queue first, then drafts at the bottom.
+    // "Drafts" shows only drafts.
     const shown = showingDrafts
       ? state.drafts
-      : state.queue.filter((d) => d.status !== "invoiced")
-          .filter((d) => state.filter === "all" || d.status === state.filter);
+      : state.filter === "all"
+        ? [...queueItems, ...state.drafts]
+        : queueItems;
 
     $("app").innerHTML = `
       <header class="top">
