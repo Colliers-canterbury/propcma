@@ -61,7 +61,7 @@ async function list(req, res) {
   const { data, error } = await supabase
     .from("deal_sheets")
     .select(
-      "id, status, deal_type, property_address, vendor_name, total_invoice_ex_gst, updated_at, submitted_at"
+      "id, status, deal_type, property_address, vendor_name, purchaser_name, total_invoice_ex_gst, updated_at, submitted_at"
     )
     .eq("created_by", user.oid)
     .order("updated_at", { ascending: false });
