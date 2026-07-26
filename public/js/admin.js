@@ -56,12 +56,13 @@
       </div>
 
       ${shown.length ? `<table class="compTable">
-        <thead><tr><th>Property</th><th>Type</th><th>Vendor / Lessor</th><th class="r">To invoice</th>
+        <thead><tr><th>Property</th><th>Type</th><th>Vendor / Lessor</th><th>Purchaser / Tenant</th><th class="r">To invoice</th>
           <th>Updated</th><th>Status</th><th></th></tr></thead>
         <tbody>${shown.map((d) => `<tr data-open="${d.id}" data-type="${d.deal_type || "sale"}">
           <td><strong>${esc(d.property_address || "(no address)")}</strong></td>
           <td><span class="typePill ${d.deal_type === "lease" ? "lease" : "sale"}">${d.deal_type === "lease" ? "Lease" : "Sale"}</span></td>
           <td>${esc(d.vendor_name || "—")}</td>
+          <td>${esc(d.purchaser_name || "—")}</td>
           <td class="r mono">${d.total_invoice_ex_gst ? "$"+fmt(d.total_invoice_ex_gst) : "—"}</td>
           <td>${when(d.updated_at || d.submitted_at)}</td>
           <td><span class="pill ${META[d.status].cls}">${META[d.status].label}</span></td>

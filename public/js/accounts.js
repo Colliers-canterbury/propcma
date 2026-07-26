@@ -36,7 +36,7 @@
   async function loadDeal(id) {
     state.selectedId = id;
     state.deal = await api.get(id);
-    state.pendingNums = { fileNo: state.deal.file_no || "", dealNo: state.deal.deal_no || "" };
+    state.pendingNums = { dealNo: state.deal.deal_no || "" };
     state.note = "";
   }
 
@@ -156,13 +156,13 @@
     $("tabBody").innerHTML = rows.length ? `
       <table class="compTable">
         <thead><tr><th>Property</th><th>Vendor</th><th>Salespeople</th>
-          <th class="r">Invoiced</th><th>File / Deal</th><th>Date</th><th></th></tr></thead>
+          <th class="r">Invoiced</th><th>Deal no.</th><th>Date</th><th></th></tr></thead>
         <tbody>${rows.map((d) => `<tr>
           <td><strong>${esc(d.property_address || "—")}</strong></td>
           <td>${esc(d.vendor_name || "—")}</td>
           <td>${esc(d.salesperson || "—")}</td>
           <td class="r mono">$${fmt(d.total_invoice_ex_gst)}</td>
-          <td>${esc(d.file_no || "—")} / ${esc(d.deal_no || "—")}</td>
+          <td>${esc(d.deal_no || "—")}</td>
           <td>${d.submitted_at ? new Date(d.submitted_at).toLocaleDateString("en-NZ",{day:"2-digit",month:"short",year:"numeric"}) : "—"}</td>
           <td class="r"><button class="linkBtn" data-print="${d.id}">Print</button></td>
         </tr>`).join("")}</tbody></table>`
@@ -311,20 +311,18 @@
 
         <section class="panel actions">
           <h3>Process</h3>
-          <label class="fld"><span class="lbl">File no.</span>
-            <input id="fileNo" value="${esc(state.pendingNums.fileNo)}" ${d.status!=="submitted"?"disabled":""} placeholder="e.g. F-26-119" /></label>
           <label class="fld"><span class="lbl">Deal no.</span>
             <input id="dealNo" value="${esc(state.pendingNums.dealNo)}" ${d.status!=="submitted"?"disabled":""} placeholder="e.g. D-3073" /></label>
 
           ${d.status==="submitted" ? `
-            <button class="primary" id="processBtn" ${!checklistOk?"disabled":""}>Assign numbers &amp; start processing</button>
+            <button class="primary" id="processBtn" ${!checklistOk?"disabled":""}>Assign number &amp; start processing</button>
             ${!checklistOk?`<p class="warn">Checklist incomplete — return to broker.</p>`:""}
             <div class="returnBox">
               <textarea id="returnNote" rows="2" placeholder="Reason for returning to broker…">${esc(state.note)}</textarea>
               <button class="ghost" id="returnBtn">Return to broker</button>
             </div>` : ""}
           ${d.status==="processing" ? `<button class="primary" id="invoiceBtn">Mark invoiced — commission approved</button>` : ""}
-          ${d.status==="invoiced" ? `<p class="doneNote">✓ Invoiced. File ${esc(d.file_no)} · Deal ${esc(d.deal_no)}.</p>` : ""}
+          ${d.status==="invoiced" ? `<p class="doneNote">✓ Invoiced. Deal ${esc(d.deal_no)}.</p>` : ""}
           ${d.status==="rejected" ? `<p class="warn">Returned to broker — awaiting resubmission.</p>` : ""}
 
           <h3 style="margin-top:18px">History</h3>
@@ -333,8 +331,7 @@
         </section>
       </div>`;
 
-    const fileNo = $("fileNo"), dealNo = $("dealNo");
-    if (fileNo) fileNo.oninput = () => { state.pendingNums.fileNo = fileNo.value; toggleProcess(); };
+    const dealNo = $("dealNo");
     if (dealNo) dealNo.oninput = () => { state.pendingNums.dealNo = dealNo.value; toggleProcess(); };
     const note = $("returnNote");
     if (note) note.oninput = () => { state.note = note.value; const rb = $("returnBtn"); if (rb) rb.disabled = !note.value.trim(); };
@@ -383,13 +380,13 @@
 
     const pb = $("processBtn"); if (!pb) return;
     const checks = checklistOf(state.deal);
-    const ok = checks.every((c) => c.ok) && state.pendingNums.fileNo.trim() && state.pendingNums.dealNo.trim();
+    const ok = checks.every((c) => c.ok) && state.pendingNums.dealNo.trim();
     pb.disabled = !ok;
   }
 
   async function doProcess() {
     try {
-      await api.process(state.deal.id, { fileNo: state.pendingNums.fileNo.trim(), dealNo: state.pendingNums.dealNo.trim() });
+      await api.process(state.deal.id, { dealNo: state.pendingNums.dealNo.trim() });
       await refresh();
     } catch (e) { alert("Could not process: " + e.message); }
   }

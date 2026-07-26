@@ -183,10 +183,10 @@
       d.form = d.form || {}; d.form.deposit = { ...(d.form.deposit || {}), receiptNo };
       return delay({ ok: true, receiptNo });
     },
-    process: (id, { fileNo, dealNo }) => {
+    process: (id, { dealNo }) => {
       const d = findDeal(id);
-      d.status = "processing"; d.file_no = fileNo; d.deal_no = dealNo;
-      d.events.push({ created_at: new Date().toISOString(), note: `File ${fileNo} / Deal ${dealNo} assigned`, to_status: "processing" });
+      d.status = "processing"; d.deal_no = dealNo;
+      d.events.push({ created_at: new Date().toISOString(), note: `Deal ${dealNo} assigned`, to_status: "processing" });
       return delay({ ok: true });
     },
     invoice: (id) => {
