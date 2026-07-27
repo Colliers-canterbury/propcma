@@ -532,6 +532,10 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
               <button class="btn btn-sm" onclick="recoverPhotos()"><i class="ti ti-photo-search" aria-hidden="true"></i> Recover uploaded photos</button>
               <span style="font-size:11px;color:var(--ink3);">Re-attaches photos from the PropCMA Photos folder on OneDrive and writes them back to the sheet.</span>
             </div>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+              <button class="btn btn-sm" onclick="migratePhotosToSupabase()"><i class="ti ti-transfer" aria-hidden="true"></i> Migrate photos to Supabase</button>
+              <span style="font-size:11px;color:var(--ink3);">One-off: copies legacy OneDrive photos to shared Supabase storage so all users can see them. Run while signed in as the original uploader.</span>
+            </div>
             <div class="status-pill ok" style="display:inline-flex;"><i class="ti ti-check" aria-hidden="true"></i> Signed in — Excel sync and write-back enabled</div>
           </div>
         </div>
@@ -685,7 +689,7 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
 
     <!-- Photos -->
     <div class="edit-section-title">Photos</div>
-    <p style="font-size:12px;color:var(--ink3);margin-bottom:10px;">Paste public image URLs (Google Drive, Dropbox, etc.). Each is saved as a comma-separated list and written back to your sheet.</p>
+    <p style="font-size:12px;color:var(--ink3);margin-bottom:10px;">Upload photos (stored in shared Supabase storage, visible to all users) or paste public image URLs. Each is saved as a comma-separated list and written back to your sheet.</p>
     <div class="photo-list" id="so-photo-list"></div>
     <div style="display:flex;gap:8px;margin-bottom:10px;">
       <button class="btn btn-sm" onclick="document.getElementById('so-photo-file').click()"><i class="ti ti-upload" aria-hidden="true"></i> Upload photo</button>
@@ -713,6 +717,27 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
 <script>
 // ── Supabase client ──────────────────────────────────────────
 const sb = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON);
+
+// ── Supabase Storage (property photos) ────────────────────────
+// Photos are stored in the public 'property-photos' bucket so every
+// user sees them without any per-user OneDrive/Graph permissions.
+// The photos field stores the full public URL, which the existing
+// https:// rendering paths (table thumbs, summary modal, previews,
+// PDF payload) already handle natively.
+const PHOTO_BUCKET='property-photos';
+function sbPhotoPublicUrl(path){
+  return sb.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+async function sbUploadPhoto(propId,blob){
+  const path=`${(propId||'photo').replace(/[^a-z0-9_\-]/gi,'')}/${Date.now()}.jpg`;
+  const{error}=await sb.storage.from(PHOTO_BUCKET).upload(path,blob,{
+    contentType:'image/jpeg',
+    cacheControl:'31536000', // paths are unique, cache hard
+    upsert:false,
+  });
+  if(error)throw new Error(error.message||'Storage upload failed');
+  return sbPhotoPublicUrl(path);
+}
 
 // ── Microsoft / MSAL configuration ──────────────────────────
 const MS_CLIENT_ID = 'e41d7680-86d8-49a0-8a68-17a5f166e10b';
@@ -1177,24 +1202,24 @@ function dataUrlToBlob(dataUrl){
   for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);
   return new Blob([arr],{type:mime});
 }
-// Upload a photo to OneDrive and add a graph:// reference to the photo list
+// Upload a photo to Supabase Storage and add its public URL to the photo list.
+// No Microsoft sign-in needed — the bucket is public, so every user can see
+// the photo immediately (unlike the old OneDrive uploads, which were only
+// visible to the uploader).
 async function handlePhotoUpload(input){
   const file=input.files&&input.files[0];
   input.value='';
   if(!file)return;
   const status=document.getElementById('so-photo-status');
-  if(!msToken){showToast('Sign in to Microsoft first (Settings)');return;}
   status.textContent='Uploading…';
   try{
     const dataUrl=await downscaleImage(file,1600,0.85);
     const blob=dataUrlToBlob(dataUrl);
-    const folderId=await ensurePhotoFolder();
-    const safeName=(editingPropId||'photo').replace(/[^a-z0-9_\-]/gi,'')+'_'+Date.now()+'.jpg';
-    const item=await graphPutBinary(`/drives/${cfg._driveId}/items/${folderId}:/${safeName}:/content`,blob,'image/jpeg');
+    const publicUrl=await sbUploadPhoto(editingPropId,blob);
     // Remove a single empty placeholder row before adding
     const rows=Array.from(document.querySelectorAll('#so-photo-list input'));
     if(rows.length===1&&!rows[0].value.trim())rows[0].parentElement.remove();
-    addPhotoRow(`graph://${cfg._driveId}/${item.id}`);
+    addPhotoRow(publicUrl);
     renderPhotoPreviews();
     status.textContent='✓ Uploaded — save changes to keep';
   }catch(e){
@@ -1244,6 +1269,56 @@ async function recoverPhotos(){
     if(attached)showToast(`Re-attached photos to ${attached} propert${attached===1?'y':'ies'} (${written} written to Excel)`);
     else showToast('No orphaned photos found');
   }catch(e){showToast('Recovery failed: '+e.message);console.error(e);}
+}
+// One-off migration: copy legacy OneDrive (graph://) photos to Supabase
+// Storage and replace the references with public URLs. Requires the person
+// who originally uploaded the photos to be signed in to Microsoft, since
+// only their token can read the OneDrive files. Safe to re-run — already-
+// migrated (https) refs are skipped, and failures leave the old ref intact.
+async function migratePhotosToSupabase(){
+  if(!msToken){showToast('Sign in to Microsoft first (Settings)');return;}
+  if(!confirm('Copy all OneDrive photos to Supabase Storage and update every property? This may take a few minutes.'))return;
+  let migrated=0,failed=0,propsUpdated=0,written=0;
+  try{
+    for(const p of allProperties){
+      const refs=(p.photos||'').split(',').map(s=>s.trim()).filter(Boolean);
+      if(!refs.some(r=>r.startsWith('graph://')))continue;
+      showToast(`Migrating photos for ${p.address||p.id}…`);
+      let changed=false;
+      const newRefs=[];
+      for(const ref of refs){
+        if(!ref.startsWith('graph://')){newRefs.push(ref);continue;}
+        try{
+          const m=ref.match(/^graph:\/\/([^\/]+)\/(.+)$/);
+          if(!m)throw new Error('Bad graph ref');
+          const blob=await graphRetry(()=>graphGetBlob(`/drives/${m[1]}/items/${m[2]}/content`));
+          // Re-encode via the same downscale path as uploads (max 1600px JPEG)
+          const dataUrl=await downscaleImage(blob,1600,0.85);
+          const publicUrl=await sbUploadPhoto(p.id,dataUrl?dataUrlToBlob(dataUrl):blob);
+          newRefs.push(publicUrl);
+          migrated++;changed=true;
+        }catch(e){
+          console.warn('Migrate failed for',p.id,ref,e.message);
+          newRefs.push(ref); // keep the old ref so nothing is lost
+          failed++;
+        }
+      }
+      if(!changed)continue;
+      // Snapshot BEFORE mutating so the Excel write-back only touches the Photos cell
+      editingSnapshot=snapshotProp(p);
+      p.photos=newRefs.join(', ');
+      const{error}=await sb.from('properties').upsert(appToDb(p),{onConflict:'id'});
+      if(error){console.warn('Migrate: supabase error for',p.id,error.message);continue;}
+      propsUpdated++;
+      if(await writePropertyToExcel(p).catch(()=>false))written++;
+    }
+    editingSnapshot=null;
+    applyFilters();
+    showToast(`Migration done: ${migrated} photo${migrated===1?'':'s'} moved across ${propsUpdated} propert${propsUpdated===1?'y':'ies'} (${written} written to Excel${failed?`, ${failed} failed — re-run to retry`:''})`);
+  }catch(e){
+    editingSnapshot=null;
+    showToast('Migration failed: '+e.message);console.error(e);
+  }
 }
 // Resolve a graph:// photo reference to a displayable thumbnail URL
 async function resolveGraphPhotoUrl(ref){
