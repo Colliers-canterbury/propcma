@@ -115,7 +115,7 @@ function renderPrintable(deal, splits, attachments, brokers, preparedBy) {
       ${row("Phone", dash(p.phone))}
       ${row("Email", dash(p.email))}
       ${row("Postal address", [p.postalAddress, p.city, p.postcode, p.country].filter(Boolean).map(esc).join(", ") || "—")}
-      ${solicitor && p.solicitorName ? row("Solicitor", `${esc(p.solicitorName)}${p.solicitorFirm ? ", " + esc(p.solicitorFirm) : ""}${p.solicitorPhone ? " · " + esc(p.solicitorPhone) : ""}`) : ""}
+      ${solicitor && p.solicitorName ? row("Solicitor", `${esc(p.solicitorName)}${p.solicitorFirm ? ", " + esc(p.solicitorFirm) : ""}${(p.solicitorEmail || p.solicitorPhone) ? " · " + esc(p.solicitorEmail || p.solicitorPhone) : ""}`) : ""}
     </table>`;
 
   return `<!DOCTYPE html>
@@ -127,7 +127,6 @@ function renderPrintable(deal, splits, attachments, brokers, preparedBy) {
   <div><h1>Deal Sheet — Sales Record</h1>
     <div class="sub">South Island Commercial (2004) Limited · Colliers</div></div>
   <div class="nums">
-    <div>File No. <b>${dash(deal.file_no)}</b></div>
     <div>Deal No. <b>${dash(deal.deal_no)}</b></div>
     <div class="sub">Status: ${esc(deal.status)}</div>
   </div>
@@ -184,11 +183,11 @@ ${deal.deposit_to_trust ? `
 <table class="grid avoid">
   <thead><tr><th>Item</th><th class="r">%</th><th class="r">Amount</th></tr></thead>
   <tbody>
-    ${(comm.tiers || []).map((t, i) => t.pct ? `<tr><td>${["Commission","Second tier","Third tier"][i]}</td>
-      <td class="r">${esc(t.pct)}%</td><td class="r">—</td></tr>` : "").join("")}
+    ${(comm.tiers || []).map((t, i) => (t.pct || t.flat) ? `<tr><td>${["Commission","Second tier","Third tier"][i]}</td>
+      <td class="r">${t.flat ? "flat rate" : esc(t.pct) + "%"}</td><td class="r">${t.flat ? money(t.flat) : "—"}</td></tr>` : "").join("")}
     ${comm.otherFee ? `<tr><td>Other — ${dash(comm.otherDesc)}</td><td class="r"></td><td class="r">${money(comm.otherFee)}</td></tr>` : ""}
     ${comm.adminFee ? `<tr><td>Administration fee</td><td class="r"></td><td class="r">${money(500)}</td></tr>` : ""}
-    ${comm.recoverMarketing ? `<tr><td>Recover marketing costs</td><td class="r"></td><td class="r">${money(comm.recoverMarketing)}</td></tr>` : ""}
+    ${comm.recoverMarketing ? `<tr><td>Recover marketing costs${comm.recoverMarketingDesc ? " — " + dash(comm.recoverMarketingDesc) : ""}</td><td class="r"></td><td class="r">${money(comm.recoverMarketing)}</td></tr>` : ""}
     ${comm.recoverOther ? `<tr><td>Recover other — ${dash(comm.recoverOtherDesc)}</td><td class="r"></td><td class="r">${money(comm.recoverOther)}</td></tr>` : ""}
     <tr class="total"><td>Total to invoice (excl GST)</td><td></td><td class="r">${money(deal.total_invoice_ex_gst)}</td></tr>
   </tbody>
@@ -198,7 +197,7 @@ ${deal.deposit_to_trust ? `
 <table class="grid avoid">
   <thead><tr><th>Party</th><th class="r">%</th><th class="r">Amount</th></tr></thead>
   <tbody>${splits.map((s) => `<tr><td>${esc(s.party_name)}${s.party_type === "third_party" ? " <em>(third party)</em>" : ""}</td>
-    <td class="r">${s.split_pct}%</td><td class="r">${money(s.split_amount)}</td></tr>`).join("") ||
+    <td class="r">${s.split_pct ? s.split_pct + "%" : "—"}</td><td class="r">${money(s.split_amount)}</td></tr>`).join("") ||
     `<tr><td colspan="3">—</td></tr>`}</tbody>
 </table>
 
@@ -313,7 +312,6 @@ function renderLeasePrintable(deal, splits, attachments, brokers, preparedBy) {
   <div><h1>Deal Sheet — Leasing Record</h1>
     <div class="sub">South Island Commercial (2004) Limited · Colliers</div></div>
   <div class="nums">
-    <div>File No. <b>${dash(deal.file_no)}</b></div>
     <div>Deal No. <b>${dash(deal.deal_no)}</b></div>
     <div class="sub">Status: ${esc(deal.status)}</div>
   </div>
