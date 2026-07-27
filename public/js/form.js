@@ -373,13 +373,15 @@
       const path = el.dataset.path;
       if (el.type === "checkbox") {
         el.onchange = () => set(path, el.checked);
-      } else if (el.tagName === "SELECT" || el.type === "date") {
+      } else if (el.tagName === "SELECT") {
         // no typing caret to preserve — safe to re-render
         el.onchange = () => set(path, el.value);
       } else {
-        // text / textarea: update state + summary only, NEVER re-render
-        // the form while typing (that was reversing text as the caret
-        // jumped back to the start on each keystroke)
+        // text / textarea / date: update state + summary only, NEVER
+        // re-render the form while typing (re-rendering rebuilds the
+        // input and drops focus — for dates, Chrome fires change as
+        // soon as the first year digit makes a valid date, which froze
+        // typed years at 0002; the picker still commits fine via input)
         el.oninput = () => setNoRender(path, el.value);
         // numeric fields that drive table amounts recalc on blur
         if (el.hasAttribute("data-recalc")) el.onchange = () => set(path, el.value);
