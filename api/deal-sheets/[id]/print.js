@@ -106,6 +106,21 @@ function renderPrintable(deal, splits, attachments, brokers, preparedBy) {
   const nameOf = (code) => (brokers.find((b) => b.code === code) || {}).first_name || code;
   const dealBrokers = (f.ownership?.salespeople || []).map(nameOf).join(", ");
 
+  // Mirror the form's derive(): tier fees from the base chain (typed
+  // amount, or remainder of the sale price), with flat rates winning;
+  // yield falls back to the auto-calculation when not manually set.
+  const n = (v) => { const x = parseFloat(String(v ?? "").replace(/[$,\s]/g, "")); return isNaN(x) ? 0 : x; };
+  const salePriceN = n(deal.sale_price_ex_gst ?? sale.salePrice);
+  let remainingBase = salePriceN;
+  const tierFees = (comm.tiers || []).map((t) => {
+    const typed = t.base !== "" && t.base != null;
+    const base = typed ? n(t.base) : Math.max(remainingBase, 0);
+    remainingBase -= base;
+    return n(t.flat) > 0 ? n(t.flat) : (n(t.pct) / 100) * base;
+  });
+  const yieldPct = (sale.yieldManual !== "" && sale.yieldManual != null) ? n(sale.yieldManual)
+    : (salePriceN > 0 && n(sale.rentalIncome) > 0 ? (n(sale.rentalIncome) / salePriceN) * 100 : 0);
+
   const row = (label, value) => `<tr><th>${label}</th><td>${value}</td></tr>`;
   const party = (p, title, solicitor) => !p?.name ? "" : `
     <h3>${title}</h3>
@@ -160,7 +175,7 @@ ${f.billingDifferent ? party(f.billing, "Billing entity", false) : ""}
   ${row("Unconditional date", dash(sale.unconditionalDate))}
   ${row("Sale price (excl GST)", money(deal.sale_price_ex_gst))}
   ${row(`${esc(sale.rentalBasis || "Net")} rental income`, sale.rentalIncome ? money(sale.rentalIncome) : "—")}
-  ${row("Yield", sale.yieldManual ? esc(sale.yieldManual) + " %" : "—")}
+  ${row(`${esc(sale.rentalBasis || "Net")} yield`, yieldPct ? yieldPct.toFixed(2) + " %" : "—")}
   ${row("Title", dash(sale.titleType))}
   ${row("Land area (sqm)", dash(sale.landArea))}
   ${row("Occupied by area (sqm)", dash(sale.occupiedArea))}
@@ -184,7 +199,7 @@ ${deal.deposit_to_trust ? `
   <thead><tr><th>Item</th><th class="r">%</th><th class="r">Amount</th></tr></thead>
   <tbody>
     ${(comm.tiers || []).map((t, i) => (t.pct || t.flat) ? `<tr><td>${["Commission","Second tier","Third tier"][i]}</td>
-      <td class="r">${t.flat ? "flat rate" : esc(t.pct) + "%"}</td><td class="r">${t.flat ? money(t.flat) : "—"}</td></tr>` : "").join("")}
+      <td class="r">${t.flat ? "flat rate" : esc(t.pct) + "%"}</td><td class="r">${tierFees[i] ? money(tierFees[i]) : "—"}</td></tr>` : "").join("")}
     ${comm.otherFee ? `<tr><td>Other — ${dash(comm.otherDesc)}</td><td class="r"></td><td class="r">${money(comm.otherFee)}</td></tr>` : ""}
     ${comm.adminFee ? `<tr><td>Administration fee</td><td class="r"></td><td class="r">${money(500)}</td></tr>` : ""}
     ${comm.recoverMarketing ? `<tr><td>Recover marketing costs${comm.recoverMarketingDesc ? " — " + dash(comm.recoverMarketingDesc) : ""}</td><td class="r"></td><td class="r">${money(comm.recoverMarketing)}</td></tr>` : ""}
