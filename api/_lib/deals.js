@@ -31,7 +31,8 @@ export function computeDerived(form) {
     const typed = t.base !== "" && t.base != null;
     const base = typed ? num(t.base) : Math.max(remaining, 0);
     remaining -= base;
-    return (num(t.pct) / 100) * base;
+    // A flat $ rate wins over the % calculation when set (mirrors the form).
+    return num(t.flat) > 0 ? num(t.flat) : (num(t.pct) / 100) * base;
   });
 
   const adminFee = form.comm?.adminFee ? 500 : 0;
@@ -47,12 +48,14 @@ export function computeDerived(form) {
   const commissionBase = totalInvoice - adminFee;
 
   const thirdPartyRows = (form.thirdParty || [])
-    .filter((s) => num(s.pct) > 0)
+    .filter((s) => num(s.pct) > 0 || num(s.fixed) > 0)
     .map((s) => ({
       party_type: "third_party",
       party_name: s.name || "(unnamed)",
       split_pct: num(s.pct),
-      split_amount: +((num(s.pct) / 100) * commissionBase).toFixed(2),
+      // % of commission PLUS any fixed $ — both apply together
+      // (e.g. 10% + $500), mirroring the form's tpAmount().
+      split_amount: +((num(s.pct) / 100) * commissionBase + num(s.fixed)).toFixed(2),
     }));
 
   const thirdPartyTotal = thirdPartyRows.reduce((a, s) => a + s.split_amount, 0);
@@ -106,7 +109,9 @@ export function toRow(form, derived) {
     total_invoice_ex_gst: derived.totalInvoice || null,
     wale_years: form.sale?.wale ? parseFloat(String(form.sale.wale).replace(/[^\d.]/g, "")) || null : null,
     deposit_to_trust: !!form.depositToTrust,
-    confidential: !!form.press?.confidential,
+    // The form stores this at the top level (form.confidential); the old
+    // form.press path never existed, so the flag silently never persisted.
+    confidential: !!(form.confidential ?? form.press?.confidential),
     property_id: form.propertyId || null, // uuid from PropCMA properties table
     form,
   };
@@ -128,6 +133,8 @@ export function validateForSubmit(form, derived) {
     missing.push("Salesperson split must total 100%");
   if (derived.thirdPartyPctTotal >= 100)
     missing.push("Third-party share must be under 100% of commission");
+  else if (derived.totalInvoice && derived.thirdPartyTotal >= derived.totalInvoice)
+    missing.push("Third-party share can't exceed the commission");
   if (!form.buyerSource) missing.push("Buyer source");
   if (!form.listingSource) missing.push("Listing source");
 
