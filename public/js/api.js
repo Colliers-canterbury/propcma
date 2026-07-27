@@ -42,19 +42,33 @@
     returnToBroker: (id, note) => call(`/${id}/return`, { method: "POST", body: { note } }),
 
     // ---- attachments ----
+    // Two-step upload: the API authorises and returns a one-time signed
+    // URL, then the file goes straight to Supabase Storage — it never
+    // passes through Vercel, so large scans (up to 50 MB) work.
     async uploadAttachment(id, slot, file) {
-      const token = await window.DealSheetAuth.getToken();
-      const fd = new FormData();
-      fd.append("slot", slot);
-      fd.append("file", file);
-      const res = await fetch(`${cfg.apiBase}/api/deal-sheets/${id}/attachments`, {
+      const MAX = 50 * 1024 * 1024;
+      if (file.size > MAX)
+        throw new Error(`File is ${(file.size / 1024 / 1024).toFixed(1)} MB — the maximum is 50 MB`);
+
+      // 1) ask the API to authorise this upload
+      const { uploadUrl, path } = await call(`/${id}/attachments`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` }, // no content-type; browser sets multipart boundary
-        body: fd,
+        body: { action: "sign", slot, fileName: file.name, fileType: file.type, size: file.size },
       });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(data?.error || `Upload failed (${res.status})`);
-      return data; // { slot, name, path, size }
+
+      // 2) send the file directly to storage
+      const put = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      });
+      if (!put.ok) throw new Error(`Upload failed (${put.status})`);
+
+      // 3) record it against the deal
+      return call(`/${id}/attachments`, {
+        method: "POST",
+        body: { action: "confirm", slot, path, fileName: file.name, fileType: file.type },
+      }); // { slot, name, path, size }
     },
     removeAttachment: (id, slot) => call(`/${id}/attachments?slot=${encodeURIComponent(slot)}`, { method: "DELETE" }),
 
