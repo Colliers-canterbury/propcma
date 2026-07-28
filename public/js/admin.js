@@ -67,7 +67,8 @@
           <td>${when(d.updated_at || d.submitted_at)}</td>
           <td><span class="pill ${META[d.status].cls}">${META[d.status].label}</span></td>
           <td class="r">${["draft","rejected"].includes(d.status)
-            ? `<button class="linkBtn" data-edit="${d.id}" data-type="${d.deal_type || "sale"}">${d.status==="rejected"?"Fix &amp; resubmit":"Continue"}</button>`
+            ? `<button class="linkBtn" data-edit="${d.id}" data-type="${d.deal_type || "sale"}">${d.status==="rejected"?"Fix &amp; resubmit":"Continue"}</button>
+               <button class="linkBtn danger" data-del="${d.id}">Delete</button>`
             : `<button class="linkBtn" data-print="${d.id}">Print</button>`}</td>
         </tr>`).join("")}</tbody></table>`
         : `<p class="empty">No deal sheets here yet.</p>`}`;
@@ -78,6 +79,18 @@
       b.onclick = (e) => { e.stopPropagation(); location.href = `${b.dataset.type === "lease" ? "lease-sheet.html" : "deal-sheet.html"}?id=${b.dataset.edit}`; });
     $("app").querySelectorAll("[data-print]").forEach((b) =>
       b.onclick = (e) => { e.stopPropagation(); api.openPrint(b.dataset.print); });
+    $("app").querySelectorAll("[data-del]").forEach((b) =>
+      b.onclick = async (e) => {
+        e.stopPropagation();
+        const d = state.deals.find((x) => x.id === b.dataset.del);
+        if (!confirm(`Delete the deal sheet for "${d?.property_address || "this property"}"?\n\nThis permanently removes the deal sheet and its attachments and can't be undone.`)) return;
+        try {
+          await api.deleteDeal(b.dataset.del);
+          await load();
+        } catch (err) {
+          alert("Couldn't delete: " + err.message);
+        }
+      });
     $("app").querySelectorAll("[data-open]").forEach((tr) =>
       tr.onclick = () => location.href = `${tr.dataset.type === "lease" ? "lease-sheet.html" : "deal-sheet.html"}?id=${tr.dataset.open}`);
   }
