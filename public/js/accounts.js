@@ -290,7 +290,12 @@
             <div class="hl"><dt>Total to invoice (excl GST)</dt><dd>$${fmt(d.total_invoice_ex_gst)}</dd></div>
           </dl>
           ${d.form && d.form.deposit && d.deposit_to_trust ? `<h3>Trust deposit</h3><dl>
-            <div><dt>Amount</dt><dd>$${fmt(d.form.deposit.amount)}</dd></div>
+            <div><dt>Amount</dt><dd>
+              ${isDraft ? `$${fmt(d.form.deposit.amount)}` : `<span class="receiptEdit">
+                <input id="depositAmount" value="${esc(d.form.deposit.amount||"")}" placeholder="Enter amount" />
+                <button id="depositSave" class="miniBtn">Save</button>
+                <span id="depositStatus" class="miniStatus"></span>
+              </span>`}</dd></div>
             <div><dt>Receipt no.</dt><dd>
               ${isDraft ? esc(d.form.deposit.receiptNo||"—") : `<span class="receiptEdit">
                 <input id="receiptNo" value="${esc(d.form.deposit.receiptNo||"")}" placeholder="Enter receipt no." />
@@ -351,7 +356,7 @@
       rSave.disabled = true;
       if (rst) rst.textContent = "Saving…";
       try {
-        await api.setReceipt(state.deal.id, val);
+        await api.setReceipt(state.deal.id, { receiptNo: val });
         state.deal.form = state.deal.form || {};
         state.deal.form.deposit = { ...(state.deal.form.deposit || {}), receiptNo: val };
         if (rst) rst.textContent = "Saved ✓";
@@ -359,6 +364,25 @@
         if (rst) rst.textContent = "Failed — try again";
       } finally {
         rSave.disabled = false;
+      }
+    };
+
+    const dSave = $("depositSave");
+    if (dSave) dSave.onclick = async () => {
+      const val = ($("depositAmount").value || "").trim().replace(/[$,\s]/g, "");
+      const dst = $("depositStatus");
+      if (val && isNaN(parseFloat(val))) { if (dst) dst.textContent = "Enter a number"; return; }
+      dSave.disabled = true;
+      if (dst) dst.textContent = "Saving…";
+      try {
+        await api.setReceipt(state.deal.id, { amount: val });
+        state.deal.form = state.deal.form || {};
+        state.deal.form.deposit = { ...(state.deal.form.deposit || {}), amount: val };
+        if (dst) dst.textContent = "Saved ✓";
+      } catch (e) {
+        if (dst) dst.textContent = "Failed — try again";
+      } finally {
+        dSave.disabled = false;
       }
     };
 

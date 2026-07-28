@@ -38,7 +38,7 @@
     getQueue: (status) => call(`?scope=queue${status ? `&status=${status}` : ""}`),
     getDrafts: () => call(`?scope=drafts`),
     process: (id, nums) => call(`/${id}/process`, { method: "POST", body: nums }),
-    setReceipt: (id, receiptNo) => call(`/${id}/receipt`, { method: "POST", body: { receiptNo } }),
+    setReceipt: (id, patch) => call(`/${id}/receipt`, { method: "POST", body: patch }), // { receiptNo? , amount? }
     invoice: (id) => call(`/${id}/invoice`, { method: "POST" }),
     returnToBroker: (id, note) => call(`/${id}/return`, { method: "POST", body: { note } }),
 
@@ -198,10 +198,10 @@
     getQueue: (status) =>
       delay(demoStore.deals.filter((d) => d.status !== "draft" && (!status || d.status === status))),
     getDrafts: () => delay(demoStore.deals.filter((d) => d.status === "draft")),
-    setReceipt: (id, receiptNo) => {
+    setReceipt: (id, patch) => {
       const d = findDeal(id);
-      d.form = d.form || {}; d.form.deposit = { ...(d.form.deposit || {}), receiptNo };
-      return delay({ ok: true, receiptNo });
+      d.form = d.form || {}; d.form.deposit = { ...(d.form.deposit || {}), ...patch };
+      return delay({ ok: true, ...patch });
     },
     process: (id, { dealNo }) => {
       const d = findDeal(id);
