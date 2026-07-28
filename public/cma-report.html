@@ -74,8 +74,8 @@ dialog .dlgBody{padding:18px 20px;max-height:70vh;overflow:auto}
 
 <script>
 // ── CONFIG — copy these two values from PropCMA's index.html ──
-window.SUPABASE_URL  = "https://mcurpiuaezilcnnuqvnm.supabase.co";
-window.SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdXJwaXVhZXppbGNubnVxdm5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MTA5MTEsImV4cCI6MjA5NjA4NjkxMX0.nPts4jRqwTm_CZsD2OUmO5ZgjTKIMk1-CLsNqRYCOxw";
+window.SUPABASE_URL  = "YOUR_PROJECT.supabase.co URL HERE";
+window.SUPABASE_ANON = "YOUR ANON KEY HERE";
 const GST = 0.15;
 
 const sb = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON);
@@ -126,7 +126,7 @@ function defaultForm(){
       {label:"Opportunist",initYield:"",value:"",mktYield:""},
       {label:"Market",initYield:"",value:"",mktYield:""},
       {label:"Premium",initYield:"",value:"",mktYield:""}]},
-    origin:{local:"137",national:"78",international:"3",period:"1 Jan 2020 - 31 Dec 2025 (by number of sales)"},
+    origin:{local:"137",national:"78",international:"3",period:"1 Jan 2020 - 31 Dec 2025 (by number of sales)",photo:""},
     remuneration:{term:"Four (4) months sole agency",fee:"Reduced flat fee 1.00% + GST"},
     budget:{items:[
       {cat:"Signage",desc:"2400mm x 1800mm corflute signage or decal on building | printed, installed & removed with Anti-graffiti film",cost:"850.65"},
@@ -183,6 +183,50 @@ async function loadProps(){
   state.props=data||[];return state.props;
 }
 function blockText(key){return state.f.overrides[key] ?? state.blocks[key] ?? "";}
+function getAssets(){
+  let a={logo:"",strategyPhoto:"",world:"",dm:["","","",""]};
+  try{Object.assign(a,JSON.parse(state.blocks.office_assets||"{}"));}catch(e){}
+  if(!Array.isArray(a.dm))a.dm=["","","",""];
+  while(a.dm.length<4)a.dm.push("");
+  return a;
+}
+
+// ── photo uploads — same bucket + resize approach as PropCMA ──
+const PHOTO_BUCKET="property-photos";
+function downscaleImg(file,max=1600,q=.85){
+  return new Promise((res,rej)=>{
+    const img=new Image();
+    img.onload=()=>{
+      const s=Math.min(1,max/Math.max(img.width,img.height));
+      const c=document.createElement("canvas");
+      c.width=Math.round(img.width*s);c.height=Math.round(img.height*s);
+      c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+      c.toBlob(b=>b?res(b):rej(new Error("Could not process image")),"image/jpeg",q);
+    };
+    img.onerror=()=>rej(new Error("Not a readable image"));
+    img.src=URL.createObjectURL(file);
+  });
+}
+async function uploadPhoto(file){
+  const blob=await downscaleImg(file);
+  const path=`proposals/${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
+  const{error}=await sb.storage.from(PHOTO_BUCKET).upload(path,blob,{contentType:"image/jpeg",cacheControl:"31536000"});
+  if(error)throw new Error(error.message);
+  return sb.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+function pickAndUpload(cb){
+  const inp=document.createElement("input");inp.type="file";inp.accept="image/*";
+  inp.onchange=async()=>{
+    const f=inp.files[0];if(!f)return;
+    toast("Uploading photo…");
+    try{cb(await uploadPhoto(f));toast("Photo uploaded");}
+    catch(e){toast("Upload failed: "+e.message);}
+  };
+  inp.click();
+}
+const photoFld=(p,label,cls="")=>`<label class="fld ${cls}"><span>${label}</span>
+  <div style="display:flex;gap:6px"><input data-path="${p}" value="${esc(get(state.f,p)??"")}" style="flex:1" placeholder="Upload →" />
+  <button class="btn" type="button" data-upload="${p}">Upload</button></div></label>`;
 
 // ── builder UI ───────────────────────────────────────────────
 const SECTIONS=[
@@ -201,7 +245,7 @@ const SECTIONS=[
   {id:"team",label:"Team & CVs"},
   {grp:"Office library"},
   {id:"profiles",label:"Broker profiles"},
-  {id:"boilerplate",label:"Boilerplate content"},
+  {id:"boilerplate",label:"Template content"},
 ];
 function renderNav(){
   $("sideNav").innerHTML=SECTIONS.map(s=>s.grp?`<div class="grp">${s.grp}</div>`:
@@ -212,7 +256,8 @@ const txt=(p,label,cls="",ph="")=>`<label class="fld ${cls}"><span>${label}</spa
 const area=(p,label,cls="",tall=false,ph="")=>`<label class="fld ${cls}"><span>${label}</span><textarea data-path="${p}" class="${tall?"tall":""}" placeholder="${esc(ph)}">${esc(get(state.f,p)??"")}</textarea></label>`;
 const ovArea=(key,label,hint)=>`<label class="fld span3"><span>${label} <span class="mini">${hint||"Uses the office default; edit here to override for this report only."}</span></span><textarea data-ov="${key}" class="tall">${esc(blockText(key))}</textarea></label>`;
 
-const PAGE_DEFS=[["letter","Covering letter"],["exec","Executive summary — key terms"],["pillars","Executive summary — delivery pillars"],
+const PAGE_DEFS=[["contents","Contents"],["letter","Covering letter"],["exec","Executive summary — key terms"],["pillars","Executive summary — delivery pillars"],
+  ["teamOverview","Project team overview"],["collaboration","Collaboration"],
   ["property","The property"],["swot","SWOT analysis"],["comps","Case studies"],["value","Estimated value"],["strategy","Sales strategy"],
   ["origin","Purchaser origin"],["profiles","Purchaser profiles"],["reporting","Reporting structure"],["method","Sales method & remuneration"],
   ["budget","Marketing budget"],["timeline","Marketing timeline"],["digital","Digital marketing overview"],["why","Why Colliers"],
@@ -233,7 +278,7 @@ function render(){
   else if(S==="cover")m.innerHTML=`
     <section class="card"><h2>Cover</h2><p class="hint">The navy cover page. The photo should be a Supabase/public image URL — use the subject property's hero shot.</p>
       <div class="grid">${txt("cover.title","Report title")}${txt("cover.propertyName","Property name","", "e.g. Kathmandu Building")}${txt("cover.dateLabel","Date label","","e.g. July 2026")}
-      ${txt("cover.addressLine","Address line","span2","e.g. 223 - 231 Tuam Street, Central Christchurch")}${txt("cover.photo","Cover photo URL")}</div></section>
+      ${txt("cover.addressLine","Address line","span2","e.g. 223 - 231 Tuam Street, Central Christchurch")}${photoFld("cover.photo","Cover photo")}</div></section>
     <section class="card"><h2>Covering letter</h2><p class="hint">{property} in the body is replaced with the property name and address.</p>
       <div class="grid">${txt("letter.salutation","Salutation","span2","Dear Steven and the directors of Oyster DPF Trustees Limited")}${txt("letter.signers","Signed by","","Mark and Marius")}
       <label class="fld span3"><span>Body <span class="mini">Leave blank to use the office default letter.</span></span><textarea data-path="letter.body" class="tall" placeholder="${esc(state.blocks.letter_default||"")}">${esc(f.letter.body)}</textarea></label></div></section>`;
@@ -252,8 +297,8 @@ function render(){
       <div class="grid">${txt("property.address","Address","span2")}${txt("property.vendor","Vendor")}
       ${area("property.legal","Legal description","span2")}${txt("property.floorArea","Floor area (approx)","","4,636.50 sq m")}
       ${txt("property.landArea","Land area (more or less)","","1,683 sq m (combined titles)")}${txt("property.netRental","Net annual rental","","$1,952,726.80 pa")}${txt("property.tenure","Tenure")}
-      ${txt("property.zone","Zone","span2")}${area("property.photos","Property photo URLs (one per line, first two used)","span3")}</div>
-      <div class="rowBtns"><button class="btn" id="btnPickSubject">Pull from PropCMA…</button></div></section>`;
+      ${txt("property.zone","Zone","span2")}${area("property.photos","Property photos (one URL per line, first two used)","span3")}</div>
+      <div class="rowBtns"><button class="btn" type="button" data-upload="property.photos" data-mode="append">Upload photo</button></div></section>`;
   else if(S==="swot")m.innerHTML=`
     <section class="card"><h2>SWOT analysis</h2><p class="hint">One point per line.</p>
       <div class="grid">${area("swot.s","Strengths","","")}${area("swot.w","Weaknesses")}${area("swot.o","Opportunities")}${area("swot.t","Threats")}</div></section>`;
@@ -264,7 +309,7 @@ function render(){
         <div><div class="grid">
           ${txt(`comps.${i}.name`,"Title","span2")}${txt(`comps.${i}.salePrice`,"Sale price")}
           ${txt(`comps.${i}.saleDate`,"Sale date","","May 2026")}${txt(`comps.${i}.method`,"Method of sale")}${txt(`comps.${i}.yield`,"Initial yield","","Circa 7.80%")}
-          ${txt(`comps.${i}.landArea`,"Land area")}${txt(`comps.${i}.nla`,"Net lettable area")}${txt(`comps.${i}.photo`,"Photo URL")}
+          ${txt(`comps.${i}.landArea`,"Land area")}${txt(`comps.${i}.nla`,"Net lettable area")}${photoFld(`comps.${i}.photo`,"Photo")}
           ${area(`comps.${i}.desc`,"Narrative","span3")}</div>
           <div class="rowBtns"><button class="btn" data-compdel="${i}">Remove</button>
           <button class="btn" data-compup="${i}" ${i===0?"disabled":""}>Move up</button></div>
@@ -282,7 +327,8 @@ function render(){
   else if(S==="origin")m.innerHTML=`
     <section class="card"><h2>Purchaser origin</h2><p class="hint">Draws the pie chart; the narrative below it is office boilerplate.</p>
       <div class="grid">${txt("origin.local","Local")}${txt("origin.national","National")}${txt("origin.international","International")}
-      ${txt("origin.period","Period label","span3")}${ovArea("purchaser_origin","Narrative")}${ovArea("purchaser_profiles","Purchaser profiles page (## title, - bullets)")}</div></section>`;
+      ${txt("origin.period","Period label","span2")}${photoFld("origin.photo","Subject property photo (Purchaser Profiles page 2)")}
+      ${ovArea("purchaser_origin","Narrative")}${ovArea("purchaser_profiles","Purchaser profiles page (## title, - bullets)")}</div></section>`;
   else if(S==="remuneration")m.innerHTML=`
     <section class="card"><h2>Remuneration & sales method</h2>
       <div class="grid">${txt("remuneration.term","Sole agency term","span2")}${txt("remuneration.fee","Agency fee")}
@@ -356,25 +402,63 @@ function profileDialog(p){
   };
 }
 function renderBoilerplate(m){
-  const KEYS=[["letter_default","Default covering letter"],["exec_pillars","Executive summary — delivery pillars"],["exec_commitment","Executive summary — our commitment"],
+  const KEYS=[["letter_default","Default covering letter"],["team_overview","Project team overview"],["collaboration","Collaboration"],
+    ["exec_pillars","Executive summary — delivery pillars"],["exec_commitment","Executive summary — our commitment"],
     ["strategy","Sales strategy columns"],["purchaser_origin","Purchaser origin narrative"],["purchaser_profiles","Purchaser profiles"],["reporting","Reporting structure"],
     ["sales_method","Sales method"],["remuneration_benefits","Benefits of sole agency"],["digital_marketing","Digital marketing overview"],
     ["why_colliers","Why Colliers — advantage"],["colliers_stats","Colliers stats (JSON)"],["who_is_colliers","Who is Colliers"]];
-  m.innerHTML=`<section class="card"><h2>Boilerplate content</h2><p class="hint">Office-wide defaults used by every report (unless overridden inside a report). Format: ## starts a block, - starts a bullet. Saving here updates all future reports.</p>
+  const a=getAssets();
+  const assetRow=(label,val,setter)=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+    <div style="width:90px;height:44px;border:1px solid var(--line);border-radius:6px;background:var(--panel) center/contain no-repeat${val?`;background-image:url('${esc(val)}')`:""}"></div>
+    <div style="flex:1"><div style="font-size:13px;font-weight:600">${label}</div><div class="mini">${val?"Uploaded":"Not set"}</div></div>
+    <button class="btn" type="button" data-asset="${setter}">Upload</button>${val?`<button class="btn" type="button" data-assetclear="${setter}">Clear</button>`:""}</div>`;
+  m.innerHTML=`<section class="card"><h2>Office template images</h2><p class="hint">Loaded once for the whole office and reused on every proposal — the cover logo, sales-strategy photo, the world graphic, and the four digital-marketing icons.</p>
+      ${assetRow("Colliers logo (cover & contents)",a.logo,"logo")}
+      ${assetRow("Sales strategy photo (page 2)",a.strategyPhoto,"strategyPhoto")}
+      ${assetRow("World graphic (Who is Colliers)",a.world,"world")}
+      ${[0,1,2,3].map(i=>assetRow(`Digital marketing icon ${i+1}`,a.dm[i],"dm."+i)).join("")}
+    </section>
+    <section class="card"><h2>Template content</h2><p class="hint">Office-wide defaults used by every report (unless overridden inside a report). Format: ## starts a block, - starts a bullet. Saving here updates all future reports.</p>
     ${KEYS.map(([k,l])=>`<label class="fld" style="margin-bottom:14px"><span>${l} <span class="mini">(${k})</span></span><textarea data-block="${k}" class="tall">${esc(state.blocks[k]??"")}</textarea></label>`).join("")}
-    <div class="rowBtns"><button class="btn primary" id="btnBlocksSave">Save all boilerplate</button></div></section>`;
+    <div class="rowBtns"><button class="btn primary" id="btnBlocksSave">Save all template content</button></div></section>`;
+  async function saveAssets(next){
+    const{error}=await sb.from("cma_content_blocks").upsert({key:"office_assets",content:JSON.stringify(next),updated_at:new Date().toISOString()},{onConflict:"key"});
+    if(error){toast("Save failed: "+error.message);return;}
+    await loadAll();render();toast("Office images saved");
+  }
+  m.querySelectorAll("[data-asset]").forEach(b=>b.onclick=()=>pickAndUpload(async url=>{
+    const cur=getAssets(),key=b.dataset.asset;
+    if(key.startsWith("dm."))cur.dm[+key.slice(3)]=url;else cur[key]=url;
+    await saveAssets(cur);
+  }));
+  m.querySelectorAll("[data-assetclear]").forEach(b=>b.onclick=async()=>{
+    const cur=getAssets(),key=b.dataset.assetclear;
+    if(key.startsWith("dm."))cur.dm[+key.slice(3)]="";else cur[key]="";
+    await saveAssets(cur);
+  });
   $("btnBlocksSave").onclick=async()=>{
     const rows=[...m.querySelectorAll("[data-block]")].map(t=>({key:t.dataset.block,content:t.value,updated_at:new Date().toISOString()}));
     const{error}=await sb.from("cma_content_blocks").upsert(rows,{onConflict:"key"});
     if(error){toast("Save failed: "+error.message);return;}
-    await loadAll();toast("Boilerplate saved");
+    await loadAll();toast("Template content saved");
   };
 }
 
 // ── wiring ───────────────────────────────────────────────────
 function wire(m){
   m.querySelectorAll("[data-inc]").forEach(cb=>cb.onchange=()=>{state.f.include[cb.dataset.inc]=cb.checked;});
-  m.querySelectorAll("[data-path]").forEach(el=>el.oninput=()=>{set(state.f,el.dataset.path,el.value);if(el.dataset.recalc!=null)render();});
+  m.querySelectorAll("[data-path]").forEach(el=>{
+    el.oninput=()=>set(state.f,el.dataset.path,el.value);
+    // recalc totals when the field is left, not per keystroke — re-rendering
+    // mid-typing was limiting cost entry to one digit at a time
+    if(el.dataset.recalc!=null)el.onchange=()=>render();
+  });
+  m.querySelectorAll("[data-upload]").forEach(b=>b.onclick=()=>pickAndUpload(url=>{
+    const p=b.dataset.upload;
+    if(b.dataset.mode==="append"){const cur=get(state.f,p)||"";set(state.f,p,(cur?cur+"\n":"")+url);}
+    else set(state.f,p,url);
+    render();
+  }));
   m.querySelectorAll("[data-ov]").forEach(el=>el.oninput=()=>{
     const k=el.dataset.ov;
     if(el.value===(state.blocks[k]??""))delete state.f.overrides[k];else state.f.overrides[k]=el.value;});
@@ -386,28 +470,25 @@ function wire(m){
   const tAdd=$("btnTlAdd");if(tAdd)tAdd.onclick=()=>{state.f.timeline.rows.push({label:"",marks:""});render();};
   const cMan=$("btnCompManual");if(cMan)cMan.onclick=()=>{state.f.comps.push({name:"",desc:"",salePrice:"",saleDate:"",method:"Deadline Private Treaty",landArea:"",nla:"",yield:"",photo:""});render();};
   const cPick=$("btnPickComp");if(cPick)cPick.onclick=()=>propertyPicker(p=>{
-    state.f.comps.push({name:p.address||"",desc:p.notes||"",salePrice:p.sale_price?String(p.sale_price):"",
-      saleDate:p.sale_date||"",method:p.sale_method||"Deadline Private Treaty",landArea:p.land_area||"",
-      nla:p.floor_area||"",yield:p.yield?`${p.yield}%`:"",photo:(p.photos||"").split(",")[0]?.trim()||""});
-    render();});
-  const sPick=$("btnPickSubject");if(sPick)sPick.onclick=()=>propertyPicker(p=>{
-    const f=state.f;
-    f.property.address=p.address||f.property.address;
-    f.property.vendor=p.vendor||f.property.vendor;
-    f.property.floorArea=p.floor_area||f.property.floorArea;
-    f.property.landArea=p.land_area||f.property.landArea;
-    f.property.netRental=p.net_rental||p.rental||f.property.netRental;
-    f.property.zone=p.zone||f.property.zone;
-    f.property.photos=(p.photos||"").split(",").map(s=>s.trim()).filter(Boolean).join("\n")||f.property.photos;
-    if(!f.cover.addressLine)f.cover.addressLine=p.address||"";
-    if(!f.cover.photo)f.cover.photo=(p.photos||"").split(",")[0]?.trim()||"";
-    render();toast("Pulled from PropCMA — check and edit the fields");});
+    state.f.comps.push(compFromProp(p));render();});
+
   ["pickLead","pickSup"].forEach(id=>{const el=$(id);if(!el)return;
     el.querySelectorAll(".pill").forEach(p=>p.onclick=()=>{
       const path=el.dataset.target,cur=get(state.f,path).split(",").map(x=>x.trim()).filter(Boolean);
       const i=cur.indexOf(p.dataset.code);
       if(i>=0)cur.splice(i,1);else cur.push(p.dataset.code);
       set(state.f,path,cur.join(","));render();});});
+}
+// Map a PropCMA properties row (real column names) to an editable case study.
+function compFromProp(p){
+  return{name:p.address||"",desc:p.notes||"",
+    salePrice:p.sale_price?String(p.sale_price):"",
+    saleDate:p.sale_date||"",
+    method:"Deadline Private Treaty",
+    landArea:p.land_area?`${fmt0(p.land_area)} sq m`:"",
+    nla:p.sqm?`${fmt0(p.sqm)} sq m`:"",
+    yield:p.initial_yield?`Circa ${p.initial_yield}%`:"",
+    photo:(p.photos||"").split(/[\n,]/)[0]?.trim()||""};
 }
 async function propertyPicker(onPick){
   const d=$("dlg");$("dlgHead").textContent="Select a PropCMA property";
@@ -498,16 +579,19 @@ table.grid2 tr.total td{background:var(--panel);font-weight:700;border-bottom:no
 
 function pgHead(n){return `<div class="pghead">${n%2?`<span>Page ${n}</span><span class="rule"></span>`:`<span class="rule"></span><span>Page ${n}</span>`}</div>`;}
 function lines(t){return String(t||"").split(/\r?\n/).map(s=>s.trim()).filter(Boolean);}
-function ulOf(t){const l=lines(t);return l.length?`<ul>${l.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:"";}
+function ulOf(t){const l=lines(t).map(x=>x.replace(/^[-•*]\s+/,""));return l.length?`<ul>${l.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:"";}
 function paras(t){return lines(t).map(x=>`<p>${esc(x)}</p>`).join("");}
 
 // SVG charts (all colours inline for print fidelity)
 function svgValueBars(scen){
   const vals=scen.map(s=>num(s.value)),max=Math.max(...vals,1);
   const W=460,H=230,bw=64,gap=60,x0=110,base=170;
+  // Per-scenario height nudge (px). 1mm ≈ 2.83 SVG units at this scale:
+  // opportunist −5mm, market unchanged, premium +5mm.
+  const nudge=[-14.2,0,14.2];
   let bars="";
   scen.forEach((s,i)=>{
-    const h=Math.max(18,(vals[i]/max)*120),x=x0+i*(bw+gap),y=base-h;
+    const h=Math.max(18,(vals[i]/max)*120+(nudge[i]||0)),x=x0+i*(bw+gap),y=base-h;
     const fill=["#5878b8","#2557a5","#12265e"][i]||"#2557a5";
     bars+=`<text x="${x+bw/2}" y="${y-8}" text-anchor="middle" font-size="11" font-weight="700" fill="#12265e">${esc(s.label)}</text>
     <rect x="${x}" y="${y}" width="${bw}" height="${h}" fill="${fill}"/>
@@ -553,12 +637,30 @@ function svgAnnual(years,cs,ks){
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg">${out}</svg>`;
 }
 
+function svgWorld(){
+  // Simple dotted world silhouette in Colliers blue — flat, decorative.
+  return `<svg viewBox="0 0 600 150" width="100%" xmlns="http://www.w3.org/2000/svg">
+    <rect width="600" height="150" fill="#eef2fa"/>
+    <g fill="#12265e" opacity="0.85">
+      <ellipse cx="120" cy="70" rx="55" ry="34"/><ellipse cx="175" cy="105" rx="28" ry="30"/>
+      <ellipse cx="300" cy="60" rx="40" ry="30"/><ellipse cx="315" cy="100" rx="30" ry="34"/>
+      <ellipse cx="420" cy="72" rx="60" ry="30"/><ellipse cx="500" cy="110" rx="26" ry="20"/>
+      <ellipse cx="250" cy="55" rx="18" ry="14"/></g>
+  </svg>`;
+}
+// Colliers logo block — uses the uploaded office logo if present, else a
+// text fallback in the brand style.
+function logoBlock(assets,onDark){
+  if(assets.logo)return `<img src="${esc(assets.logo)}" style="max-width:42mm;max-height:16mm;object-fit:contain" />`;
+  return `<div style="background:#fff;padding:2.5mm 4mm;font-weight:700;color:#12265e;font-size:13pt;border-radius:1.5mm;display:inline-block">Colliers</div>`;
+}
 function buildReport(){
   const f=state.f,P=[];
   const inc=(k)=>f.include?.[k]!==false;
   const profile=(c)=>state.profiles.find(p=>p.code===c.trim());
   const leads=lines(f.team.lead.replace(/,/g,"\n")).map(profile).filter(Boolean);
   const sups=lines(f.team.supporting.replace(/,/g,"\n")).map(profile).filter(Boolean);
+  const assets=getAssets();
   const propertyLabel=[f.cover.propertyName,f.cover.addressLine].filter(Boolean).join(", ");
   const letterBody=(f.letter.body||blockText("letter_default")).replace(/\{property\}/g,propertyLabel||"the property");
   const contactCard=(p)=>`<div style="border-top:.6pt solid var(--blue);border-bottom:.6pt solid var(--blue);padding:2.5mm 0;display:flex;gap:4mm;align-items:center">
@@ -569,7 +671,7 @@ function buildReport(){
   P.push(`<div class="pg navy">
     <div style="position:absolute;top:0;left:0;bottom:0;width:64%;background:var(--navy)"></div>
     <div style="position:absolute;top:0;right:0;bottom:0;width:36%;background:#fff"></div>
-    <div style="position:absolute;top:24mm;right:18mm;background:#fff;padding:3mm 5mm;font-weight:700;color:var(--navy);font-size:14pt;border-radius:1.5mm;box-shadow:0 0 0 1pt var(--navy)">Colliers</div>
+    <div style="position:absolute;top:22mm;right:18mm">${assets.logo?`<img src="${esc(assets.logo)}" style="max-width:46mm;max-height:18mm;object-fit:contain" />`:`<div style="background:#fff;padding:3mm 5mm;font-weight:700;color:var(--navy);font-size:14pt;border-radius:1.5mm">Colliers</div>`}</div>
     <div style="position:absolute;top:72mm;left:18mm;width:58%;color:#fff">
       <div class="coverTitle">${esc(f.cover.title)}</div>
       <div style="border-top:.6pt solid rgba(255,255,255,.6);margin:8mm 0 6mm"></div>
@@ -577,6 +679,25 @@ function buildReport(){
       <div class="small" style="opacity:.85;margin-top:2mm">${esc(f.cover.dateLabel)}</div></div>
     ${f.cover.photo?`<img class="photo" src="${esc(f.cover.photo)}" style="position:absolute;left:10mm;right:0;bottom:22mm;height:110mm;width:auto;max-width:190mm" />`:""}
   </div>`);
+
+  // Contents — generated from whichever pages are included
+  if(inc("contents")){
+    const tocPages=[["letter","Executive summary"],["exec","Key terms"],["teamOverview","Project team overview"],
+      ["collaboration","Collaboration"],["property","The property"],["swot","SWOT analysis"],["comps","Case studies"],
+      ["value","Estimated value"],["strategy","Sales strategy"],["origin","Purchaser origin"],["profiles","Purchaser profiles"],
+      ["reporting","Reporting structure"],["method","Sales method & remuneration"],["budget","Marketing budget"],
+      ["timeline","Marketing timeline"],["digital","Digital marketing overview"],["why","Why Colliers?"],
+      ["team","Colliers team"],["cvs","Curriculum vitae"],["refs","References"]].filter(([k])=>inc(k));
+    const third=Math.ceil(tocPages.length/3);
+    const col=(items)=>`<div>${items.map(([,l])=>`<div style="border-top:.6pt solid var(--navy);padding:2mm 0 4mm"><div class="small" style="color:var(--ink2)">${esc(l)}</div></div>`).join("")}</div>`;
+    P.push(`<div class="pg navy"><div style="position:absolute;inset:0;background:var(--navy)"></div>
+      <div style="position:absolute;top:26mm;left:18mm;right:18mm;color:#fff">
+        <h1 class="sec" style="color:#fff">Contents</h1>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8mm;margin-top:8mm">
+          ${col(tocPages.slice(0,third))}${col(tocPages.slice(third,2*third))}${col(tocPages.slice(2*third))}</div></div>
+      <div style="position:absolute;top:26mm;right:18mm">${logoBlock(assets)}</div>
+    </div>`);
+  }
 
   // 2 · Letter
   if(inc("letter"))P.push(`<div class="pg"><div class="pad" style="padding-top:30mm">
@@ -587,14 +708,33 @@ function buildReport(){
   </div></div>`);
 
   // 3 · Executive summary — key terms
-  const cards=[["Agency",f.exec.agency],["Estimated value",[money0(f.exec.valueLow),money0(f.exec.valueHigh)].filter(Boolean).join(" - ")+"<br/><span class='small dim'>plus GST (if any)</span>"],
-    ["Recommended timeline",`Marketing campaign commencing:<br/>${esc(f.exec.campaignStart)}<br/><br/>Deadline Private Treaty closing:<br/>${esc(f.exec.deadlineClose)}`],
-    ["Fee",f.exec.fee],["Proposed marketing budget",budgetTotalLabel()],["Method of sale",f.exec.method]];
+  const ICON={
+    agency:`<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#2557a5" stroke-width="1.6"><rect x="4" y="3" width="16" height="18" rx="1"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="13" y2="16"/></svg>`,
+    value:`<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#2557a5" stroke-width="1.6"><line x1="4" y1="20" x2="4" y2="12"/><line x1="10" y1="20" x2="10" y2="8"/><line x1="16" y1="20" x2="16" y2="4"/><polyline points="3,10 9,6 15,2"/></svg>`,
+    timeline:`<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#2557a5" stroke-width="1.6"><rect x="3" y="5" width="18" height="16" rx="1"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></svg>`,
+    fee:`<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#2557a5" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M9.5 10h4a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3h4"/></svg>`,
+    budget:`<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#2557a5" stroke-width="1.6"><path d="M3 8h18v11H3z"/><path d="M3 8l3-4h12l3 4"/><circle cx="12" cy="13" r="2.5"/></svg>`,
+    method:`<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#2557a5" stroke-width="1.6"><path d="M4 20l8-16 8 16"/><line x1="4" y1="20" x2="20" y2="20"/><circle cx="12" cy="9" r="1.4" fill="#2557a5"/></svg>`};
+  const cards=[["Agency",f.exec.agency,ICON.agency],["Estimated value",[money0(f.exec.valueLow),money0(f.exec.valueHigh)].filter(Boolean).join(" - ")+"<br/><span class='small dim'>plus GST (if any)</span>",ICON.value],
+    ["Recommended timeline",`Marketing campaign commencing:<br/>${esc(f.exec.campaignStart)}<br/><br/>Deadline Private Treaty closing:<br/>${esc(f.exec.deadlineClose)}`,ICON.timeline],
+    ["Fee",f.exec.fee,ICON.fee],["Proposed marketing budget",budgetTotalLabel(),ICON.budget],["Method of sale",f.exec.method,ICON.method]];
   if(inc("exec"))P.push(`<div class="pg"><div class="lightWrap" style="inset:0 34% 0 0"></div><div class="pad" style="position:relative">
     <h1 class="sec">Executive summary</h1>
     <p class="small" style="max-width:120mm">We have proposed an exclusive agency appointment for the sale of the asset. Colliers will provide weekly written marketing reports detailing the marketing initiatives completed that week, the response from buyers, issues arising and objectives for the following week. This will provide you with up-to-the-minute feedback on prospective purchasers' intentions and a clear picture of how the campaign is progressing.</p>
     <p class="small" style="max-width:120mm">Hereunder is a summary of the suggested key terms, for your consideration.</p>
-    <div class="cols2" style="max-width:135mm;margin-top:8mm;column-gap:12mm">${cards.map(([l,v])=>`<div class="kcard" style="break-inside:avoid"><div class="kl">${l}</div><div class="small">${v}</div></div>`).join("")}</div>
+    <div class="cols2" style="max-width:135mm;margin-top:8mm;column-gap:12mm">${cards.map(([l,v,ic])=>`<div class="kcard" style="break-inside:avoid;display:flex;gap:4mm"><div style="flex:0 0 auto">${ic}</div><div><div class="kl">${l}</div><div class="small">${v}</div></div></div>`).join("")}</div>
+  </div></div>`);
+
+  // Project team overview + Collaboration (office boilerplate)
+  if(inc("teamOverview"))P.push(`<div class="pg"><div class="lightWrap" style="inset:0 44% 0 0"></div><div class="pad" style="position:relative">
+    <h1 class="sec">Project team overview</h1>
+    <div class="small" style="max-width:120mm">${paras(blockText("team_overview"))}</div>
+    <div style="display:flex;gap:10mm;margin-top:8mm">${leads.map(p=>`<div class="teamCell" style="text-align:left">${p.photo_url?`<img src="${esc(p.photo_url)}" style="width:24mm;height:24mm;border-radius:50%;object-fit:cover" />`:""}<div style="margin-top:2mm"><b>${esc(p.name)}</b><br/><span class="dim">${esc(p.title||"")}</span></div></div>`).join("")}</div>
+  </div></div>`);
+  if(inc("collaboration"))P.push(`<div class="pg"><div class="pad">
+    <h1 class="sec">Collaboration</h1>
+    <h2 class="st">The project team will be led by ${leads.map(p=>p.name).join(" and ")||"our project directors"}.</h2>
+    <div class="small" style="max-width:150mm">${parseBlocks(blockText("collaboration")).map(b=>b.title?`<h3 class="blue">${esc(b.title)}</h3>${blockHtml(b)}`:blockHtml(b)).join("")}</div>
   </div></div>`);
 
   // 4 · Executive summary — pillars
@@ -661,7 +801,8 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
     <div class="cols3 small" style="margin-top:6mm">${strat.slice(0,3).map((b,i)=>`<div class="colTop"><h3 class="blue">${i+1}. ${esc(b.title)}</h3>${blockHtml(b)}</div>`).join("")}</div>
   </div></div>`);
   if(inc("strategy")&&strat.length>3)P.push(`<div class="pg"><div class="pad">
-    <div class="cols4 small" style="margin-top:14mm">${strat.slice(3,7).map((b,i)=>`<div class="colTop"><h3 class="blue">${i+4}. ${esc(b.title)}</h3>${blockHtml(b)}</div>`).join("")}</div>
+    ${assets.strategyPhoto?`<img class="photo" src="${esc(assets.strategyPhoto)}" style="height:60mm;width:100%;margin-bottom:8mm" />`:""}
+    <div class="cols4 small">${strat.slice(3,7).map((b,i)=>`<div class="colTop"><h3 class="blue">${i+4}. ${esc(b.title)}</h3>${blockHtml(b)}</div>`).join("")}</div>
   </div></div>`);
 
   // 9 · Purchaser origin + profiles
@@ -674,11 +815,21 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
     <table class="kv" style="max-width:60mm;margin:4mm auto 0"><tr><th>International</th><td>${esc(f.origin.international)}</td></tr><tr><th>Local</th><td>${esc(f.origin.local)}</td></tr><tr><th>National</th><td>${esc(f.origin.national)}</td></tr></table>
   </div></div>`);
   const profs=parseBlocks(blockText("purchaser_profiles"));
-  if(inc("profiles"))P.push(`<div class="pg"><div class="pad">
-    <h1 class="sec">Purchaser Profiles</h1>
-    <h2 class="st" style="max-width:130mm">Understanding who will buy this asset and how they behave is critical to structuring a campaign that maximises price. Our focus is on targeting and competing the buyers most likely to transact, while increasing tension and depth.</h2>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6mm 9mm" class="small">${profs.map(b=>`<div class="colTop"><h3 class="blue">${esc(b.title)}</h3>${blockHtml(b)}</div>`).join("")}</div>
-  </div></div>`);
+  if(inc("profiles")){
+    // Split at "Agri Capital": first two profiles on page 1, remainder on
+    // page 2 with the subject-property photo above them.
+    const splitAt=Math.max(1,profs.findIndex(b=>/agri/i.test(b.title)));
+    const first=profs.slice(0,splitAt<0?2:splitAt),rest=profs.slice(splitAt<0?2:splitAt);
+    P.push(`<div class="pg"><div class="pad">
+      <h1 class="sec">Purchaser Profiles</h1>
+      <h2 class="st" style="max-width:130mm">Understanding who will buy this asset and how they behave is critical to structuring a campaign that maximises price. Our focus is on targeting and competing the buyers most likely to transact, while increasing tension and depth.</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6mm 9mm" class="small">${first.map(b=>`<div class="colTop"><h3 class="blue">${esc(b.title)}</h3>${blockHtml(b)}</div>`).join("")}</div>
+    </div></div>`);
+    if(rest.length)P.push(`<div class="pg"><div class="pad">
+      ${f.origin.photo?`<img class="photo" src="${esc(f.origin.photo)}" style="height:56mm;width:100%;margin-bottom:7mm" />`:""}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6mm 9mm" class="small">${rest.map(b=>`<div class="colTop"><h3 class="blue">${esc(b.title)}</h3>${blockHtml(b)}</div>`).join("")}</div>
+    </div></div>`);
+  }
 
   // 10 · Reporting / Sales method / Remuneration
   const rep=parseBlocks(blockText("reporting"));
@@ -705,7 +856,7 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
   if(inc("budget"))P.push(`<div class="pg"><div class="pad">
     <h1 class="sec">Marketing budget</h1>
     <h3 class="blue" style="max-width:150mm">To maximise market exposure and ensure every opportunity is captured, we believe a comprehensive and targeted marketing campaign is essential. Our approach is designed to generate strong buyer engagement, create competitive tension and support the best possible sales outcome.</h3>
-    <table class="grid2" style="margin-top:5mm"><thead><tr><th style="width:34mm">Item description</th><th></th><th class="r" style="width:26mm">Cost</th></tr></thead><tbody>
+    <table class="grid2" style="margin-top:5mm"><thead><tr><th style="width:34mm">Category</th><th>Item description</th><th class="r" style="width:26mm">Cost</th></tr></thead><tbody>
     ${Object.entries(cats).map(([cat,items])=>items.map((it,i)=>`<tr><td style="color:var(--blue);font-weight:700">${i===0?esc(cat):""}</td><td class="small">${esc(it.desc)}</td><td class="r">$${fmt(num(it.cost))}</td></tr>`).join("")).join("")}
     <tr class="total"><td></td><td class="r">Total</td><td class="r">$${fmt(btot)} + GST</td></tr>
     <tr class="total"><td></td><td class="r">Total GST inclusive</td><td class="r">$${fmt(btot*(1+GST))}</td></tr>
@@ -722,12 +873,13 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
       return `<tr><td>${esc(r.label)}</td>${weeks.map((_,i)=>`<td class="dot">${marks.includes(i+1)?"•":""}</td>`).join("")}</tr>`;}).join("")}
     </tbody></table></div></div>`);
 
-  // 12 · Digital marketing
+  // 12 · Digital marketing (office template icon beside each heading)
   const dm=parseBlocks(blockText("digital_marketing"));
+  const dmIcon=(i)=>assets.dm[i]?`<img src="${esc(assets.dm[i])}" style="width:9mm;height:9mm;object-fit:contain;flex:0 0 auto" />`:"";
   if(inc("digital"))P.push(`<div class="pg"><div class="pad">
     <h1 class="sec">Digital marketing overview</h1>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:7mm 10mm" class="small">
-    ${dm.map(b=>`<div class="colTop"><h3 class="blue">${esc(b.title)}</h3>${blockHtml(b)}</div>`).join("")}</div>
+    ${dm.map((b,i)=>`<div class="colTop"><div style="display:flex;gap:3mm;align-items:center">${dmIcon(i)}<h3 class="blue" style="margin:0">${esc(b.title)}</h3></div>${blockHtml(b)}</div>`).join("")}</div>
     <p class="small dim r" style="margin-top:4mm">*Approximate impressions &amp; clicks</p>
   </div></div>`);
 
@@ -756,6 +908,7 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
   const whoBody=who.split(/^## Stats$/m)[0];
   if(inc("who"))P.push(`<div class="pg"><div class="pad">
     <h1 class="sec">Who is Colliers?</h1>
+    <div style="margin:0 0 8mm">${assets.world?`<img class="photo" src="${esc(assets.world)}" style="height:34mm;width:100%;object-fit:cover" />`:svgWorld()}</div>
     <div style="display:grid;grid-template-columns:1fr 60mm;gap:12mm">
       <div class="small"><h3 class="blue">At Colliers we are enterprising.</h3>${paras(whoBody)}</div>
       <div>${whoStats.map(i=>{const[l,v]=i.x.split("|").map(s=>s.trim());return `<div class="statCard" style="margin-bottom:5mm"><div class="small dim">${esc(l)}</div><div class="big" style="font-size:15pt">${esc(v||"")}</div></div>`;}).join("")}</div>
@@ -798,8 +951,8 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
   if(inc("refs")&&refs.length){
     P.push(`<div class="pg"><div class="pad">
       <h1 class="sec">References</h1>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12mm" class="small">
-      ${refs.slice(0,2).map(r=>`<div><h3 class="blue">${esc(r.title)}</h3>${paras(r.body)}</div>`).join("")}</div>
+      <div class="small" style="max-width:155mm">
+      ${refs.slice(0,2).map(r=>`<div style="margin-bottom:10mm"><h3 class="blue">${esc(r.title)}</h3>${paras(r.body)}</div>`).join("")}</div>
     </div></div>`);
   }
 
@@ -835,6 +988,15 @@ $("reportPick").onchange=(e)=>openReport(e.target.value);
 (async function boot(){
   if(String(window.SUPABASE_URL).includes("YOUR_PROJECT")){$("main").innerHTML=`<section class="card"><h2>Setup needed</h2><p>Open this file and paste your Supabase URL and anon key into the CONFIG block at the top of the script (copy them from PropCMA's index.html), then run cma-schema.sql in the Supabase SQL Editor.</p></section>`;renderNav();return;}
   try{await loadAll();}catch(e){toast("Load failed: "+e.message);}
+  // Pre-fill case studies from PropCMA's selected properties (?comps=id1,id2)
+  const compIds=(new URLSearchParams(location.search).get("comps")||"").split(",").map(s=>s.trim()).filter(Boolean);
+  if(compIds.length&&!state.reportId){
+    try{
+      const props=await loadProps();
+      compIds.forEach(id=>{const p=props.find(x=>String(x.id)===id);if(p)state.f.comps.push(compFromProp(p));});
+      if(state.f.comps.length){state.section="comps";toast(`${state.f.comps.length} case stud${state.f.comps.length===1?"y":"ies"} pre-filled from PropCMA — edit as needed`);}
+    }catch(e){/* non-fatal */}
+  }
   render();
 })();
 </script>

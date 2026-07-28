@@ -219,7 +219,7 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
     <div class="top-tabs">
       <button class="top-tab active" onclick="switchView('properties')">Properties</button>
       <button class="top-tab" onclick="switchView('report')">CMA Report</button>
-      <button class="top-tab" onclick="window.open('cma-report.html','_blank')">Marketing Proposal <i class="ti ti-external-link" aria-hidden="true" style="font-size:12px;"></i></button>
+      <button class="top-tab" onclick="openMarketingProposal()">Marketing Proposal <i class="ti ti-external-link" aria-hidden="true" style="font-size:12px;"></i></button>
       <button class="top-tab" onclick="switchView('settings')"><i class="ti ti-settings" aria-hidden="true"></i> Settings</button>
     </div>
     <div class="sync-info">
@@ -1915,6 +1915,29 @@ function renderTable(){
 function toggleRow(id,e){e.stopPropagation();selected.has(id)?selected.delete(id):selected.add(id);renderTable();updateCMABar();updateSelCount();}
 function toggleAll(cb){cb.checked?filtered.forEach(p=>selected.add(p.id)):filtered.forEach(p=>selected.delete(p.id));renderTable();updateCMABar();updateSelCount();}
 function selectAll(){filtered.forEach(p=>selected.add(p.id));renderTable();updateCMABar();updateSelCount();}
+// Marketing Proposal: remind the user to pick case-study properties, then
+// open the builder — passing any selected property IDs so they pre-fill the
+// case studies. Selecting is optional; Proceed works either way.
+function openMarketingProposal(){
+  const n=selected.size;
+  const ids=[...selected].join(',');
+  const url='cma-report.html'+(ids?('?comps='+encodeURIComponent(ids)):'');
+  const ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(10,18,46,.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  ov.innerHTML=`<div style="background:#fff;border-radius:12px;max-width:440px;width:90%;box-shadow:0 20px 60px rgba(10,20,60,.35);overflow:hidden;font-family:inherit;">
+    <div style="background:var(--cb,#12265e);color:#fff;padding:14px 20px;font-weight:600;">Marketing Proposal</div>
+    <div style="padding:20px;">
+      <p style="margin:0 0 10px;">Remember to select your properties for the Case Study.</p>
+      <p style="margin:0;font-size:13px;color:#5a6478;">${n?`${n} propert${n===1?'y is':'ies are'} currently selected and will pre-fill the case studies.`:'No properties are selected yet — you can tick them in the table first, or add them inside the builder.'}</p>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">
+        <button id="mpClose" style="padding:8px 16px;border:1px solid #dde3ef;background:#fff;border-radius:6px;cursor:pointer;font:inherit;">Close</button>
+        <button id="mpProceed" style="padding:8px 16px;border:none;background:var(--cb,#2557a5);color:#fff;border-radius:6px;cursor:pointer;font:inherit;">Proceed</button>
+      </div></div></div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('#mpClose').onclick=()=>ov.remove();
+  ov.onclick=(e)=>{if(e.target===ov)ov.remove();};
+  ov.querySelector('#mpProceed').onclick=()=>{ov.remove();window.open(url,'_blank');};
+}
 function clearSel(){selected.clear();renderTable();updateCMABar();updateSelCount();}
 function updateSelCount(){const n=selected.size;document.getElementById('sel-count').textContent=n+' selected';document.getElementById('sel-count').style.display=n?'':'none';document.getElementById('s-selected').textContent=n;}
 
