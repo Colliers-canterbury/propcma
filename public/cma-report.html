@@ -74,8 +74,8 @@ dialog .dlgBody{padding:18px 20px;max-height:70vh;overflow:auto}
 
 <script>
 // ── CONFIG — copy these two values from PropCMA's index.html ──
-window.SUPABASE_URL  = "https://mcurpiuaezilcnnuqvnm.supabase.co";
-window.SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdXJwaXVhZXppbGNubnVxdm5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MTA5MTEsImV4cCI6MjA5NjA4NjkxMX0.nPts4jRqwTm_CZsD2OUmO5ZgjTKIMk1-CLsNqRYCOxw";
+window.SUPABASE_URL  = "YOUR_PROJECT.supabase.co URL HERE";
+window.SUPABASE_ANON = "YOUR ANON KEY HERE";
 const GST = 0.15;
 
 const sb = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON);
@@ -179,8 +179,13 @@ async function loadAll(){
 }
 async function loadProps(){
   if(state.props.length)return state.props;
-  const {data}=await sb.from("properties").select("*").limit(1000);
-  state.props=data||[];return state.props;
+  // Case studies are sold comparables — exclude leases. PropCMA stores the
+  // type in lease_or_sale ("Sale"/"Lease"); keep anything that isn't a lease
+  // so blank/legacy rows still appear.
+  const {data}=await sb.from("properties").select("*").limit(2000);
+  state.props=(data||[]).filter(r=>String(r.lease_or_sale||"").toLowerCase()!=="lease")
+    .sort((a,b)=>String(b.sale_date||"").localeCompare(String(a.sale_date||"")));
+  return state.props;
 }
 function blockText(key){return state.f.overrides[key] ?? state.blocks[key] ?? "";}
 function getAssets(){
@@ -224,9 +229,14 @@ function pickAndUpload(cb){
   };
   inp.click();
 }
-const photoFld=(p,label,cls="")=>`<label class="fld ${cls}"><span>${label}</span>
-  <div style="display:flex;gap:6px"><input data-path="${p}" value="${esc(get(state.f,p)??"")}" style="flex:1" placeholder="Upload →" />
-  <button class="btn" type="button" data-upload="${p}">Upload</button></div></label>`;
+const photoFld=(p,label,cls="")=>{
+  const v=get(state.f,p)||"";
+  return `<label class="fld ${cls}"><span>${label}</span>
+  <div style="display:flex;gap:8px;align-items:center">
+    ${v?`<img src="${esc(v)}" style="width:54px;height:40px;object-fit:cover;border-radius:5px;border:1px solid var(--line);flex:0 0 auto" onerror="this.style.display='none'" />`:""}
+    <input data-path="${p}" value="${esc(v)}" style="flex:1" placeholder="Upload →" />
+    <button class="btn" type="button" data-upload="${p}">Upload</button></div></label>`;
+};
 
 // ── builder UI ───────────────────────────────────────────────
 const SECTIONS=[
@@ -298,6 +308,7 @@ function render(){
       ${area("property.legal","Legal description","span2")}${txt("property.floorArea","Floor area (approx)","","4,636.50 sq m")}
       ${txt("property.landArea","Land area (more or less)","","1,683 sq m (combined titles)")}${txt("property.netRental","Net annual rental","","$1,952,726.80 pa")}${txt("property.tenure","Tenure")}
       ${txt("property.zone","Zone","span2")}${area("property.photos","Property photos (one URL per line, first two used)","span3")}</div>
+      ${(()=>{const ph=lines(f.property.photos);return ph.length?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0">${ph.map(u=>`<img src="${esc(u)}" style="width:80px;height:58px;object-fit:cover;border-radius:6px;border:1px solid var(--line)" onerror="this.style.display='none'" />`).join("")}</div>`:"";})()}
       <div class="rowBtns"><button class="btn" type="button" data-upload="property.photos" data-mode="append">Upload photo</button></div></section>`;
   else if(S==="swot")m.innerHTML=`
     <section class="card"><h2>SWOT analysis</h2><p class="hint">One point per line.</p>
@@ -497,7 +508,10 @@ async function propertyPicker(onPick){
   const props=await loadProps();
   const draw=(q)=>{
     const ql=(q||"").toLowerCase();
-    const hits=props.filter(p=>!ql||JSON.stringify(p).toLowerCase().includes(ql)).slice(0,40);
+    // Search the human fields only — searching the whole JSON row matched
+    // stray "sale"/"lease" text and other noise.
+    const hay=(p)=>[p.address,p.vendor,p.purchaser,p.category,p.broker].filter(Boolean).join(" ").toLowerCase();
+    const hits=props.filter(p=>!ql||hay(p).includes(ql)).slice(0,40);
     $("ppList").innerHTML=hits.map((p,i)=>`<div class="pickRow" data-i="${props.indexOf(p)}"><span>${esc(p.address||"(no address)")}</span><span class="mini">${p.sale_price?money0(p.sale_price):""} ${esc(p.sale_date||"")}</span></div>`).join("")||"No matches.";
     $("ppList").querySelectorAll(".pickRow").forEach(r=>r.onclick=()=>{d.close();onPick(props[+r.dataset.i]);});
   };
@@ -992,10 +1006,15 @@ $("reportPick").onchange=(e)=>openReport(e.target.value);
   const compIds=(new URLSearchParams(location.search).get("comps")||"").split(",").map(s=>s.trim()).filter(Boolean);
   if(compIds.length&&!state.reportId){
     try{
-      const props=await loadProps();
-      compIds.forEach(id=>{const p=props.find(x=>String(x.id)===id);if(p)state.f.comps.push(compFromProp(p));});
+      // Fetch the chosen rows by id directly — the user picked these, so we
+      // don't apply the sale-only filter here. IDs may be numeric or uuid,
+      // so match loosely on string form.
+      const {data}=await sb.from("properties").select("*").in("id",compIds);
+      const rows=data||[];
+      compIds.forEach(id=>{const p=rows.find(x=>String(x.id)===String(id));if(p)state.f.comps.push(compFromProp(p));});
       if(state.f.comps.length){state.section="comps";toast(`${state.f.comps.length} case stud${state.f.comps.length===1?"y":"ies"} pre-filled from PropCMA — edit as needed`);}
-    }catch(e){/* non-fatal */}
+      else toast("Couldn't load the selected properties — add them with the button");
+    }catch(e){toast("Case study pre-fill failed: "+e.message);}
   }
   render();
 })();
