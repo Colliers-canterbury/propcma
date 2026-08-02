@@ -494,7 +494,7 @@
     });
     // Net/gross show the calculated figure (comma-formatted) unless the
     // user has typed a manual override or is currently editing the field.
-    const netEl = $("#netRentalCell"), grossEl = $("#grossRentalCell");
+    const netEl = $("netRentalCell"), grossEl = $("grossRentalCell");
     if (netEl && document.activeElement !== netEl && state.f.rentalOverride.net === "")
       netEl.value = fmt(d.calcNet);
     if (grossEl && document.activeElement !== grossEl && state.f.rentalOverride.gross === "")
