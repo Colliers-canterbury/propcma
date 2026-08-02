@@ -162,10 +162,8 @@
     if (!c.agencyAgreement) m.push("Checklist — signed agency agreement");
     if (!c.unconditionalConfirmation) m.push("Checklist — confirmation of unconditional");
     if (!c.leaseValueConfirmation) m.push("Checklist — confirmation of lease value");
-    if (!c.marketingReport) m.push("Checklist — marketing campaign report");
     if (!c.amlComplete) m.push("Checklist — AML complete");
     if (!c.leaseDeed) m.push("Checklist — lease deed");
-    if (f.depositToTrust && !c.appraisals) m.push("Checklist — appraisals (trust deal)");
     return m;
   }
 
@@ -345,10 +343,10 @@
               <tbody>${rentalRows}</tbody>
               <tfoot>
                 <tr class="sub"><td colspan="3">Total Net Rental (excl GST)</td>
-                  <td class="r"><input class="cell r mono" data-recalc data-path="rentalOverride.net" value="${esc(f.rentalOverride.net)}" placeholder="${fmt(d.calcNet)}" id="netRentalCell" /></td></tr>
+                  <td class="r"><input class="cell r mono" data-recalc data-path="rentalOverride.net" value="${f.rentalOverride.net!==""?esc(f.rentalOverride.net):fmt(d.calcNet)}" placeholder="0.00" id="netRentalCell" /></td></tr>
                 <tr><td colspan="3">Plus Opex</td><td class="r"><input class="cell r" data-recalc data-path="rental.opex" value="${esc(f.rental.opex)}" placeholder="0.00" /></td></tr>
                 <tr class="total"><td colspan="3">Total Gross Rental (excl GST) p.a.</td>
-                  <td class="r"><input class="cell r mono" data-recalc data-path="rentalOverride.gross" value="${esc(f.rentalOverride.gross)}" placeholder="${fmt(d.calcGross)}" id="grossRentalCell" /></td></tr>
+                  <td class="r"><input class="cell r mono" data-recalc data-path="rentalOverride.gross" value="${f.rentalOverride.gross!==""?esc(f.rentalOverride.gross):fmt(d.calcGross)}" placeholder="0.00" id="grossRentalCell" /></td></tr>
               </tfoot></table>
               ${f.rentalOverride.net!==""||f.rentalOverride.gross!==""?`<p class="note" style="margin-top:6px">Manual total in use. Calculated: net $${fmt(d.calcNet)}, gross $${fmt(d.calcGross)}. Clear the field to revert.</p>`:""}`)}
 
@@ -391,10 +389,10 @@
             <div class="checkRow">${chk("checklist.agencyAgreement","Signed agency agreement attached")}${uploadSlot("agencyAgreement","")}</div>
             <div class="checkRow">${chk("checklist.unconditionalConfirmation","Confirmation of unconditional attached")}${uploadSlot("unconditionalConfirmation","")}</div>
             <div class="checkRow">${chk("checklist.leaseValueConfirmation","Confirmation of lease value")}${uploadSlot("leaseValueConfirmation","e.g. schedule from the lease agreement")}</div>
-            <div class="checkRow">${chk("checklist.marketingReport","Marketing campaign report attached")}${uploadSlot("marketingReport","")}</div>
+            <div class="checkRow">${chk("checklist.marketingReport","Marketing campaign report attached (optional)")}${uploadSlot("marketingReport","")}</div>
             <div class="checkRow">${chk("checklist.amlComplete","AML complete")}${uploadSlot("amlComplete","")}</div>
             <div class="checkRow">${chk("checklist.leaseDeed","Lease deed attached")}${uploadSlot("leaseDeed","")}</div>
-            ${f.depositToTrust ? `<div class="checkRow">${chk("checklist.appraisals","Appraisals (trust deals)")}${uploadSlot("appraisals","")}</div>` : ""}`)}
+            ${f.depositToTrust ? `<div class="checkRow">${chk("checklist.appraisals","Appraisals (trust deals) (optional)")}${uploadSlot("appraisals","")}</div>` : ""}`)}
 
           ${section("13","Sign-off","",`<div class="grid">
             <label class="fld span2"><span class="lbl">Prepared by</span>
@@ -439,6 +437,15 @@
         el.onchange = () => { set(path, el.value); scheduleAutosave(); render(); };
       } else if (el.hasAttribute("data-recalc")) {
         el.oninput = () => { set(path, el.value); scheduleAutosave(); refreshDerived(); };
+        // Money fields (right-aligned) reformat with thousands separators
+        // when the user leaves the field — not while typing, to avoid
+        // cursor jumps. Net/gross override fields are handled separately.
+        if (el.classList.contains("r") && !["netRentalCell","grossRentalCell"].includes(el.id)) {
+          el.onblur = () => {
+            const v = num(el.value);
+            if (v) { el.value = fmt(v); }
+          };
+        }
       } else {
         el.oninput = () => { set(path, el.value); scheduleAutosave(); };
       }
@@ -485,10 +492,13 @@
         el.placeholder = d.lineTotals[l.key] ? fmt(d.lineTotals[l.key]) : "0.00";
       }
     });
-    // Net/gross placeholders track the calculated figure when not overridden.
+    // Net/gross show the calculated figure (comma-formatted) unless the
+    // user has typed a manual override or is currently editing the field.
     const netEl = $("#netRentalCell"), grossEl = $("#grossRentalCell");
-    if (netEl && document.activeElement !== netEl) netEl.placeholder = fmt(d.calcNet);
-    if (grossEl && document.activeElement !== grossEl) grossEl.placeholder = fmt(d.calcGross);
+    if (netEl && document.activeElement !== netEl && state.f.rentalOverride.net === "")
+      netEl.value = fmt(d.calcNet);
+    if (grossEl && document.activeElement !== grossEl && state.f.rentalOverride.gross === "")
+      grossEl.value = fmt(d.calcGross);
 
     const setText = (sel, val) => {
       const el = $("app").querySelector(sel);
