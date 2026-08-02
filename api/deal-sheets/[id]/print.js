@@ -106,21 +106,6 @@ function renderPrintable(deal, splits, attachments, brokers, preparedBy) {
   const nameOf = (code) => (brokers.find((b) => b.code === code) || {}).first_name || code;
   const dealBrokers = (f.ownership?.salespeople || []).map(nameOf).join(", ");
 
-  // Mirror the form's derive(): tier fees from the base chain (typed
-  // amount, or remainder of the sale price), with flat rates winning;
-  // yield falls back to the auto-calculation when not manually set.
-  const n = (v) => { const x = parseFloat(String(v ?? "").replace(/[$,\s]/g, "")); return isNaN(x) ? 0 : x; };
-  const salePriceN = n(deal.sale_price_ex_gst ?? sale.salePrice);
-  let remainingBase = salePriceN;
-  const tierFees = (comm.tiers || []).map((t) => {
-    const typed = t.base !== "" && t.base != null;
-    const base = typed ? n(t.base) : Math.max(remainingBase, 0);
-    remainingBase -= base;
-    return n(t.flat) > 0 ? n(t.flat) : (n(t.pct) / 100) * base;
-  });
-  const yieldPct = (sale.yieldManual !== "" && sale.yieldManual != null) ? n(sale.yieldManual)
-    : (salePriceN > 0 && n(sale.rentalIncome) > 0 ? (n(sale.rentalIncome) / salePriceN) * 100 : 0);
-
   const row = (label, value) => `<tr><th>${label}</th><td>${value}</td></tr>`;
   const party = (p, title, solicitor) => !p?.name ? "" : `
     <h3>${title}</h3>
@@ -130,7 +115,7 @@ function renderPrintable(deal, splits, attachments, brokers, preparedBy) {
       ${row("Phone", dash(p.phone))}
       ${row("Email", dash(p.email))}
       ${row("Postal address", [p.postalAddress, p.city, p.postcode, p.country].filter(Boolean).map(esc).join(", ") || "—")}
-      ${solicitor && p.solicitorName ? row("Solicitor", `${esc(p.solicitorName)}${p.solicitorFirm ? ", " + esc(p.solicitorFirm) : ""}${(p.solicitorEmail || p.solicitorPhone) ? " · " + esc(p.solicitorEmail || p.solicitorPhone) : ""}`) : ""}
+      ${solicitor && p.solicitorName ? row("Solicitor", `${esc(p.solicitorName)}${p.solicitorFirm ? ", " + esc(p.solicitorFirm) : ""}${p.solicitorPhone ? " · " + esc(p.solicitorPhone) : ""}`) : ""}
     </table>`;
 
   return `<!DOCTYPE html>
@@ -142,6 +127,7 @@ function renderPrintable(deal, splits, attachments, brokers, preparedBy) {
   <div><h1>Deal Sheet — Sales Record</h1>
     <div class="sub">South Island Commercial (2004) Limited · Colliers</div></div>
   <div class="nums">
+    <div>File No. <b>${dash(deal.file_no)}</b></div>
     <div>Deal No. <b>${dash(deal.deal_no)}</b></div>
     <div class="sub">Status: ${esc(deal.status)}</div>
   </div>
@@ -175,7 +161,7 @@ ${f.billingDifferent ? party(f.billing, "Billing entity", false) : ""}
   ${row("Unconditional date", dash(sale.unconditionalDate))}
   ${row("Sale price (excl GST)", money(deal.sale_price_ex_gst))}
   ${row(`${esc(sale.rentalBasis || "Net")} rental income`, sale.rentalIncome ? money(sale.rentalIncome) : "—")}
-  ${row(`${esc(sale.rentalBasis || "Net")} yield`, yieldPct ? yieldPct.toFixed(2) + " %" : "—")}
+  ${row("Yield", sale.yieldManual ? esc(sale.yieldManual) + " %" : "—")}
   ${row("Title", dash(sale.titleType))}
   ${row("Land area (sqm)", dash(sale.landArea))}
   ${row("Occupied by area (sqm)", dash(sale.occupiedArea))}
@@ -198,11 +184,11 @@ ${deal.deposit_to_trust ? `
 <table class="grid avoid">
   <thead><tr><th>Item</th><th class="r">%</th><th class="r">Amount</th></tr></thead>
   <tbody>
-    ${(comm.tiers || []).map((t, i) => (t.pct || t.flat) ? `<tr><td>${["Commission","Second tier","Third tier"][i]}</td>
-      <td class="r">${t.flat ? "flat rate" : esc(t.pct) + "%"}</td><td class="r">${tierFees[i] ? money(tierFees[i]) : "—"}</td></tr>` : "").join("")}
+    ${(comm.tiers || []).map((t, i) => t.pct ? `<tr><td>${["Commission","Second tier","Third tier"][i]}</td>
+      <td class="r">${esc(t.pct)}%</td><td class="r">—</td></tr>` : "").join("")}
     ${comm.otherFee ? `<tr><td>Other — ${dash(comm.otherDesc)}</td><td class="r"></td><td class="r">${money(comm.otherFee)}</td></tr>` : ""}
     ${comm.adminFee ? `<tr><td>Administration fee</td><td class="r"></td><td class="r">${money(500)}</td></tr>` : ""}
-    ${comm.recoverMarketing ? `<tr><td>Recover marketing costs${comm.recoverMarketingDesc ? " — " + dash(comm.recoverMarketingDesc) : ""}</td><td class="r"></td><td class="r">${money(comm.recoverMarketing)}</td></tr>` : ""}
+    ${comm.recoverMarketing ? `<tr><td>Recover marketing costs</td><td class="r"></td><td class="r">${money(comm.recoverMarketing)}</td></tr>` : ""}
     ${comm.recoverOther ? `<tr><td>Recover other — ${dash(comm.recoverOtherDesc)}</td><td class="r"></td><td class="r">${money(comm.recoverOther)}</td></tr>` : ""}
     <tr class="total"><td>Total to invoice (excl GST)</td><td></td><td class="r">${money(deal.total_invoice_ex_gst)}</td></tr>
   </tbody>
@@ -212,7 +198,7 @@ ${deal.deposit_to_trust ? `
 <table class="grid avoid">
   <thead><tr><th>Party</th><th class="r">%</th><th class="r">Amount</th></tr></thead>
   <tbody>${splits.map((s) => `<tr><td>${esc(s.party_name)}${s.party_type === "third_party" ? " <em>(third party)</em>" : ""}</td>
-    <td class="r">${s.split_pct ? s.split_pct + "%" : "—"}</td><td class="r">${money(s.split_amount)}</td></tr>`).join("") ||
+    <td class="r">${s.split_pct}%</td><td class="r">${money(s.split_amount)}</td></tr>`).join("") ||
     `<tr><td colspan="3">—</td></tr>`}</tbody>
 </table>
 
@@ -238,12 +224,12 @@ ${attachments.length ? `<h3>Attached documents</h3><ul class="checks">${
 <h2 class="avoid">Sign-off</h2>
 <table class="kv avoid">
   ${row("Prepared by", dash(preparedBy))}
-  ${row("Submitted", deal.submitted_at ? new Date(deal.submitted_at).toLocaleString("en-NZ") : "—")}
+  ${row("Submitted", deal.submitted_at ? new Date(deal.submitted_at).toLocaleString("en-NZ", { timeZone: "Pacific/Auckland" }) : "—")}
 </table>
 
 <footer>
   <span>Deal sheet ${esc(deal.id)}</span>
-  <span>Printed ${new Date().toLocaleString("en-NZ")}</span>
+  <span>Printed ${new Date().toLocaleString("en-NZ", { timeZone: "Pacific/Auckland" })}</span>
 </footer>
 </body></html>`;
 }
@@ -327,6 +313,7 @@ function renderLeasePrintable(deal, splits, attachments, brokers, preparedBy) {
   <div><h1>Deal Sheet — Leasing Record</h1>
     <div class="sub">South Island Commercial (2004) Limited · Colliers</div></div>
   <div class="nums">
+    <div>File No. <b>${dash(deal.file_no)}</b></div>
     <div>Deal No. <b>${dash(deal.deal_no)}</b></div>
     <div class="sub">Status: ${esc(deal.status)}</div>
   </div>
@@ -349,10 +336,10 @@ function renderLeasePrintable(deal, splits, attachments, brokers, preparedBy) {
 </table>
 
 <div class="two avoid">
-  <div>${party(f.lessor, "Lessor", true)}
+  <div>${party(f.lessor, "Landlord", true)}
     ${f.lessor?.parentCompany ? `<table class="kv">${row("Parent company", dash(f.lessor.parentCompany))}</table>` : ""}</div>
-  <div>${party(f.lessee, "Lessee", true)}
-    ${f.invoiceToLessee ? `<p class="sub2">Invoice to be raised to the Lessee.</p>` : ""}</div>
+  <div>${party(f.lessee, "Tenant", true)}
+    ${f.invoiceToLessee ? `<p class="sub2">Invoice to be raised to the Tenant.</p>` : ""}</div>
 </div>
 ${f.billingDifferent ? party(f.billing, "Billing entity", false) : ""}
 
@@ -397,7 +384,7 @@ ${deal.deposit_to_trust ? `
 <table class="grid avoid">
   <thead><tr><th>Item</th><th>Description</th><th class="r">Amount</th></tr></thead>
   <tbody>
-    ${comm.fee ? `<tr><td>Commission (per scale of fees)</td><td></td><td class="r">${money(comm.fee)}</td></tr>` : ""}
+    ${comm.fee ? `<tr><td>Commission (per scale of fees)</td><td>${dash(comm.feeDesc)}</td><td class="r">${money(comm.fee)}</td></tr>` : ""}
     ${comm.otherFee ? `<tr><td>Other / consultancy</td><td>${dash(comm.otherDesc)}</td><td class="r">${money(comm.otherFee)}</td></tr>` : ""}
     ${adminFee ? `<tr><td>Administration fee</td><td></td><td class="r">${money(500)}</td></tr>` : ""}
     ${comm.recoverMarketing ? `<tr><td>Recover marketing costs</td><td></td><td class="r">${money(comm.recoverMarketing)}</td></tr>` : ""}
@@ -436,12 +423,12 @@ ${attachments.length ? `<h3>Attached documents</h3><ul class="checks">${
 <h2 class="avoid">Sign-off</h2>
 <table class="kv avoid">
   ${row("Prepared by", dash(preparedBy))}
-  ${row("Submitted", deal.submitted_at ? new Date(deal.submitted_at).toLocaleString("en-NZ") : "—")}
+  ${row("Submitted", deal.submitted_at ? new Date(deal.submitted_at).toLocaleString("en-NZ", { timeZone: "Pacific/Auckland" }) : "—")}
 </table>
 
 <footer>
   <span>Leasing deal sheet ${esc(deal.id)}</span>
-  <span>Printed ${new Date().toLocaleString("en-NZ")}</span>
+  <span>Printed ${new Date().toLocaleString("en-NZ", { timeZone: "Pacific/Auckland" })}</span>
 </footer>
 </body></html>`;
 }
