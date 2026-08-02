@@ -35,15 +35,28 @@ export async function notifyAccounts(deal, ccEmails = []) {
     deal.deposit_to_trust ? " [TRUST]" : ""
   }`;
 
+  const isLease = deal.deal_type === "lease";
+  // For a lease, the "sale price" figure is actually annual rental. Show
+  // Gross when outgoings (opex) are on the deal, otherwise Net.
+  const hasOutgoings = isLease && parseFloat(deal.form?.rental?.opex || 0) > 0;
+  const rentalLabel = isLease
+    ? (hasOutgoings ? "Total Gross Rental p.a. (excl GST)" : "Total Net Rental p.a. (excl GST)")
+    : "Sale price (excl GST)";
+  const partyLabel = isLease ? "Landlord" : "Vendor";
+  const dateLabel = isLease ? "Commencement" : "Unconditional";
+  const dateValue = isLease
+    ? (deal.form?.lease?.commencementDate || deal.unconditional_date || "—")
+    : (deal.unconditional_date || "—");
+
   const html = `
     <div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1A2233">
       <p>A new deal sheet has been submitted and is ready for processing.</p>
       <table cellpadding="6" style="border-collapse:collapse">
         <tr><td style="color:#66708A">Property</td><td><b>${deal.property_address}</b></td></tr>
         <tr><td style="color:#66708A">Broker</td><td>${deal.salesperson} (${deal.division || "—"})</td></tr>
-        <tr><td style="color:#66708A">Vendor</td><td>${deal.vendor_name || "—"}</td></tr>
-        <tr><td style="color:#66708A">Unconditional</td><td>${deal.unconditional_date || "—"}</td></tr>
-        <tr><td style="color:#66708A">Sale price (excl GST)</td><td>${nzd(deal.sale_price_ex_gst)}</td></tr>
+        <tr><td style="color:#66708A">${partyLabel}</td><td>${deal.vendor_name || "—"}</td></tr>
+        <tr><td style="color:#66708A">${dateLabel}</td><td>${dateValue}</td></tr>
+        <tr><td style="color:#66708A">${rentalLabel}</td><td>${nzd(deal.sale_price_ex_gst)}</td></tr>
         <tr><td style="color:#66708A">Total to invoice (excl GST)</td><td><b>${nzd(deal.total_invoice_ex_gst)}</b></td></tr>
         <tr><td style="color:#66708A">Trust deposit</td><td>${deal.deposit_to_trust ? "Yes — check receipt" : "No"}</td></tr>
       </table>

@@ -200,11 +200,8 @@ export function validateLeaseForSubmit(form, derived) {
   if (!c.agencyAgreement) missing.push("Checklist — signed agency agreement");
   if (!c.unconditionalConfirmation) missing.push("Checklist — confirmation of unconditional");
   if (!c.leaseValueConfirmation) missing.push("Checklist — confirmation of lease value");
-  if (!c.marketingReport) missing.push("Checklist — marketing campaign report");
   if (!c.amlComplete) missing.push("Checklist — AML complete");
   if (!c.leaseDeed) missing.push("Checklist — lease deed");
-  if (form.depositToTrust && !c.appraisals)
-    missing.push("Checklist — appraisals (trust deal)");
 
   return missing;
 }
