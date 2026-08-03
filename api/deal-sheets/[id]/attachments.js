@@ -1,28 +1,34 @@
 // /api/deal-sheets/[id]/attachments.js
 //
-// Uploads use SIGNED UPLOAD URLS so the file bytes go browser →
-// Supabase Storage directly and never pass through Vercel (whose
-// ~4.5 MB request cap was rejecting larger scans).
+// POST   /api/deal-sheets/:id/attachments   (multipart: slot, file) — upload a checklist item
+// POST   /api/deal-sheets/:id/attachments   (multipart: description, file) — accounts: upload an EXTRA attachment
+// DELETE /api/deal-sheets/:id/attachments?slot=…                     — remove
 //
-// POST   /api/deal-sheets/:id/attachments  {action:"sign", slot, fileName, fileType, size}
-//          → validates + returns { uploadUrl, path } (one-time signed URL)
-// POST   /api/deal-sheets/:id/attachments  {action:"confirm", slot, path, fileName, fileType}
-//          → verifies the object landed, records it, replaces any prior file for the slot
-// GET    ?slot=…  → signed download URL
-// DELETE ?slot=…  → remove
-//
-// Files live in the private bucket `deal-documents` under
-// <dealId>/<slot>/<timestamp>_<filename>. One row per slot in
-// `deal_sheet_attachments` (confirm replaces any existing).
+// Files live in the private Supabase Storage bucket `deal-documents`
+// under  <dealId>/<slot>/<filename>. A row per attachment is tracked
+// in `deal_sheet_attachments` so the accounts page can list them.
 //
 // Brokers may attach/remove on their OWN draft; accounts/managers may
 // on any non-draft deal.
+//
+// EXTRA attachments (kind='extra') are a separate concept from the
+// fixed checklist slots: accounts can add any number of them, each
+// with a required description, at any point after submission —
+// including after the deal is invoiced. Each gets a generated slot
+// value (extra_<uuid>) so multiple can exist per deal without
+// touching the existing one-file-per-named-slot constraint. Only
+// accounts/manager can create or remove them — never a broker, and
+// never on a draft.
 
+import Busboy from "busboy";
+import { randomUUID } from "crypto";
 import { requireUser, sendError, HttpError } from "../../_lib/auth.js";
 import { supabase } from "../../_lib/supabase.js";
 
+export const config = { api: { bodyParser: false } }; // we parse multipart ourselves
+
 const BUCKET = "deal-documents";
-const MAX_BYTES = 50 * 1024 * 1024; // 50 MB — also check the bucket's file size limit in Supabase
+const MAX_BYTES = 20 * 1024 * 1024; // 20 MB
 const ALLOWED = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -38,20 +44,19 @@ const VALID_SLOTS = new Set([
   // Leasing deal sheet
   "leaseValueConfirmation", "leaseDeed", "appraisals",
 ]);
+// Extra (accounts-added) attachments each get a generated slot of the
+// form extra_<uuid>, so any number can coexist per deal.
+const isExtraSlot = (slot) => typeof slot === "string" && slot.startsWith("extra_");
 
 export default async function handler(req, res) {
   try {
     const { id } = req.query;
 
+    // GET returns a signed download URL (read access — broker owner or staff)
     if (req.method === "GET") return await signedUrl(req, res, id);
 
     const deal = await loadDealForWrite(req, id);
-    if (req.method === "POST") {
-      const body = req.body || {};
-      if (body.action === "sign") return await sign(res, deal, body);
-      if (body.action === "confirm") return await confirm(res, deal, body);
-      throw new HttpError(400, "Unknown action");
-    }
+    if (req.method === "POST") return await upload(req, res, deal);
     if (req.method === "DELETE") return await remove(req, res, deal);
     res.setHeader("Allow", "GET, POST, DELETE");
     return res.status(405).end();
@@ -63,7 +68,7 @@ export default async function handler(req, res) {
 async function signedUrl(req, res, id) {
   const user = await requireUser(req);
   const slot = req.query.slot;
-  if (!VALID_SLOTS.has(slot)) throw new HttpError(400, "Invalid slot");
+  if (!VALID_SLOTS.has(slot) && !isExtraSlot(slot)) throw new HttpError(400, "Invalid slot");
 
   const { data: deal, error } = await supabase
     .from("deal_sheets").select("id, created_by, status").eq("id", id).single();
@@ -94,71 +99,125 @@ async function loadDealForWrite(req, id) {
   const isStaff = ["accounts", "manager"].includes(user.role) && deal.status !== "draft";
   if (!isOwnerDraft && !isStaff)
     throw new HttpError(403, "Not permitted to change attachments on this deal");
+  deal._user = user; // carried through so upload()/remove() don't re-fetch it
   return deal;
 }
 
-// Step 1: validate the declared file and hand back a one-time upload URL.
-async function sign(res, deal, { slot, fileName, fileType, size }) {
-  if (!VALID_SLOTS.has(slot)) throw new HttpError(400, "Invalid attachment slot");
-  if (!fileName) throw new HttpError(400, "No file name provided");
-  if (!ALLOWED.has(fileType)) throw new HttpError(415, "File type not allowed (PDF, Word, Excel or image only)");
-  if (!size || size <= 0) throw new HttpError(400, "No file size provided");
-  if (size > MAX_BYTES) throw new HttpError(413, `File exceeds the ${Math.round(MAX_BYTES / 1024 / 1024)} MB limit`);
+function parseMultipart(req) {
+  return new Promise((resolve, reject) => {
+    const bb = Busboy({ headers: req.headers, limits: { fileSize: MAX_BYTES, files: 1 } });
+    const fields = {};
+    let fileBuf = null, fileName = null, fileType = null, tooBig = false;
 
-  const safeName = String(fileName).replace(/[^\w.\-]+/g, "_").slice(-120);
-  // Timestamped path: no upsert needed, and replacing a slot can't
-  // collide with the file it replaces.
-  const path = `${deal.id}/${slot}/${Date.now()}_${safeName}`;
-
-  const { data, error } = await supabase.storage.from(BUCKET).createSignedUploadUrl(path);
-  if (error) throw new HttpError(500, `Could not authorise upload: ${error.message}`);
-
-  return res.status(200).json({ uploadUrl: data.signedUrl, path });
+    bb.on("field", (name, val) => { fields[name] = val; });
+    bb.on("file", (_name, stream, info) => {
+      fileName = info.filename; fileType = info.mimeType;
+      const chunks = [];
+      stream.on("data", (c) => chunks.push(c));
+      stream.on("limit", () => { tooBig = true; stream.resume(); });
+      stream.on("end", () => { fileBuf = Buffer.concat(chunks); });
+    });
+    bb.on("close", () => {
+      if (tooBig) return reject(new HttpError(413, "File exceeds 20 MB limit"));
+      resolve({ fields, fileBuf, fileName, fileType });
+    });
+    bb.on("error", reject);
+    req.pipe(bb);
+  });
 }
 
-// Step 2: the browser has PUT the file to storage — verify and record it.
-async function confirm(res, deal, { slot, path, fileName, fileType }) {
+async function upload(req, res, deal) {
+  const user = deal._user;
+  const { fields, fileBuf, fileName, fileType } = await parseMultipart(req);
+
+  if (!fileBuf || !fileName) throw new HttpError(400, "No file provided");
+  if (!ALLOWED.has(fileType)) throw new HttpError(415, "File type not allowed (PDF, Word, Excel or image only)");
+
+  // Two upload shapes share this endpoint:
+  //  - a checklist item: { slot } from the fixed VALID_SLOTS list
+  //  - an accounts "extra" attachment: { description }, no slot —
+  //    accounts/manager only, and never on a draft.
+  const isExtra = !fields.slot && fields.description != null;
+
+  if (isExtra) {
+    if (!["accounts", "manager"].includes(user.role))
+      throw new HttpError(403, "Only accounts or a manager can add extra attachments");
+    if (deal.status === "draft")
+      throw new HttpError(409, "Cannot attach extra documents to a draft");
+    const description = String(fields.description || "").trim();
+    if (!description) throw new HttpError(400, "A description is required");
+
+    const slot = `extra_${randomUUID()}`;
+    const safeName = fileName.replace(/[^\w.\-]+/g, "_").slice(-120);
+    const path = `${deal.id}/${slot}/${safeName}`;
+
+    const { error: upErr } = await supabase.storage
+      .from(BUCKET)
+      .upload(path, fileBuf, { contentType: fileType, upsert: true });
+    if (upErr) throw new HttpError(500, `Storage upload failed: ${upErr.message}`);
+
+    const { data: row, error: dbErr } = await supabase.from("deal_sheet_attachments").insert({
+      deal_id: deal.id, slot, kind: "extra", description,
+      file_name: fileName, storage_path: path,
+      content_type: fileType, size_bytes: fileBuf.length, uploaded_by: user.oid,
+    }).select("id").single();
+    if (dbErr) throw new HttpError(500, "Attachment record failed");
+
+    await supabase.from("deal_sheet_events").insert({
+      deal_id: deal.id, actor: user.oid,
+      from_status: deal.status, to_status: deal.status,
+      note: `Attachment added: ${description} (${fileName})`,
+    });
+
+    return res.status(200).json({ id: row.id, slot, name: fileName, description, path, size: fileBuf.length });
+  }
+
+  // ---- checklist slot upload (existing behaviour) ----
+  const slot = fields.slot;
   if (!VALID_SLOTS.has(slot)) throw new HttpError(400, "Invalid attachment slot");
-  if (!path || !String(path).startsWith(`${deal.id}/${slot}/`))
-    throw new HttpError(400, "Path does not match this deal and slot");
 
-  // Verify the object actually landed and get its true size.
-  const folder = `${deal.id}/${slot}`;
-  const leaf = String(path).slice(folder.length + 1);
-  const { data: listing, error: listErr } = await supabase.storage
-    .from(BUCKET).list(folder, { limit: 100 });
-  if (listErr) throw new HttpError(500, "Could not verify upload");
-  const obj = (listing || []).find((o) => o.name === leaf);
-  if (!obj) throw new HttpError(400, "Upload not found — the file may not have finished uploading");
-  const size = obj.metadata?.size ?? 0;
+  const safeName = fileName.replace(/[^\w.\-]+/g, "_").slice(-120);
+  const path = `${deal.id}/${slot}/${safeName}`;
 
-  // Replace semantics: remove any previous file(s) for this slot.
-  const { data: oldRows } = await supabase.from("deal_sheet_attachments")
-    .select("storage_path").eq("deal_id", deal.id).eq("slot", slot);
-  const stale = (oldRows || []).map((r) => r.storage_path).filter((p) => p !== path);
-  if (stale.length) await supabase.storage.from(BUCKET).remove(stale);
+  const { error: upErr } = await supabase.storage
+    .from(BUCKET)
+    .upload(path, fileBuf, { contentType: fileType, upsert: true });
+  if (upErr) throw new HttpError(500, `Storage upload failed: ${upErr.message}`);
+
+  // Track it (one row per slot — replace any existing for this slot)
   await supabase.from("deal_sheet_attachments").delete()
     .eq("deal_id", deal.id).eq("slot", slot);
-
   const { error: dbErr } = await supabase.from("deal_sheet_attachments").insert({
-    deal_id: deal.id, slot, file_name: fileName, storage_path: path,
-    content_type: fileType, size_bytes: size,
+    deal_id: deal.id, slot, kind: "checklist", file_name: fileName, storage_path: path,
+    content_type: fileType, size_bytes: fileBuf.length, uploaded_by: user.oid,
   });
   if (dbErr) throw new HttpError(500, "Attachment record failed");
 
-  return res.status(200).json({ slot, name: fileName, path, size });
+  return res.status(200).json({ slot, name: fileName, path, size: fileBuf.length });
 }
 
 async function remove(req, res, deal) {
   const slot = req.query.slot;
-  if (!VALID_SLOTS.has(slot)) throw new HttpError(400, "Invalid slot");
+  if (!VALID_SLOTS.has(slot) && !isExtraSlot(slot)) throw new HttpError(400, "Invalid slot");
+
+  // Extra attachments can only be removed by accounts/manager — never a
+  // broker, even on their own deal.
+  if (isExtraSlot(slot) && !["accounts", "manager"].includes(deal._user.role))
+    throw new HttpError(403, "Only accounts or a manager can remove an extra attachment");
 
   const { data: rows } = await supabase.from("deal_sheet_attachments")
-    .select("storage_path").eq("deal_id", deal.id).eq("slot", slot);
+    .select("storage_path, file_name, description").eq("deal_id", deal.id).eq("slot", slot);
   if (rows && rows.length) {
     await supabase.storage.from(BUCKET).remove(rows.map((r) => r.storage_path));
     await supabase.from("deal_sheet_attachments").delete()
       .eq("deal_id", deal.id).eq("slot", slot);
+    if (isExtraSlot(slot)) {
+      await supabase.from("deal_sheet_events").insert({
+        deal_id: deal.id, actor: deal._user.oid,
+        from_status: deal.status, to_status: deal.status,
+        note: `Attachment removed: ${rows[0].description || rows[0].file_name}`,
+      });
+    }
   }
   return res.status(200).json({ ok: true });
 }
