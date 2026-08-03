@@ -34,6 +34,7 @@
       call("", { method: "POST", body: { form, id, dealType } }),
     submit: (id) => call(`/${id}/submit`, { method: "POST" }),
     get: (id) => call(`/${id}`),
+    deleteDeal: (id) => call(`/${id}`, { method: "DELETE" }),
     getQueue: (status) => call(`?scope=queue${status ? `&status=${status}` : ""}`),
     getDrafts: () => call(`?scope=drafts`),
     process: (id, nums) => call(`/${id}/process`, { method: "POST", body: nums }),
@@ -192,6 +193,11 @@
       return delay({ ok: true, status: "submitted", emailed: true });
     },
     get: (id) => delay(findDeal(id)),
+    deleteDeal: (id) => {
+      const i = demoStore.deals.findIndex((d) => d.id === id);
+      if (i >= 0) demoStore.deals.splice(i, 1);
+      return delay({ ok: true });
+    },
     getQueue: (status) =>
       delay(demoStore.deals.filter((d) => d.status !== "draft" && (!status || d.status === status))),
     getDrafts: () => delay(demoStore.deals.filter((d) => d.status === "draft")),
