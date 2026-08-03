@@ -308,3 +308,17 @@ tfoot td{border-top:2px solid var(--navy);border-bottom:none;font-weight:700;pad
 .pill.pillDraft,.typePill.pillDraft{background:#EEF1F5;color:#5B6472;}
 .draftBanner{background:#EEF1F5;border:1px solid #D3DAE3;color:#3A4351;font-size:13px;
   padding:9px 13px;border-radius:8px;margin-bottom:14px;}
+
+/* ---------- accounts: extra attachments ---------- */
+.extraList{margin-bottom:10px;}
+.attachBtns{display:inline-flex;gap:6px;}
+.rmBtn{padding:4px 10px;font-size:12px;font-weight:600;background:#FEE2E2;color:#991B1B;
+  border:1px solid #FCA5A5;border-radius:6px;cursor:pointer;}
+.rmBtn:hover{background:#FECACA;}
+.rmBtn:disabled{opacity:.5;cursor:default;}
+.extraUpload{display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+  background:#F8FAFC;border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:8px;}
+.extraUpload input#extraDesc{flex:1 1 240px;padding:6px 10px;border:1px solid var(--line);
+  border-radius:6px;font-size:13px;}
+.extraUpload .upBtn{padding:6px 12px;font-size:12.5px;font-weight:600;background:#fff;
+  border:1px solid var(--line);border-radius:6px;cursor:pointer;}
