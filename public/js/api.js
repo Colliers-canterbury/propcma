@@ -34,44 +34,46 @@
       call("", { method: "POST", body: { form, id, dealType } }),
     submit: (id) => call(`/${id}/submit`, { method: "POST" }),
     get: (id) => call(`/${id}`),
-    deleteDeal: (id) => call(`/${id}`, { method: "DELETE" }),
     getQueue: (status) => call(`?scope=queue${status ? `&status=${status}` : ""}`),
     getDrafts: () => call(`?scope=drafts`),
     process: (id, nums) => call(`/${id}/process`, { method: "POST", body: nums }),
-    setReceipt: (id, patch) => call(`/${id}/receipt`, { method: "POST", body: patch }), // { receiptNo? , amount? }
+    setReceipt: (id, receiptNo) => call(`/${id}/receipt`, { method: "POST", body: { receiptNo } }),
     invoice: (id) => call(`/${id}/invoice`, { method: "POST" }),
     returnToBroker: (id, note) => call(`/${id}/return`, { method: "POST", body: { note } }),
 
     // ---- attachments ----
-    // Two-step upload: the API authorises and returns a one-time signed
-    // URL, then the file goes straight to Supabase Storage — it never
-    // passes through Vercel, so large scans (up to 50 MB) work.
     async uploadAttachment(id, slot, file) {
-      const MAX = 50 * 1024 * 1024;
-      if (file.size > MAX)
-        throw new Error(`File is ${(file.size / 1024 / 1024).toFixed(1)} MB — the maximum is 50 MB`);
-
-      // 1) ask the API to authorise this upload
-      const { uploadUrl, path } = await call(`/${id}/attachments`, {
+      const token = await window.DealSheetAuth.getToken();
+      const fd = new FormData();
+      fd.append("slot", slot);
+      fd.append("file", file);
+      const res = await fetch(`${cfg.apiBase}/api/deal-sheets/${id}/attachments`, {
         method: "POST",
-        body: { action: "sign", slot, fileName: file.name, fileType: file.type, size: file.size },
+        headers: { Authorization: `Bearer ${token}` }, // no content-type; browser sets multipart boundary
+        body: fd,
       });
-
-      // 2) send the file directly to storage
-      const put = await fetch(uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": file.type || "application/octet-stream" },
-        body: file,
-      });
-      if (!put.ok) throw new Error(`Upload failed (${put.status})`);
-
-      // 3) record it against the deal
-      return call(`/${id}/attachments`, {
-        method: "POST",
-        body: { action: "confirm", slot, path, fileName: file.name, fileType: file.type },
-      }); // { slot, name, path, size }
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || `Upload failed (${res.status})`);
+      return data; // { slot, name, path, size }
     },
     removeAttachment: (id, slot) => call(`/${id}/attachments?slot=${encodeURIComponent(slot)}`, { method: "DELETE" }),
+
+    // Accounts: an extra supporting document with a required description,
+    // rather than a fixed checklist slot. Same endpoint, no slot sent.
+    async uploadExtraAttachment(id, description, file) {
+      const token = await window.DealSheetAuth.getToken();
+      const fd = new FormData();
+      fd.append("description", description);
+      fd.append("file", file);
+      const res = await fetch(`${cfg.apiBase}/api/deal-sheets/${id}/attachments`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || `Upload failed (${res.status})`);
+      return data; // { id, slot, name, description, path, size }
+    },
 
     // ---- reference data / settings ----
     listBrokers: () => call("/settings?type=brokers"),
@@ -190,18 +192,13 @@
       return delay({ ok: true, status: "submitted", emailed: true });
     },
     get: (id) => delay(findDeal(id)),
-    deleteDeal: (id) => {
-      const i = demoStore.deals.findIndex((d) => d.id === id);
-      if (i >= 0) demoStore.deals.splice(i, 1);
-      return delay({ ok: true });
-    },
     getQueue: (status) =>
       delay(demoStore.deals.filter((d) => d.status !== "draft" && (!status || d.status === status))),
     getDrafts: () => delay(demoStore.deals.filter((d) => d.status === "draft")),
-    setReceipt: (id, patch) => {
+    setReceipt: (id, receiptNo) => {
       const d = findDeal(id);
-      d.form = d.form || {}; d.form.deposit = { ...(d.form.deposit || {}), ...patch };
-      return delay({ ok: true, ...patch });
+      d.form = d.form || {}; d.form.deposit = { ...(d.form.deposit || {}), receiptNo };
+      return delay({ ok: true, receiptNo });
     },
     process: (id, { dealNo }) => {
       const d = findDeal(id);
@@ -231,7 +228,16 @@
     removeAttachment: (id, slot) => {
       const d = findDeal(id);
       if (d && d.form && d.form.attachments) delete d.form.attachments[slot];
+      if (d && d.attachments) d.attachments = d.attachments.filter((a) => a.slot !== slot);
       return delay({ ok: true });
+    },
+    uploadExtraAttachment: (id, description, file) => {
+      const d = findDeal(id);
+      const slot = `extra_${Math.random().toString(36).slice(2)}`;
+      const row = { id: slot, slot, kind: "extra", description, file_name: file.name,
+        size_bytes: file.size, uploaded_at: new Date().toISOString() };
+      if (d) { d.attachments = d.attachments || []; d.attachments.push(row); }
+      return delay({ id: slot, slot, name: file.name, description, size: file.size });
     },
     attachmentUrl: (id, slot) => delay({ url: "#demo-file-" + slot }),
 

@@ -256,6 +256,9 @@
     const events = d.events || [];
     const checks = checklistOf(d);
     const checklistOk = checks.every((c) => c.ok);
+    const allAttachments = d.attachments || [];
+    const checklistAttachments = allAttachments.filter((a) => a.kind !== "extra");
+    const extraAttachments = allAttachments.filter((a) => a.kind === "extra");
 
     el.className = "detail";
     const meta = META[d.status] || { cls: "pillDraft", label: "Draft" };
@@ -290,12 +293,7 @@
             <div class="hl"><dt>Total to invoice (excl GST)</dt><dd>$${fmt(d.total_invoice_ex_gst)}</dd></div>
           </dl>
           ${d.form && d.form.deposit && d.deposit_to_trust ? `<h3>Trust deposit</h3><dl>
-            <div><dt>Amount</dt><dd>
-              ${isDraft ? `$${fmt(d.form.deposit.amount)}` : `<span class="receiptEdit">
-                <input id="depositAmount" value="${esc(d.form.deposit.amount||"")}" placeholder="Enter amount" />
-                <button id="depositSave" class="miniBtn">Save</button>
-                <span id="depositStatus" class="miniStatus"></span>
-              </span>`}</dd></div>
+            <div><dt>Amount</dt><dd>$${fmt(d.form.deposit.amount)}</dd></div>
             <div><dt>Receipt no.</dt><dd>
               ${isDraft ? esc(d.form.deposit.receiptNo||"—") : `<span class="receiptEdit">
                 <input id="receiptNo" value="${esc(d.form.deposit.receiptNo||"")}" placeholder="Enter receipt no." />
@@ -308,10 +306,26 @@
             `<tr><td>${esc(s.party_name)}</td><td class="r">${s.split_pct}%</td><td class="r mono">$${fmt(s.split_amount)}</td></tr>`).join("")||`<tr><td class="dim">No splits recorded</td></tr>`}</tbody></table>
           <h3>Mandatory checklist</h3>
           <ul class="checks">${checks.map((c) => `<li class="${c.ok?"":"bad"}">${c.label}</li>`).join("")}</ul>
-          ${(d.attachments && d.attachments.length) ? `<h3>Attachments</h3>
-          <ul class="attachList">${d.attachments.map((a) =>
+          ${(checklistAttachments.length) ? `<h3>Attachments</h3>
+          <ul class="attachList">${checklistAttachments.map((a) =>
             `<li><span>📎 ${esc(a.file_name)} <span class="dim">(${fmtSize(a.size_bytes)})</span></span>
              <button class="dlBtn" data-slot="${esc(a.slot)}">Download</button></li>`).join("")}</ul>` : ""}
+
+          <h3>Additional attachments <span class="dim">(for accounts / audit)</span></h3>
+          ${extraAttachments.length ? `<ul class="attachList extraList">${extraAttachments.map((a) => `<li>
+              <span>📎 <strong>${esc(a.description||"(no description)")}</strong> — ${esc(a.file_name)}
+                <span class="dim">(${fmtSize(a.size_bytes)}${a.uploaded_at?" · "+new Date(a.uploaded_at).toLocaleDateString("en-NZ"):""})</span></span>
+              <span class="attachBtns">
+                <button class="dlBtn" data-slot="${esc(a.slot)}">Download</button>
+                <button class="rmBtn" data-extra-remove="${esc(a.slot)}">Remove</button>
+              </span></li>`).join("")}</ul>` : `<p class="dim" style="margin:4px 0 10px">None added yet.</p>`}
+          ${!isDraft ? `<div class="extraUpload">
+              <input id="extraDesc" placeholder="Description for the tax auditors (required)" />
+              <label class="upBtn">Choose file<input type="file" id="extraFile" hidden /></label>
+              <span id="extraFileName" class="dim"></span>
+              <button id="extraUploadBtn" class="miniBtn" disabled>Add attachment</button>
+              <span id="extraUploadStatus" class="miniStatus"></span>
+            </div>` : ""}
         </section>
 
         <section class="panel actions">
@@ -356,7 +370,7 @@
       rSave.disabled = true;
       if (rst) rst.textContent = "Saving…";
       try {
-        await api.setReceipt(state.deal.id, { receiptNo: val });
+        await api.setReceipt(state.deal.id, val);
         state.deal.form = state.deal.form || {};
         state.deal.form.deposit = { ...(state.deal.form.deposit || {}), receiptNo: val };
         if (rst) rst.textContent = "Saved ✓";
@@ -364,25 +378,6 @@
         if (rst) rst.textContent = "Failed — try again";
       } finally {
         rSave.disabled = false;
-      }
-    };
-
-    const dSave = $("depositSave");
-    if (dSave) dSave.onclick = async () => {
-      const val = ($("depositAmount").value || "").trim().replace(/[$,\s]/g, "");
-      const dst = $("depositStatus");
-      if (val && isNaN(parseFloat(val))) { if (dst) dst.textContent = "Enter a number"; return; }
-      dSave.disabled = true;
-      if (dst) dst.textContent = "Saving…";
-      try {
-        await api.setReceipt(state.deal.id, { amount: val });
-        state.deal.form = state.deal.form || {};
-        state.deal.form.deposit = { ...(state.deal.form.deposit || {}), amount: val };
-        if (dst) dst.textContent = "Saved ✓";
-      } catch (e) {
-        if (dst) dst.textContent = "Failed — try again";
-      } finally {
-        dSave.disabled = false;
       }
     };
 
@@ -394,6 +389,50 @@
           window.open(url, "_blank");
         } catch (e) { alert("Could not get download link: " + e.message); }
         finally { b.disabled = false; b.textContent = "Download"; }
+      };
+    });
+
+    // ---- extra attachments (accounts / audit) ----
+    let pendingFile = null;
+    const descEl = $("extraDesc"), fileBtn = $("extraFile"),
+          fileNameEl = $("extraFileName"), uploadBtn = $("extraUploadBtn"),
+          statusEl = $("extraUploadStatus");
+    const updateUploadReady = () => {
+      if (uploadBtn) uploadBtn.disabled = !(pendingFile && descEl && descEl.value.trim());
+    };
+    if (fileBtn) fileBtn.onchange = () => {
+      pendingFile = fileBtn.files[0] || null;
+      if (fileNameEl) fileNameEl.textContent = pendingFile ? pendingFile.name : "";
+      updateUploadReady();
+    };
+    if (descEl) descEl.oninput = updateUploadReady;
+    if (uploadBtn) uploadBtn.onclick = async () => {
+      const description = descEl.value.trim();
+      if (!description || !pendingFile) return;
+      uploadBtn.disabled = true;
+      if (statusEl) statusEl.textContent = "Uploading…";
+      try {
+        await api.uploadExtraAttachment(state.deal.id, description, pendingFile);
+        await loadDeal(state.deal.id); // refresh to show the new attachment
+        render();
+      } catch (e) {
+        if (statusEl) statusEl.textContent = "Upload failed";
+        uploadBtn.disabled = false;
+        alert("Upload failed: " + e.message);
+      }
+    };
+    el.querySelectorAll("[data-extra-remove]").forEach((b) => {
+      b.onclick = async () => {
+        if (!confirm("Remove this attachment? This cannot be undone.")) return;
+        b.disabled = true; b.textContent = "Removing…";
+        try {
+          await api.removeAttachment(state.deal.id, b.dataset.extraRemove);
+          await loadDeal(state.deal.id);
+          render();
+        } catch (e) {
+          alert("Could not remove: " + e.message);
+          b.disabled = false; b.textContent = "Remove";
+        }
       };
     });
   }
