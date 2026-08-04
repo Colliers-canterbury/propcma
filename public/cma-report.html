@@ -5,7 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Marketing Proposal Builder — South Island Commercial</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<script src="js/msal-browser.min.js" onerror="this.remove()"></script>
+<script>
+// Fallback to CDN only if the local file (used by the deal sheets) is absent.
+if(typeof msal==="undefined"){document.write('<script src="https://alcdn.msauth.net/browser/2.39.0/js/msal-browser.min.js"><\/script>');}
+</script>
 <style>
 :root{--navy:#25408F;--blue:#0C9ED9;--cyan:#0C9ED9;--ink:#1A2233;--ink2:#66708A;--line:#DCE2EC;--panel:#EEF4FB;--bg:#F5F7FA;--ok:#1E8E5A;--warn:#C0392B;--gold:#FFD100}
 *{box-sizing:border-box}body{margin:0;font:14px/1.5 "Segoe UI",system-ui,sans-serif;color:var(--ink);background:var(--bg)}
@@ -76,8 +80,8 @@ dialog .dlgBody{padding:18px 20px;max-height:70vh;overflow:auto}
 
 <script>
 // ── CONFIG — copy these two values from PropCMA's index.html ──
-window.SUPABASE_URL  = "https://mcurpiuaezilcnnuqvnm.supabase.co";
-window.SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdXJwaXVhZXppbGNubnVxdm5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MTA5MTEsImV4cCI6MjA5NjA4NjkxMX0.nPts4jRqwTm_CZsD2OUmO5ZgjTKIMk1-CLsNqRYCOxw";
+window.SUPABASE_URL  = "YOUR_PROJECT.supabase.co URL HERE";
+window.SUPABASE_ANON = "YOUR ANON KEY HERE";
 // Microsoft sign-in — same Azure app registration as the deal sheets.
 // Used only to identify the user so Template Content can be admin-gated.
 window.MSAL = {
@@ -94,16 +98,22 @@ const sb = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON);
 // ── Microsoft sign-in (identity only, to admin-gate Template Content) ──
 let msalApp=null;
 const auth={account:null,isAdmin:false};
-async function authInit(){
-  if(typeof msal==="undefined")return; // library didn't load — treat as signed-out
+// Build (once) the MSAL app. Returns null if the library isn't available.
+async function ensureMsal(){
+  if(msalApp)return msalApp;
+  if(typeof msal==="undefined")return null; // CDN/library didn't load
   msalApp=new msal.PublicClientApplication({
     auth:{clientId:window.MSAL.clientId,authority:`https://login.microsoftonline.com/${window.MSAL.tenantId}`,redirectUri:location.href.split(/[?#]/)[0]},
     cache:{cacheLocation:"localStorage"},
   });
-  // initialize() exists in MSAL 3.x; guard so 2.x doesn't throw.
   if(typeof msalApp.initialize==="function")await msalApp.initialize();
-  const resp=await msalApp.handleRedirectPromise().catch(()=>null);
-  auth.account=resp?.account||msalApp.getAllAccounts()[0]||null;
+  return msalApp;
+}
+async function authInit(){
+  const app=await ensureMsal();
+  if(!app)return; // signed-out; sign-in button will explain when clicked
+  const resp=await app.handleRedirectPromise().catch(()=>null);
+  auth.account=resp?.account||app.getAllAccounts()[0]||null;
   if(auth.account){
     // Look up this user's role in app_users (populated by the deal sheets).
     const oid=auth.account.idTokenClaims?.oid||auth.account.localAccountId;
@@ -128,8 +138,10 @@ async function authInit(){
   }
 }
 async function signIn(){
-  if(!msalApp)return;
-  await msalApp.loginRedirect({scopes:["User.Read"]});
+  const app=await ensureMsal();
+  if(!app){toast("Microsoft sign-in library didn't load — check your connection or ad-blocker, then reload");return;}
+  try{await app.loginRedirect({scopes:["User.Read"]});}
+  catch(e){toast("Sign-in failed: "+(e.message||e));}
 }
 function signOut(){
   if(msalApp&&auth.account)msalApp.logoutRedirect({account:auth.account});
