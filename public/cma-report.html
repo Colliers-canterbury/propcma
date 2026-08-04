@@ -76,8 +76,8 @@ dialog .dlgBody{padding:18px 20px;max-height:70vh;overflow:auto}
 
 <script>
 // ── CONFIG — copy these two values from PropCMA's index.html ──
-window.SUPABASE_URL  = "https://mcurpiuaezilcnnuqvnm.supabase.co";
-window.SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdXJwaXVhZXppbGNubnVxdm5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MTA5MTEsImV4cCI6MjA5NjA4NjkxMX0.nPts4jRqwTm_CZsD2OUmO5ZgjTKIMk1-CLsNqRYCOxw";
+window.SUPABASE_URL  = "YOUR_PROJECT.supabase.co URL HERE";
+window.SUPABASE_ANON = "YOUR ANON KEY HERE";
 // Microsoft sign-in — same Azure app registration as the deal sheets.
 // Used only to identify the user so Template Content can be admin-gated.
 window.MSAL = {
@@ -106,10 +106,24 @@ async function authInit(){
   if(auth.account){
     // Look up this user's role in app_users (populated by the deal sheets).
     const oid=auth.account.idTokenClaims?.oid||auth.account.localAccountId;
+    const email=(auth.account.username||"").toLowerCase();
+    auth.oid=oid;auth.email=email;
     try{
-      const{data}=await sb.from("app_users").select("role,active").eq("oid",oid).eq("active",true).maybeSingle();
-      auth.isAdmin=!!data&&["office_admin","accounts","manager"].includes(data.role);
-    }catch(e){auth.isAdmin=false;}
+      // Match on oid OR email, since app_users may key on either.
+      let row=null;
+      const byOid=await sb.from("app_users").select("*").eq("oid",oid).maybeSingle();
+      row=byOid.data;
+      if(!row&&email){
+        const byEmail=await sb.from("app_users").select("*").ilike("email",email).maybeSingle();
+        row=byEmail.data;
+      }
+      if(byOid.error)auth.authError="app_users read failed: "+byOid.error.message;
+      const role=(row?.role||"").toLowerCase();
+      const activeOk=row?("active"in row?!!row.active:true):false;
+      auth.isAdmin=!!row&&activeOk&&["office_admin","admin","accounts","manager"].includes(role);
+      if(row&&!auth.isAdmin)auth.authError=`Signed in, but role "${row.role||"(none)"}" isn't an admin role`;
+      else if(!row)auth.authError="Signed in, but your account isn't in app_users";
+    }catch(e){auth.isAdmin=false;auth.authError="Admin check failed: "+e.message;}
   }
 }
 async function signIn(){
@@ -413,8 +427,8 @@ function render(){
   else if(S==="timeline")m.innerHTML=`
     <section class="card"><h2>Marketing timeline</h2><p class="hint">Weeks are comma-separated column labels. Marks are week numbers, e.g. "1,2,3".</p>
       <div class="grid">${txt("timeline.weeks","Week commencing labels","span3")}${area("timeline.notes","Timing notes (shown above the grid, one per line)","span3")}</div>
-      <table class="tbl" style="margin-top:12px"><thead><tr><th>Row</th><th style="width:160px">Marked weeks</th><th style="width:40px"></th></tr></thead>
-      <tbody>${f.timeline.rows.map((r,i)=>`<tr><td><input data-path="timeline.rows.${i}.label" value="${esc(r.label)}" /></td>
+      <table class="tbl" style="margin-top:12px"><thead><tr><th style="width:24px"></th><th>Row</th><th style="width:160px">Marked weeks</th><th style="width:40px"></th></tr></thead>
+      <tbody id="tlRows">${f.timeline.rows.map((r,i)=>`<tr draggable="true" data-dragrow="${i}" data-draglist="timeline.rows"><td style="cursor:grab;color:var(--ink2);text-align:center">⠿</td><td><input data-path="timeline.rows.${i}.label" value="${esc(r.label)}" /></td>
         <td><input data-path="timeline.rows.${i}.marks" value="${esc(r.marks)}" /></td>
         <td><button class="btn" data-tldel="${i}" style="padding:3px 8px">×</button></td></tr>`).join("")}</tbody></table>
       <div class="rowBtns"><button class="btn" id="btnTlAdd">Add row</button></div></section>`;
@@ -533,6 +547,22 @@ function wire(m){
   m.querySelectorAll("[data-buddel]").forEach(b=>b.onclick=()=>{state.f.budget.items.splice(+b.dataset.buddel,1);render();});
   m.querySelectorAll("[data-tldel]").forEach(b=>b.onclick=()=>{state.f.timeline.rows.splice(+b.dataset.tldel,1);render();});
   const bAdd=$("btnBudAdd");if(bAdd)bAdd.onclick=()=>{state.f.budget.items.push({cat:"",desc:"",cost:""});render();};
+  // Drag-to-reorder for any [data-dragrow] within a [data-draglist] array.
+  let dragFrom=null;
+  m.querySelectorAll("[data-dragrow]").forEach(row=>{
+    row.ondragstart=(e)=>{dragFrom={list:row.dataset.draglist,i:+row.dataset.dragrow};e.dataTransfer.effectAllowed="move";};
+    row.ondragover=(e)=>{e.preventDefault();row.style.borderTop="2px solid var(--blue)";};
+    row.ondragleave=()=>{row.style.borderTop="";};
+    row.ondrop=(e)=>{
+      e.preventDefault();row.style.borderTop="";
+      const to=+row.dataset.dragrow,list=row.dataset.draglist;
+      if(!dragFrom||dragFrom.list!==list||dragFrom.i===to)return;
+      const arr=get(state.f,list);
+      const [moved]=arr.splice(dragFrom.i,1);
+      arr.splice(to,0,moved);
+      dragFrom=null;render();
+    };
+  });
   const tAdd=$("btnTlAdd");if(tAdd)tAdd.onclick=()=>{state.f.timeline.rows.push({label:"",marks:""});render();};
   const cMan=$("btnCompManual");if(cMan)cMan.onclick=()=>{state.f.comps.push({name:"",desc:"",salePrice:"",saleDate:"",method:"Deadline Private Treaty",landArea:"",nla:"",yield:"",photo:""});render();};
   const cPick=$("btnPickComp");if(cPick)cPick.onclick=()=>propertyPicker(p=>{
@@ -762,13 +792,16 @@ function buildReport(){
       ["timeline","Marketing timeline"],["digital","Digital marketing overview"],["why","Why Colliers?"],
       ["team","Colliers team"],["cvs","Curriculum vitae"],["refs","References"]].filter(([k])=>inc(k));
     const third=Math.ceil(tocPages.length/3);
-    const col=(items)=>`<div>${items.map(([,l])=>`<div style="border-top:.6pt solid var(--navy);padding:2mm 0 4mm"><div class="small" style="color:var(--ink2)">${esc(l)}</div></div>`).join("")}</div>`;
+    // Each entry: white label, with a thin centred white rule below it and
+    // generous spacing. (Page numbers aren't known at build time, so the
+    // emphasis is on the section names in white per the mark-up.)
+    const col=(items)=>`<div>${items.map(([,l])=>`<div style="padding:0 0 7mm"><div style="color:#fff;font-size:11pt;font-weight:600;margin-bottom:3.5mm">${esc(l)}</div><div style="width:70%;margin:0 auto;border-top:.5pt solid rgba(255,255,255,.55)"></div></div>`).join("")}</div>`;
     P.push(`<div class="pg navy"><div style="position:absolute;inset:0;background:var(--navy)"></div>
       <div style="position:absolute;top:26mm;left:18mm;right:18mm;color:#fff">
         <h1 class="sec" style="color:#fff">Contents</h1>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8mm;margin-top:8mm">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10mm;margin-top:12mm">
           ${col(tocPages.slice(0,third))}${col(tocPages.slice(third,2*third))}${col(tocPages.slice(2*third))}</div></div>
-      <div style="position:absolute;top:26mm;right:18mm">${logoBlock(assets)}</div>
+      <div style="position:absolute;top:24mm;right:18mm">${assets.logo?`<img src="${esc(assets.logo)}" style="max-width:40mm;max-height:16mm;object-fit:contain;background:#fff;padding:2mm;border-radius:1.5mm" />`:`<div style="background:#fff;padding:3mm 5mm;font-weight:700;color:var(--navy);font-size:13pt;border-radius:1.5mm">Colliers</div>`}</div>
     </div>`);
   }
 
@@ -1059,7 +1092,8 @@ $("btnGenerate").onclick=generate;
 (function(){
   const b=$("btnAuth");if(!b)return;
   function paint(){
-    if(auth.account){b.textContent=(auth.isAdmin?"Admin: ":"")+(auth.account.name||auth.account.username||"Signed in")+" · Sign out";b.onclick=signOut;}
+    if(auth.account){b.textContent=(auth.isAdmin?"Admin: ":"")+(auth.account.name||auth.account.username||"Signed in")+" · Sign out";b.onclick=signOut;
+      if(!auth.isAdmin&&auth.authError)b.title=auth.authError;}
     else{b.textContent="Sign in (admin)";b.onclick=signIn;}
   }
   window.__paintAuth=paint;paint();
@@ -1068,7 +1102,9 @@ $("btnNew").onclick=()=>{if(confirm("Start a new report? Unsaved changes will be
 $("reportPick").onchange=(e)=>openReport(e.target.value);
 (async function boot(){
   if(String(window.SUPABASE_URL).includes("YOUR_PROJECT")){$("main").innerHTML=`<section class="card"><h2>Setup needed</h2><p>Open this file and paste your Supabase URL and anon key into the CONFIG block at the top of the script (copy them from PropCMA's index.html), then run cma-schema.sql in the Supabase SQL Editor.</p></section>`;renderNav();return;}
-  try{await authInit();if(window.__paintAuth)window.__paintAuth();}catch(e){/* signed-out is fine */}
+  try{await authInit();if(window.__paintAuth)window.__paintAuth();
+    if(auth.account&&!auth.isAdmin&&auth.authError)toast(auth.authError);
+  }catch(e){toast("Sign-in error: "+e.message);}
   try{await loadAll();}catch(e){toast("Load failed: "+e.message);}
   // Pre-fill case studies from PropCMA's selected properties (?comps=id1,id2)
   const compIds=(new URLSearchParams(location.search).get("comps")||"").split(",").map(s=>s.trim()).filter(Boolean);
