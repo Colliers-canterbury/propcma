@@ -80,8 +80,8 @@ dialog .dlgBody{padding:18px 20px;max-height:70vh;overflow:auto}
 
 <script>
 // ── CONFIG — copy these two values from PropCMA's index.html ──
-window.SUPABASE_URL  = "https://mcurpiuaezilcnnuqvnm.supabase.co";
-window.SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdXJwaXVhZXppbGNubnVxdm5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MTA5MTEsImV4cCI6MjA5NjA4NjkxMX0.nPts4jRqwTm_CZsD2OUmO5ZgjTKIMk1-CLsNqRYCOxw";
+window.SUPABASE_URL  = "YOUR_PROJECT.supabase.co URL HERE";
+window.SUPABASE_ANON = "YOUR ANON KEY HERE";
 // Microsoft sign-in — same Azure app registration as the deal sheets.
 // Used only to identify the user so Template Content can be admin-gated.
 window.MSAL = {
@@ -115,25 +115,16 @@ async function authInit(){
   const resp=await app.handleRedirectPromise().catch(()=>null);
   auth.account=resp?.account||app.getAllAccounts()[0]||null;
   if(auth.account){
-    // Look up this user's role in app_users (populated by the deal sheets).
+    // Admin gate uses a dedicated cma_admins table (just oids) that the anon
+    // key is allowed to read — app_users is RLS-locked to the server API.
     const oid=auth.account.idTokenClaims?.oid||auth.account.localAccountId;
     const email=(auth.account.username||"").toLowerCase();
     auth.oid=oid;auth.email=email;
     try{
-      // Match on oid OR email, since app_users may key on either.
-      let row=null;
-      const byOid=await sb.from("app_users").select("*").eq("oid",oid).maybeSingle();
-      row=byOid.data;
-      if(!row&&email){
-        const byEmail=await sb.from("app_users").select("*").ilike("email",email).maybeSingle();
-        row=byEmail.data;
-      }
-      if(byOid.error)auth.authError="app_users read failed: "+byOid.error.message;
-      const role=(row?.role||"").toLowerCase();
-      const activeOk=row?("active"in row?!!row.active:true):false;
-      auth.isAdmin=!!row&&activeOk&&["office_admin","admin","accounts","manager"].includes(role);
-      if(row&&!auth.isAdmin)auth.authError=`Signed in, but role "${row.role||"(none)"}" isn't an admin role`;
-      else if(!row)auth.authError="Signed in, but your account isn't in app_users";
+      const{data,error}=await sb.from("cma_admins").select("oid").eq("oid",oid).maybeSingle();
+      if(error)auth.authError="Admin check couldn't read cma_admins: "+error.message;
+      auth.isAdmin=!!data;
+      if(!data&&!error)auth.authError="Signed in, but your account isn't an approved template admin";
     }catch(e){auth.isAdmin=false;auth.authError="Admin check failed: "+e.message;}
   }
 }
