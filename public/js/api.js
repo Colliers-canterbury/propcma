@@ -43,37 +43,65 @@
     returnToBroker: (id, note) => call(`/${id}/return`, { method: "POST", body: { note } }),
 
     // ---- attachments ----
-    async uploadAttachment(id, slot, file) {
+    //
+    // Files upload DIRECTLY to Supabase Storage, not through our own
+    // Vercel function — Vercel Functions cap request bodies at 4.5 MB
+    // at the platform level, well below what a real document (scanned
+    // agreements, valuations, etc.) can run to. Three steps:
+    //   1. ask our API for a signed upload URL (tiny JSON)
+    //   2. hand the file to the Supabase SDK, which uploads it straight
+    //      to Supabase Storage using that URL (never touches our function)
+    //   3. tell our API the upload succeeded, so it can record it (tiny JSON)
+    async _directUpload(id, { slot, description }, file) {
       const token = await window.DealSheetAuth.getToken();
-      const fd = new FormData();
-      fd.append("slot", slot);
-      fd.append("file", file);
-      const res = await fetch(`${cfg.apiBase}/api/deal-sheets/${id}/attachments`, {
+      const authHeaders = { Authorization: `Bearer ${token}` };
+
+      // 1) get a signed upload URL
+      const initParams = new URLSearchParams({ op: "init", fileName: file.name });
+      if (slot) initParams.set("slot", slot);
+      if (description != null) initParams.set("description", description);
+      const initRes = await fetch(
+        `${cfg.apiBase}/api/deal-sheets/${id}/attachments?${initParams}`,
+        { headers: authHeaders }
+      );
+      const init = await initRes.json().catch(() => null);
+      if (!initRes.ok) throw new Error(init?.error || `Could not start upload (${initRes.status})`);
+
+      // 2) upload the bytes straight to storage, via the Supabase SDK —
+      // a raw fetch PUT to the signed URL does NOT work on its own; the
+      // storage API still requires a valid project key on the request
+      // even with a signed token, and the SDK handles that correctly.
+      if (!window.DealSheetStorage) {
+        throw new Error("Storage isn't configured — check js/storage-config.js has your Supabase URL and anon key set.");
+      }
+      const { error: putErr } = await window.DealSheetStorage.storage
+        .from(window.DEAL_STORAGE_BUCKET)
+        .uploadToSignedUrl(init.path, init.token, file);
+      if (putErr) throw new Error(`Upload to storage failed: ${putErr.message}`);
+
+      // 3) record the attachment now that the file is in place
+      const confirmRes = await fetch(`${cfg.apiBase}/api/deal-sheets/${id}/attachments`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` }, // no content-type; browser sets multipart boundary
-        body: fd,
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slot: init.slot, kind: init.kind, path: init.path,
+          fileName: file.name, contentType: file.type, sizeBytes: file.size,
+          description,
+        }),
       });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(data?.error || `Upload failed (${res.status})`);
-      return data; // { slot, name, path, size }
+      const data = await confirmRes.json().catch(() => null);
+      if (!confirmRes.ok) throw new Error(data?.error || `Could not record upload (${confirmRes.status})`);
+      return data;
+    },
+    uploadAttachment(id, slot, file) {
+      return this._directUpload(id, { slot }, file);
     },
     removeAttachment: (id, slot) => call(`/${id}/attachments?slot=${encodeURIComponent(slot)}`, { method: "DELETE" }),
 
     // Accounts: an extra supporting document with a required description,
-    // rather than a fixed checklist slot. Same endpoint, no slot sent.
-    async uploadExtraAttachment(id, description, file) {
-      const token = await window.DealSheetAuth.getToken();
-      const fd = new FormData();
-      fd.append("description", description);
-      fd.append("file", file);
-      const res = await fetch(`${cfg.apiBase}/api/deal-sheets/${id}/attachments`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: fd,
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(data?.error || `Upload failed (${res.status})`);
-      return data; // { id, slot, name, description, path, size }
+    // rather than a fixed checklist slot.
+    uploadExtraAttachment(id, description, file) {
+      return this._directUpload(id, { description }, file);
     },
 
     // ---- reference data / settings ----
