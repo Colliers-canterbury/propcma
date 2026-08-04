@@ -14,6 +14,11 @@
   <script src="js/msal-browser.min.js"></script>
   <script src="js/config.js"></script>
   <script src="js/auth.js"></script>
+  <!-- Supabase browser client — used only for direct-to-storage file
+       uploads, bypassing Vercel's 4.5MB function body limit. See
+       js/storage-config.js for the two values you need to fill in. -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="js/storage-config.js"></script>
   <script src="js/api.js"></script>
   <script src="js/accounts.js"></script>
 </body>
