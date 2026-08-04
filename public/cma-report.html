@@ -100,7 +100,8 @@ async function authInit(){
     auth:{clientId:window.MSAL.clientId,authority:`https://login.microsoftonline.com/${window.MSAL.tenantId}`,redirectUri:location.href.split(/[?#]/)[0]},
     cache:{cacheLocation:"localStorage"},
   });
-  await msalApp.initialize();
+  // initialize() exists in MSAL 3.x; guard so 2.x doesn't throw.
+  if(typeof msalApp.initialize==="function")await msalApp.initialize();
   const resp=await msalApp.handleRedirectPromise().catch(()=>null);
   auth.account=resp?.account||msalApp.getAllAccounts()[0]||null;
   if(auth.account){
@@ -1102,10 +1103,16 @@ $("btnNew").onclick=()=>{if(confirm("Start a new report? Unsaved changes will be
 $("reportPick").onchange=(e)=>openReport(e.target.value);
 (async function boot(){
   if(String(window.SUPABASE_URL).includes("YOUR_PROJECT")){$("main").innerHTML=`<section class="card"><h2>Setup needed</h2><p>Open this file and paste your Supabase URL and anon key into the CONFIG block at the top of the script (copy them from PropCMA's index.html), then run cma-schema.sql in the Supabase SQL Editor.</p></section>`;renderNav();return;}
-  try{await authInit();if(window.__paintAuth)window.__paintAuth();
-    if(auth.account&&!auth.isAdmin&&auth.authError)toast(auth.authError);
-  }catch(e){toast("Sign-in error: "+e.message);}
+  // Render the UI first so the app always works, even if auth or data load fails.
   try{await loadAll();}catch(e){toast("Load failed: "+e.message);}
+  render();
+  // Auth runs in the background and never blocks the interface. If it grants
+  // admin, we just re-render the nav to reveal the Office library.
+  authInit().then(()=>{
+    if(window.__paintAuth)window.__paintAuth();
+    if(auth.isAdmin)renderNav();
+    if(auth.account&&!auth.isAdmin&&auth.authError)toast(auth.authError);
+  }).catch(e=>toast("Sign-in unavailable: "+e.message));
   // Pre-fill case studies from PropCMA's selected properties (?comps=id1,id2)
   const compIds=(new URLSearchParams(location.search).get("comps")||"").split(",").map(s=>s.trim()).filter(Boolean);
   if(compIds.length&&!state.reportId){
@@ -1119,8 +1126,8 @@ $("reportPick").onchange=(e)=>openReport(e.target.value);
       if(state.f.comps.length){state.section="comps";toast(`${state.f.comps.length} case stud${state.f.comps.length===1?"y":"ies"} pre-filled from PropCMA — edit as needed`);}
       else toast("Couldn't load the selected properties — add them with the button");
     }catch(e){toast("Case study pre-fill failed: "+e.message);}
+    render(); // re-render to show the pre-filled case studies
   }
-  render();
 })();
 </script>
 </body>
