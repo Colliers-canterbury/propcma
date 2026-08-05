@@ -8,6 +8,39 @@
   const num = (v) => { const n = parseFloat(String(v ?? "").replace(/[$,\s%]/g, "")); return isNaN(n) ? 0 : n; };
   const fmt = (n) => Number(n || 0).toLocaleString("en-NZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+  // Live comma-formatting for $ fields, as the user types. Preserves the
+  // caret position by digit-count rather than raw character offset, so
+  // inserting/removing a comma doesn't visibly move the cursor.
+  function formatMoneyLive(el) {
+    const raw = el.value;
+    const caret = el.selectionStart ?? raw.length;
+    // Count digits AND the decimal point (never commas) up to the caret —
+    // this survives reformatting even when the caret sits right after a
+    // decimal point that hasn't had a digit typed after it yet.
+    const meaningfulBefore = (raw.slice(0, caret).match(/[\d.]/g) || []).length;
+
+    let clean = raw.replace(/[^\d.]/g, "");
+    const firstDot = clean.indexOf(".");
+    if (firstDot !== -1) clean = clean.slice(0, firstDot + 1) + clean.slice(firstDot + 1).replace(/\./g, "");
+    let [intPart, decPart] = clean.split(".");
+    if (decPart != null) decPart = decPart.slice(0, 2);
+    intPart = (intPart || "").replace(/^0+(?=\d)/, "");
+
+    if (!intPart && decPart == null) { el.value = ""; return; }
+    const withCommas = intPart ? Number(intPart).toLocaleString("en-NZ") : "0";
+    el.value = decPart != null ? `${withCommas}.${decPart}` : withCommas;
+
+    let seen = 0, pos = el.value.length;
+    if (meaningfulBefore === 0) { pos = 0; }
+    else {
+      for (let i = 0; i < el.value.length; i++) {
+        if (/[\d.]/.test(el.value[i])) seen++;
+        if (seen === meaningfulBefore) { pos = i + 1; break; }
+      }
+    }
+    el.setSelectionRange(pos, pos);
+  }
+
   const DIVISIONS = ["Industrial","Office","Retail","Investment Sales","Land","Rural & Agribusiness","Other"];
   const DEAL_TYPES = ["Relocation","Expansion","Assignment","Renegotiation"];
   let BROKERS = [];
@@ -40,6 +73,7 @@
     triedSubmit: false,
     resumed: false,
     returnNote: "",
+    dealStatus: "draft", // a brand-new, never-saved sheet is implicitly a draft
     f: {
       ownership: { salespeople: [], division: "Industrial", office: "Christchurch" },
       property: { address:"", buildingName:"", propertyType:"", level:"", unit:"", city:"Christchurch" },
@@ -68,8 +102,10 @@
       tenantSource: "", tenantSourceOther: "", tenantReferralWho: "",
       confidential: false,
       checklist: { agencyAgreement:false, unconditionalConfirmation:false, leaseValueConfirmation:false,
-                   marketingReport:false, amlComplete:false, leaseDeed:false, appraisals:false },
+                   marketingReport:false, amlComplete:false, leaseDeed:false, appraisals:false,
+                   executedAgreement:false },
       attachments: {},
+      extraAttachments: [], // "Other Documents" — free-form, description required, draft-only
     },
   };
 
@@ -185,9 +221,9 @@
 
   // ---------- builders ----------
   const txt = (path, label, opts = {}) => {
-    const { ph = "", type = "text", span = 1, req = false } = opts;
+    const { ph = "", type = "text", span = 1, req = false, money = false } = opts;
     return `<label class="fld span${span}"><span class="lbl">${label}${req ? '<em class="req">*</em>' : ''}</span>
-      <input type="${type}" data-path="${path}" value="${esc(get(path))}" placeholder="${esc(ph)}" /></label>`;
+      <input type="${type}" ${money ? 'data-money' : ''} data-path="${path}" value="${esc(get(path))}" placeholder="${esc(ph)}" /></label>`;
   };
   const sel = (path, label, options, span = 1) =>
     `<label class="fld span${span}"><span class="lbl">${label}</span>
@@ -219,6 +255,16 @@
       <span class="upProgress hidden" data-slot="${slotKey}">Uploading…</span></div>`;
   }
 
+  function extraAttachmentsList() {
+    const items = state.f.extraAttachments || [];
+    if (!items.length) return `<p class="dim" style="margin:4px 0 10px">None added yet.</p>`;
+    return `<ul class="attachList extraList">${items.map((a) => `<li>
+        <span>📎 <strong>${esc(a.description || "(no description)")}</strong> — ${esc(a.name)}</span>
+        <span class="attachBtns">
+          ${state.dealStatus === "draft" ? `<button type="button" class="rmBtn" data-extra-remove="${esc(a.slot)}">Remove</button>` : ""}
+        </span></li>`).join("")}</ul>`;
+  }
+
   // ---------- render ----------
   function render() {
     const d = derive();
@@ -241,14 +287,14 @@
         return `<tr>
           <td>${l.label}</td>
           <td colspan="2"><input class="cell" data-path="rental.${l.key}.desc" value="${esc(line.desc)}" placeholder="Description (e.g. signage, storage)" /></td>
-          <td class="r"><input class="cell r" data-recalc data-path="rental.${l.key}.total" value="${esc(line.total)}" placeholder="0.00" /></td>
+          <td class="r"><input class="cell r" data-money data-recalc data-path="rental.${l.key}.total" value="${esc(line.total)}" placeholder="0.00" /></td>
         </tr>`;
       }
       return `<tr>
         <td>${l.label}</td>
         <td>${l.unit ? `<input class="cell" data-recalc data-path="rental.${l.key}.qty" value="${esc(line.qty)}" placeholder="${l.unit}" />` : ""}</td>
-        <td>${l.rateLabel ? `<input class="cell" data-recalc data-path="rental.${l.key}.rate" value="${esc(line.rate)}" placeholder="${l.rateLabel}" />` : ""}</td>
-        <td class="r"><input class="cell r" data-recalc data-path="rental.${l.key}.total" value="${esc(line.total)}" placeholder="${showCalc || "0.00"}" /></td>
+        <td>${l.rateLabel ? `<input class="cell" data-money data-recalc data-path="rental.${l.key}.rate" value="${esc(line.rate)}" placeholder="${l.rateLabel}" />` : ""}</td>
+        <td class="r"><input class="cell r" data-money data-recalc data-path="rental.${l.key}.total" value="${esc(line.total)}" placeholder="${showCalc || "0.00"}" /></td>
       </tr>`;
     }).join("");
 
@@ -260,13 +306,13 @@
         ${dealBrokers.map((b) => `<option value="${esc(b.name)}" ${s.person===b.name?"selected":""}>${esc(b.name)}</option>`).join("")}
         </select></td>
       <td><input class="cell" data-recalc data-path="splits.${i}.pct" value="${esc(s.pct)}" placeholder="%" ${num(s.fixed)>0?"disabled":""} /></td>
-      <td><input class="cell r" data-recalc data-path="splits.${i}.fixed" value="${esc(s.fixed)}" placeholder="fixed $" /></td>
+      <td><input class="cell r" data-money data-recalc data-path="splits.${i}.fixed" value="${esc(s.fixed)}" placeholder="fixed $" /></td>
       <td class="r mono" id="splitAmt${i}">${(num(s.fixed)||num(s.pct))?fmt(d.tpAmount(s,d.internalPool)):"—"}</td></tr>`).join("");
 
     const tpRows = f.thirdParty.map((s,i) => `<tr>
       <td><input class="cell" data-path="thirdParty.${i}.name" value="${esc(s.name)}" placeholder="Company / office" /></td>
       <td><input class="cell" data-recalc data-path="thirdParty.${i}.pct" value="${esc(s.pct)}" placeholder="%" ${num(s.fixed)>0?"disabled":""} /></td>
-      <td><input class="cell r" data-recalc data-path="thirdParty.${i}.fixed" value="${esc(s.fixed)}" placeholder="fixed $" /></td>
+      <td><input class="cell r" data-money data-recalc data-path="thirdParty.${i}.fixed" value="${esc(s.fixed)}" placeholder="fixed $" /></td>
       <td class="r mono" id="tpAmt${i}">${(num(s.fixed)||num(s.pct))?fmt(d.tpAmount(s,d.commissionBase)):"—"}</td></tr>`).join("");
 
     $("app").innerHTML = `
@@ -330,7 +376,7 @@
           ${section("7","Trust deposit","Complete only if a deposit is paid into the Colliers trust account.",`
             ${chk("depositToTrust","A deposit will be paid into the trust account")}
             ${f.depositToTrust ? `<div class="grid" style="margin-top:10px">
-                ${txt("deposit.amount","Deposit amount (inc GST)",{ph:"e.g. $5,000 inc GST"})}${txt("deposit.dateReceived","Date received",{type:"date"})}
+                ${txt("deposit.amount","Deposit amount (inc GST)",{ph:"e.g. $5,000 inc GST",money:true})}${txt("deposit.dateReceived","Date received",{type:"date"})}
                 ${txt("deposit.receiptNo","Trust receipt no.")}</div>
                 <div class="authRow" style="margin-top:8px">${chk("deposit.earlyRelease","Early release required")}
                 ${f.deposit.earlyRelease?`<div class="authGrid"><span class="authLbl">Authorisation forms</span>
@@ -343,10 +389,10 @@
               <tbody>${rentalRows}</tbody>
               <tfoot>
                 <tr class="sub"><td colspan="3">Total Net Rental (excl GST)</td>
-                  <td class="r"><input class="cell r mono" data-recalc data-path="rentalOverride.net" value="${f.rentalOverride.net!==""?esc(f.rentalOverride.net):fmt(d.calcNet)}" placeholder="0.00" id="netRentalCell" /></td></tr>
-                <tr><td colspan="3">Plus Opex</td><td class="r"><input class="cell r" data-recalc data-path="rental.opex" value="${esc(f.rental.opex)}" placeholder="0.00" /></td></tr>
+                  <td class="r"><input class="cell r mono" data-money data-recalc data-path="rentalOverride.net" value="${f.rentalOverride.net!==""?esc(f.rentalOverride.net):fmt(d.calcNet)}" placeholder="0.00" id="netRentalCell" /></td></tr>
+                <tr><td colspan="3">Plus Opex</td><td class="r"><input class="cell r" data-money data-recalc data-path="rental.opex" value="${esc(f.rental.opex)}" placeholder="0.00" /></td></tr>
                 <tr class="total"><td colspan="3">Total Gross Rental (excl GST) p.a.</td>
-                  <td class="r"><input class="cell r mono" data-recalc data-path="rentalOverride.gross" value="${f.rentalOverride.gross!==""?esc(f.rentalOverride.gross):fmt(d.calcGross)}" placeholder="0.00" id="grossRentalCell" /></td></tr>
+                  <td class="r"><input class="cell r mono" data-money data-recalc data-path="rentalOverride.gross" value="${f.rentalOverride.gross!==""?esc(f.rentalOverride.gross):fmt(d.calcGross)}" placeholder="0.00" id="grossRentalCell" /></td></tr>
               </tfoot></table>
               ${f.rentalOverride.net!==""||f.rentalOverride.gross!==""?`<p class="note" style="margin-top:6px">Manual total in use. Calculated: net $${fmt(d.calcNet)}, gross $${fmt(d.calcGross)}. Clear the field to revert.</p>`:""}`)}
 
@@ -355,19 +401,19 @@
               <tbody>
                 <tr><td>Commission (per scale of fees)</td>
                   <td><input class="cell" data-path="comm.feeDesc" value="${esc(f.comm.feeDesc)}" placeholder="Description (optional)" /></td>
-                  <td class="r"><input class="cell r" data-recalc data-path="comm.fee" value="${esc(f.comm.fee)}" placeholder="0.00" /></td></tr>
+                  <td class="r"><input class="cell r" data-money data-recalc data-path="comm.fee" value="${esc(f.comm.fee)}" placeholder="0.00" /></td></tr>
                 <tr><td>Other / consultancy</td>
                   <td><input class="cell" data-path="comm.otherDesc" value="${esc(f.comm.otherDesc)}" placeholder="Please specify" /></td>
-                  <td class="r"><input class="cell r" data-recalc data-path="comm.otherFee" value="${esc(f.comm.otherFee)}" placeholder="0.00" /></td></tr>
+                  <td class="r"><input class="cell r" data-money data-recalc data-path="comm.otherFee" value="${esc(f.comm.otherFee)}" placeholder="0.00" /></td></tr>
                 <tr><td colspan="2"><div class="feeRow">
                   <label class="chk"><input type="checkbox" id="feeAdmin" ${f.comm.adminFee?"checked":""} /><span>Administration fee ($500)</span></label>
                   </div></td><td class="r mono" id="adminFeeCell">${fmt(d.adminFee)}</td></tr>
                 <tr><td>Recover marketing costs</td>
                   <td><input class="cell" data-path="comm.recoverMarketingDesc" value="${esc(f.comm.recoverMarketingDesc)}" placeholder="Description (optional)" /></td>
-                  <td class="r"><input class="cell r" data-recalc data-path="comm.recoverMarketing" value="${esc(f.comm.recoverMarketing)}" placeholder="0.00" /></td></tr>
+                  <td class="r"><input class="cell r" data-money data-recalc data-path="comm.recoverMarketing" value="${esc(f.comm.recoverMarketing)}" placeholder="0.00" /></td></tr>
                 <tr><td>Recover other costs</td>
                   <td><input class="cell" data-path="comm.recoverOtherDesc" value="${esc(f.comm.recoverOtherDesc)}" placeholder="Please specify" /></td>
-                  <td class="r"><input class="cell r" data-recalc data-path="comm.recoverOther" value="${esc(f.comm.recoverOther)}" placeholder="0.00" /></td></tr>
+                  <td class="r"><input class="cell r" data-money data-recalc data-path="comm.recoverOther" value="${esc(f.comm.recoverOther)}" placeholder="0.00" /></td></tr>
                 <tr class="total"><td colspan="2">Total amount to be invoiced (excl GST)</td><td class="r mono" id="totalInvoiceCell">${fmt(d.totalInvoice)}</td></tr>
               </tbody></table>`)}
 
@@ -389,12 +435,24 @@
             <div class="checkRow">${chk("checklist.agencyAgreement","Signed agency agreement attached")}${uploadSlot("agencyAgreement","")}</div>
             <div class="checkRow">${chk("checklist.unconditionalConfirmation","Confirmation of unconditional attached")}${uploadSlot("unconditionalConfirmation","")}</div>
             <div class="checkRow">${chk("checklist.leaseValueConfirmation","Confirmation of lease value")}${uploadSlot("leaseValueConfirmation","e.g. schedule from the lease agreement")}</div>
-            <div class="checkRow">${chk("checklist.marketingReport","Marketing campaign report attached (optional)")}${uploadSlot("marketingReport","")}</div>
             <div class="checkRow">${chk("checklist.amlComplete","AML complete")}${uploadSlot("amlComplete","")}</div>
             <div class="checkRow">${chk("checklist.leaseDeed","Lease deed attached")}${uploadSlot("leaseDeed","")}</div>
             ${f.depositToTrust ? `<div class="checkRow">${chk("checklist.appraisals","Appraisals (trust deals) (optional)")}${uploadSlot("appraisals","")}</div>` : ""}`)}
 
-          ${section("13","Sign-off","",`<div class="grid">
+          ${section("13","Other Documents","Not mandatory — attach anything else useful for the file. Available while this deal sheet is still a draft.",`
+            <div class="checkRow">${chk("checklist.marketingReport","Marketing campaign report attached (optional)")}${uploadSlot("marketingReport","")}</div>
+            <div class="checkRow">${chk("checklist.executedAgreement","Executed lease agreement attached (optional)")}${uploadSlot("executedAgreement","")}</div>
+            <h3 class="subHead" style="margin-top:14px">Any other document</h3>
+            ${extraAttachmentsList()}
+            ${state.dealStatus === "draft" ? `<div class="extraUpload">
+              <input id="extraDesc" placeholder="Description for the file (required)" />
+              <label class="upBtn">Choose file<input type="file" id="extraFile" hidden /></label>
+              <span id="extraFileName" class="dim"></span>
+              <button id="extraUploadBtn" class="miniBtn" type="button" disabled>Add document</button>
+              <span id="extraUploadStatus" class="miniStatus"></span>
+            </div>` : `<p class="note">Other documents can only be added while this deal sheet is a draft.</p>`}`)}
+
+          ${section("14","Sign-off","",`<div class="grid">
             <label class="fld span2"><span class="lbl">Prepared by</span>
               <input disabled value="${esc(state.userName || "")}" /></label>
             <label class="fld"><span class="lbl">Date</span><input disabled value="${new Date().toLocaleDateString("en-NZ")}" /></label></div>
@@ -436,7 +494,10 @@
       } else if (el.tagName === "SELECT") {
         el.onchange = () => { set(path, el.value); scheduleAutosave(); render(); };
       } else if (el.hasAttribute("data-recalc")) {
-        el.oninput = () => { set(path, el.value); scheduleAutosave(); refreshDerived(); };
+        el.oninput = () => {
+          if (el.hasAttribute("data-money")) formatMoneyLive(el);
+          set(path, el.value); scheduleAutosave(); refreshDerived();
+        };
         // Money fields (right-aligned) reformat with thousands separators
         // when the user leaves the field — not while typing, to avoid
         // cursor jumps. Net/gross override fields are handled separately.
@@ -447,7 +508,10 @@
           };
         }
       } else {
-        el.oninput = () => { set(path, el.value); scheduleAutosave(); };
+        el.oninput = () => {
+          if (el.hasAttribute("data-money")) formatMoneyLive(el);
+          set(path, el.value); scheduleAutosave();
+        };
       }
     });
 
@@ -584,6 +648,56 @@
         scheduleAutosave(); render();
       };
     });
+
+    // ---- Other Documents: free-form, description required, draft-only ----
+    let pendingExtraFile = null;
+    const descEl = $("extraDesc"), fileBtn = $("extraFile"),
+          fileNameEl = $("extraFileName"), uploadBtn = $("extraUploadBtn"),
+          statusEl = $("extraUploadStatus");
+    const updateExtraReady = () => {
+      if (uploadBtn) uploadBtn.disabled = !(pendingExtraFile && descEl && descEl.value.trim());
+    };
+    if (fileBtn) fileBtn.onchange = () => {
+      pendingExtraFile = fileBtn.files[0] || null;
+      if (fileNameEl) fileNameEl.textContent = pendingExtraFile ? pendingExtraFile.name : "";
+      updateExtraReady();
+    };
+    if (descEl) descEl.oninput = updateExtraReady;
+    if (uploadBtn) uploadBtn.onclick = async () => {
+      const description = descEl.value.trim();
+      if (!description || !pendingExtraFile) return;
+      if (!state.currentId) {
+        try { const r = await api.saveDraft(state.f, null, "lease"); state.currentId = r.id; }
+        catch (e) { alert("Couldn't start a draft to attach to: " + e.message); return; }
+      }
+      uploadBtn.disabled = true;
+      if (statusEl) statusEl.textContent = "Uploading…";
+      try {
+        const r = await api.uploadExtraAttachment(state.currentId, description, pendingExtraFile);
+        state.f.extraAttachments = state.f.extraAttachments || [];
+        state.f.extraAttachments.push({ slot: r.slot, description, name: r.name, size: r.size });
+        scheduleAutosave(); render();
+      } catch (e) {
+        if (statusEl) statusEl.textContent = "Upload failed";
+        uploadBtn.disabled = false;
+        alert("Upload failed: " + e.message);
+      }
+    };
+    $("app").querySelectorAll("[data-extra-remove]").forEach((btn) => {
+      btn.onclick = async () => {
+        const slot = btn.dataset.extraRemove;
+        if (!confirm("Remove this document? This cannot be undone.")) return;
+        btn.disabled = true; btn.textContent = "Removing…";
+        try {
+          await api.removeAttachment(state.currentId, slot);
+          state.f.extraAttachments = (state.f.extraAttachments || []).filter((a) => a.slot !== slot);
+          scheduleAutosave(); render();
+        } catch (e) {
+          alert("Could not remove: " + e.message);
+          btn.disabled = false; btn.textContent = "Remove";
+        }
+      };
+    });
   }
 
   // ---------- print ----------
@@ -669,6 +783,7 @@
           return;
         }
         state.currentId = deal.id;
+        state.dealStatus = deal.status;
         state.f = Object.assign(state.f, deal.form || {});
         state.returnNote = (deal.events || []).filter((e) => (e.note||"").startsWith("Returned to broker:")).pop()?.note || "";
       } catch (e) {

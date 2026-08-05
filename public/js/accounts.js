@@ -9,14 +9,15 @@
   const fmtSize = (b) => { b = Number(b||0); return b < 1024 ? b+" B" : b < 1048576 ? (b/1024).toFixed(0)+" KB" : (b/1048576).toFixed(1)+" MB"; };
 
   const META = {
-    submitted:  { label: "Submitted",  cls: "sub" },
-    processing: { label: "Processing", cls: "proc" },
-    invoiced:   { label: "Invoiced",   cls: "inv" },
-    rejected:   { label: "Returned",   cls: "rej" },
+    submitted:        { label: "Submitted",         cls: "sub" },
+    invoiced:         { label: "Invoiced",           cls: "proc" },
+    deposit_received: { label: "Deposit Received",   cls: "dep" },
+    complete:         { label: "Complete",           cls: "inv" },
+    rejected:         { label: "Returned",           cls: "rej" },
   };
 
   const state = { tab: "queue", queue: [], completed: [], drafts: [], selectedId: null, deal: null,
-    filter: "all", note: "", pendingNums: {},
+    filter: "all", note: "", completeComment: "", pendingNums: {},
     brokers: [], admins: [], userRole: "" };
 
   async function loadQueue() {
@@ -38,6 +39,7 @@
     state.deal = await api.get(id);
     state.pendingNums = { dealNo: state.deal.deal_no || "" };
     state.note = "";
+    state.completeComment = "";
   }
 
   function counts() {
@@ -76,7 +78,7 @@
 
   function render() {
     const showingDrafts = state.filter === "drafts";
-    const queueItems = state.queue.filter((d) => d.status !== "invoiced")
+    const queueItems = state.queue.filter((d) => d.status !== "complete")
       .filter((d) => state.filter === "all" || d.status === state.filter);
     // "All" shows the active queue first, then drafts at the bottom.
     // "Drafts" shows only drafts.
@@ -94,7 +96,7 @@
       </header>
       <div class="tabs">
         <button class="tab ${state.tab==="queue"?"on":""}" data-tab="queue">Queue${
-          state.queue.filter((d)=>d.status!=="invoiced").length?`<span class="badge">${state.queue.filter((d)=>d.status!=="invoiced").length}</span>`:""}</button>
+          state.queue.filter((d)=>d.status!=="complete").length?`<span class="badge">${state.queue.filter((d)=>d.status!=="complete").length}</span>`:""}</button>
         <button class="tab ${state.tab==="completed"?"on":""}" data-tab="completed">Completed</button>
         <button class="tab ${state.tab==="settings"?"on":""}" data-tab="settings">Settings</button>
       </div>
@@ -102,7 +104,7 @@
       <div class="layout accounts">
         <aside class="queue">
           <div class="filters">
-            ${["all","submitted","processing","rejected"].map((s) =>
+            ${["all","submitted","invoiced","deposit_received","rejected"].map((s) =>
               `<button class="fbtn ${state.filter===s?"on":""}" data-filter="${s}">${s==="all"?"All":META[s].label}</button>`).join("")}
             <button class="fbtn ${state.filter==="drafts"?"on":""}" data-filter="drafts">Drafts${state.drafts.length?` (${state.drafts.length})`:""}</button>
           </div>
@@ -147,7 +149,7 @@
 
   // ---------- completed ----------
   async function loadCompleted() {
-    state.completed = await api.getQueue("invoiced");
+    state.completed = await api.getQueue("complete");
   }
 
   function renderCompleted() {
@@ -330,18 +332,32 @@
 
         <section class="panel actions">
           <h3>Process</h3>
-          <label class="fld"><span class="lbl">Deal no.</span>
-            <input id="dealNo" value="${esc(state.pendingNums.dealNo)}" ${d.status!=="submitted"?"disabled":""} placeholder="e.g. D-3073" /></label>
 
           ${d.status==="submitted" ? `
-            <button class="primary" id="processBtn" ${!checklistOk?"disabled":""}>Assign number &amp; start processing</button>
+            <button class="primary" id="invoiceClientBtn" ${!checklistOk?"disabled":""}>Invoiced Client</button>
             ${!checklistOk?`<p class="warn">Checklist incomplete — return to broker.</p>`:""}
             <div class="returnBox">
               <textarea id="returnNote" rows="2" placeholder="Reason for returning to broker…">${esc(state.note)}</textarea>
               <button class="ghost" id="returnBtn">Return to broker</button>
             </div>` : ""}
-          ${d.status==="processing" ? `<button class="primary" id="invoiceBtn">Mark invoiced — commission approved</button>` : ""}
-          ${d.status==="invoiced" ? `<p class="doneNote">✓ Invoiced. Deal ${esc(d.deal_no)}.</p>` : ""}
+
+          ${d.status==="invoiced" ? `
+            <label class="fld"><span class="lbl">Deal no.</span>
+              <input id="dealNo" value="${esc(state.pendingNums.dealNo)}" placeholder="e.g. D-3073" /></label>
+            <button class="primary" id="assignDealNoBtn">Assign Deal Number</button>
+            <div class="returnBox">
+              <textarea id="returnNote" rows="2" placeholder="Reason for returning to broker…">${esc(state.note)}</textarea>
+              <button class="ghost" id="returnBtn">Return to broker</button>
+            </div>` : ""}
+
+          ${d.status==="deposit_received" ? `
+            <label class="fld"><span class="lbl">Comments <span class="dim">(optional — visible to the office admin)</span></span>
+              <textarea id="completeComment" rows="3" placeholder="Any notes for the office admin…">${esc(state.completeComment)}</textarea></label>
+            <button class="primary" id="completeBtn">Mark as complete</button>` : ""}
+
+          ${d.status==="complete" ? `<p class="doneNote">✓ Complete. Deal ${esc(d.deal_no)}.</p>
+            ${d.accounts_comment ? `<p class="note">Comment: ${esc(d.accounts_comment)}</p>` : ""}` : ""}
+
           ${d.status==="rejected" ? `<p class="warn">Returned to broker — awaiting resubmission.</p>` : ""}
 
           <h3 style="margin-top:18px">History</h3>
@@ -351,16 +367,21 @@
       </div>`;
 
     const dealNo = $("dealNo");
-    if (dealNo) dealNo.oninput = () => { state.pendingNums.dealNo = dealNo.value; toggleProcess(); };
+    if (dealNo) dealNo.oninput = () => {
+      state.pendingNums.dealNo = dealNo.value;
+      const ab = $("assignDealNoBtn"); if (ab) ab.disabled = !dealNo.value.trim();
+    };
+    const completeCommentEl = $("completeComment");
+    if (completeCommentEl) completeCommentEl.oninput = () => { state.completeComment = completeCommentEl.value; };
     const note = $("returnNote");
     if (note) note.oninput = () => { state.note = note.value; const rb = $("returnBtn"); if (rb) rb.disabled = !note.value.trim(); };
 
     const prb = $("printDeal");
     if (prb) prb.onclick = () => api.openPrint(state.deal.id);
 
-    const pb = $("processBtn");
-    if (pb) { toggleProcess(); pb.onclick = doProcess; }
-    const ib = $("invoiceBtn"); if (ib) ib.onclick = doInvoice;
+    const icb = $("invoiceClientBtn"); if (icb) icb.onclick = doInvoiceClient;
+    const ab = $("assignDealNoBtn"); if (ab) { ab.disabled = !state.pendingNums.dealNo.trim(); ab.onclick = doAssignDealNumber; }
+    const cb = $("completeBtn"); if (cb) cb.onclick = doComplete;
     const rb = $("returnBtn"); if (rb) { rb.disabled = !state.note.trim(); rb.onclick = doReturn; }
 
     const rSave = $("receiptSave");
@@ -437,25 +458,21 @@
     });
   }
 
-  function toggleProcess() {
-    const prb = $("printDeal");
-    if (prb) prb.onclick = () => api.openPrint(state.deal.id);
-
-    const pb = $("processBtn"); if (!pb) return;
-    const checks = checklistOf(state.deal);
-    const ok = checks.every((c) => c.ok) && state.pendingNums.dealNo.trim();
-    pb.disabled = !ok;
+  async function doInvoiceClient() {
+    try { await api.invoiceClient(state.deal.id); await refresh(); }
+    catch (e) { alert("Could not invoice: " + e.message); }
   }
-
-  async function doProcess() {
+  async function doAssignDealNumber() {
     try {
-      await api.process(state.deal.id, { dealNo: state.pendingNums.dealNo.trim() });
+      await api.assignDealNumber(state.deal.id, state.pendingNums.dealNo.trim());
       await refresh();
-    } catch (e) { alert("Could not process: " + e.message); }
+    } catch (e) { alert("Could not assign deal number: " + e.message); }
   }
-  async function doInvoice() {
-    try { await api.invoice(state.deal.id); await refresh(); }
-    catch (e) { alert("Could not mark invoiced: " + e.message); }
+  async function doComplete() {
+    try {
+      await api.markComplete(state.deal.id, state.completeComment.trim());
+      await refresh();
+    } catch (e) { alert("Could not mark complete: " + e.message); }
   }
   async function doReturn() {
     if (!state.note.trim()) return;

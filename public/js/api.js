@@ -37,9 +37,10 @@
     deleteDeal: (id) => call(`/${id}`, { method: "DELETE" }),
     getQueue: (status) => call(`?scope=queue${status ? `&status=${status}` : ""}`),
     getDrafts: () => call(`?scope=drafts`),
-    process: (id, nums) => call(`/${id}/process`, { method: "POST", body: nums }),
+    invoiceClient: (id) => call(`/${id}/invoice-client`, { method: "POST" }),
+    assignDealNumber: (id, dealNo) => call(`/${id}/assign-deal-number`, { method: "POST", body: { dealNo } }),
+    markComplete: (id, comment) => call(`/${id}/complete`, { method: "POST", body: { comment } }),
     setReceipt: (id, receiptNo) => call(`/${id}/receipt`, { method: "POST", body: { receiptNo } }),
-    invoice: (id) => call(`/${id}/invoice`, { method: "POST" }),
     returnToBroker: (id, note) => call(`/${id}/return`, { method: "POST", body: { note } }),
 
     // ---- attachments ----
@@ -234,16 +235,22 @@
       d.form = d.form || {}; d.form.deposit = { ...(d.form.deposit || {}), receiptNo };
       return delay({ ok: true, receiptNo });
     },
-    process: (id, { dealNo }) => {
-      const d = findDeal(id);
-      d.status = "processing"; d.deal_no = dealNo;
-      d.events.push({ created_at: new Date().toISOString(), note: `Deal ${dealNo} assigned`, to_status: "processing" });
-      return delay({ ok: true });
-    },
-    invoice: (id) => {
+    invoiceClient: (id) => {
       const d = findDeal(id);
       d.status = "invoiced";
-      d.events.push({ created_at: new Date().toISOString(), note: "Invoice raised — commission approved", to_status: "invoiced" });
+      d.events.push({ created_at: new Date().toISOString(), note: "Invoiced client", to_status: "invoiced" });
+      return delay({ ok: true });
+    },
+    assignDealNumber: (id, dealNo) => {
+      const d = findDeal(id);
+      d.status = "deposit_received"; d.deal_no = dealNo;
+      d.events.push({ created_at: new Date().toISOString(), note: `Deal ${dealNo} assigned`, to_status: "deposit_received" });
+      return delay({ ok: true });
+    },
+    markComplete: (id, comment) => {
+      const d = findDeal(id);
+      d.status = "complete"; d.accounts_comment = comment || null;
+      d.events.push({ created_at: new Date().toISOString(), note: comment ? `Marked complete — ${comment}` : "Marked complete", to_status: "complete" });
       return delay({ ok: true });
     },
     returnToBroker: (id, note) => {

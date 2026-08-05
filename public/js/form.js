@@ -9,6 +9,39 @@
   const num = (v) => { const n = parseFloat(String(v ?? "").replace(/[$,\s]/g, "")); return isNaN(n) ? 0 : n; };
   const fmt = (n) => n.toLocaleString("en-NZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+  // Live comma-formatting for $ fields, as the user types. Preserves the
+  // caret position by digit-count rather than raw character offset, so
+  // inserting/removing a comma doesn't visibly move the cursor.
+  function formatMoneyLive(el) {
+    const raw = el.value;
+    const caret = el.selectionStart ?? raw.length;
+    // Count digits AND the decimal point (never commas) up to the caret —
+    // this survives reformatting even when the caret sits right after a
+    // decimal point that hasn't had a digit typed after it yet.
+    const meaningfulBefore = (raw.slice(0, caret).match(/[\d.]/g) || []).length;
+
+    let clean = raw.replace(/[^\d.]/g, "");
+    const firstDot = clean.indexOf(".");
+    if (firstDot !== -1) clean = clean.slice(0, firstDot + 1) + clean.slice(firstDot + 1).replace(/\./g, "");
+    let [intPart, decPart] = clean.split(".");
+    if (decPart != null) decPart = decPart.slice(0, 2);
+    intPart = (intPart || "").replace(/^0+(?=\d)/, "");
+
+    if (!intPart && decPart == null) { el.value = ""; return; }
+    const withCommas = intPart ? Number(intPart).toLocaleString("en-NZ") : "0";
+    el.value = decPart != null ? `${withCommas}.${decPart}` : withCommas;
+
+    let seen = 0, pos = el.value.length;
+    if (meaningfulBefore === 0) { pos = 0; }
+    else {
+      for (let i = 0; i < el.value.length; i++) {
+        if (/[\d.]/.test(el.value[i])) seen++;
+        if (seen === meaningfulBefore) { pos = i + 1; break; }
+      }
+    }
+    el.setSelectionRange(pos, pos);
+  }
+
   const DIVISIONS = ["Industrial","Office","Retail","Investment Sales","Land","Rural & Agribusiness","Other"];
   // Brokers are reference data loaded from the database (Settings tab
   // manages them). Populated during boot before the first render.
@@ -21,25 +54,26 @@
     currentId: null,
     saveTimer: null,
     userName: "",
+    dealStatus: "draft", // a brand-new, never-saved sheet is implicitly a draft
     f: {
       ownership: { salespeople: [], division: "Industrial", office: "Christchurch" },
       property: { address:"", buildingName:"", propertyType:"", level:"", city:"Christchurch" },
-      vendor: { name:"", phone:"", contactName:"", email:"", postalAddress:"", postcode:"", city:"", country:"NZ", fax:"", solicitorName:"", solicitorFirm:"", solicitorEmail:"", vendorGroup:"" },
+      vendor: { name:"", phone:"", contactName:"", email:"", postalAddress:"", postcode:"", city:"", country:"NZ", fax:"", solicitorName:"", solicitorFirm:"", solicitorPhone:"", vendorGroup:"" },
       billingDifferent: false,
       billing: { name:"", phone:"", contactName:"", email:"", postalAddress:"", postcode:"", city:"", country:"NZ", fax:"" },
       invoicePurchaser: false,
-      purchaser: { name:"", phone:"", contactName:"", email:"", postalAddress:"", postcode:"", city:"", country:"NZ", fax:"", solicitorName:"", solicitorFirm:"", solicitorEmail:"" },
+      purchaser: { name:"", phone:"", contactName:"", email:"", postalAddress:"", postcode:"", city:"", country:"NZ", fax:"", solicitorName:"", solicitorFirm:"", solicitorPhone:"" },
       sale: { dateOfAgreement:"", unconditionalDate:"", salePrice:"", rentalBasis:"Net", rentalIncome:"", yieldManual:"", titleType:"Freehold", landArea:"", wale:"", tenancies:"", occupiedArea:"", auction:false, tenancySchedule:false },
       depositToTrust: false,
       deposit: { amount:"", dateReceived:"", receiptNo:"", earlyRelease:false, vendorAuthSent:false, vendorAuthReceived:false, purchaserAuthSent:false, purchaserAuthReceived:false },
-      comm: { tiers:[{pct:"",base:"",flat:""},{pct:"",base:"",flat:""},{pct:"",base:"",flat:""}], otherDesc:"", otherFee:"", adminFee:true, recoverMarketingDesc:"", recoverMarketing:"", recoverOtherDesc:"", recoverOther:"" },
+      comm: { tiers:[{pct:"",base:""},{pct:"",base:""},{pct:"",base:""}], otherDesc:"", otherFee:"", adminFee:true, recoverMarketing:"", recoverOtherDesc:"", recoverOther:"" },
       splits: [ {person:"",pct:""},{person:"",pct:""},{person:"",pct:""},{person:"",pct:""},{person:"",pct:""} ],
-      thirdParty: [ {name:"",pct:"",fixed:""},{name:"",pct:"",fixed:""},{name:"",pct:"",fixed:""} ],
-      confidential: false,
+      thirdParty: [ {name:"",pct:""},{name:"",pct:""},{name:"",pct:""} ],
       buyerSource:"", buyerSourceOther:"",
       listingSource:"", listingReferralWho:"", listingReferralInternal:"Yes", listingOther:"",
-      checklist: { agencyAgreement:false, unconditionalConfirmation:false, salePriceConfirmation:false, marketingReport:false, amlComplete:false, spAgreement:false },
+      checklist: { agencyAgreement:false, unconditionalConfirmation:false, salePriceConfirmation:false, marketingReport:false, amlComplete:false, spAgreement:false, executedAgreement:false },
       attachments: {},  // { slotKey: { name, path, size } } populated after upload
+      extraAttachments: [], // "Other Documents" — free-form, description required, draft-only
     },
   };
 
@@ -74,25 +108,20 @@
       tierBases[i] = base;
       remaining -= base;
     });
-    // A tier can be a flat $ rate instead of % of amount — flat wins when set
-    // (same behaviour as the lease sheet's fixed amounts).
-    const tierFees = f.comm.tiers.map((t,i) => num(t.flat) > 0 ? num(t.flat) : (num(t.pct)/100) * tierBases[i]);
+    const tierFees = f.comm.tiers.map((t,i) => (num(t.pct)/100) * tierBases[i]);
     const adminFee = f.comm.adminFee ? 500 : 0;
     const totalInvoice = tierFees.reduce((a,b)=>a+b,0) + num(f.comm.otherFee) + adminFee
       + num(f.comm.recoverMarketing) + num(f.comm.recoverOther);
 
     const commissionBase = totalInvoice - adminFee;
-    // Third-party share: % of commission PLUS any fixed $ — both apply
-    // together (e.g. 10% + $500), unlike the lease sheet where fixed wins.
-    const tpAmount = (s) => (num(s.pct)/100)*commissionBase + num(s.fixed);
     const thirdPartyPctTotal = f.thirdParty.reduce((a,s)=>a+num(s.pct),0);
-    const thirdPartyTotal = f.thirdParty.reduce((a,s)=>a + tpAmount(s), 0);
+    const thirdPartyTotal = f.thirdParty.reduce((a,s)=>a + (num(s.pct)/100)*commissionBase, 0);
     const internalPool = totalInvoice - thirdPartyTotal;
     const internalPctTotal = f.splits.reduce((a,s)=>a+num(s.pct),0);
     const internalOk = internalPctTotal === 0 || Math.abs(internalPctTotal-100) < 0.01;
 
     return { salePrice, yieldCalc, yieldPct, tierFees, tierBases, adminFee, totalInvoice,
-             commissionBase, thirdPartyPctTotal, thirdPartyTotal, tpAmount, internalPool,
+             commissionBase, thirdPartyPctTotal, thirdPartyTotal, internalPool,
              internalPctTotal, internalOk };
   }
 
@@ -108,13 +137,11 @@
     if (d.internalPctTotal === 0) m.push("Commission split");
     else if (!d.internalOk) m.push("Salesperson split must total 100%");
     if (d.thirdPartyPctTotal >= 100) m.push("Third-party share must be under 100%");
-    else if (d.totalInvoice && d.thirdPartyTotal >= d.totalInvoice) m.push("Third-party share can't exceed the commission");
     if (!f.buyerSource) m.push("Buyer source");
     if (!f.listingSource) m.push("Listing source");
     if (!f.checklist.agencyAgreement) m.push("Checklist — signed agency agreement");
     if (!f.checklist.unconditionalConfirmation) m.push("Checklist — confirmation of unconditional");
     if (!f.checklist.salePriceConfirmation) m.push("Checklist — confirmation of sale price");
-    if (!f.checklist.marketingReport) m.push("Checklist — marketing campaign report");
     if (!f.checklist.amlComplete) m.push("Checklist — AML complete");
     if (f.depositToTrust && !f.checklist.spAgreement) m.push("Checklist — S&P agreement (trust deal)");
     return m;
@@ -138,9 +165,9 @@
 
   // ---------- small builders ----------
   const txt = (path, label, opts = {}) => {
-    const { ph = "", type = "text", span = 1, req = false } = opts;
+    const { ph = "", type = "text", span = 1, req = false, money = false } = opts;
     return `<label class="fld span${span}"><span class="lbl">${label}${req ? '<em class="req">*</em>' : ''}</span>
-      <input type="${type}" data-path="${path}" value="${esc(get(path))}" placeholder="${esc(ph)}" /></label>`;
+      <input type="${type}" ${money ? 'data-money' : ''} data-path="${path}" value="${esc(get(path))}" placeholder="${esc(ph)}" /></label>`;
   };
   const sel = (path, label, options, span = 1) =>
     `<label class="fld span${span}"><span class="lbl">${label}</span>
@@ -154,7 +181,7 @@
     ${txt(base+".contactName","Contact name",{span:2})}${txt(base+".email","Email",{type:"email"})}
     ${txt(base+".postalAddress","Postal address",{span:2})}${txt(base+".postcode","Postcode")}
     ${txt(base+".city","City")}${txt(base+".country","Country")}
-    ${solicitor ? txt(base+".solicitorName","Solicitor")+txt(base+".solicitorFirm","Firm")+txt(base+".solicitorEmail","Solicitor email",{type:"email"}) : ""}
+    ${solicitor ? txt(base+".solicitorName","Solicitor")+txt(base+".solicitorFirm","Firm")+txt(base+".solicitorPhone","Solicitor phone") : ""}
   </div>`;
   const section = (n, title, note, inner) => `<section class="card"><header class="cardHead">
     <span class="secNo">${n}</span><div><h2>${title}</h2>${note?`<p class="note">${note}</p>`:""}</div></header>${inner}</section>`;
@@ -178,6 +205,16 @@
       <span class="upProgress hidden" data-slot="${slotKey}">Uploading…</span></div>`;
   }
 
+  function extraAttachmentsList() {
+    const items = state.f.extraAttachments || [];
+    if (!items.length) return `<p class="dim" style="margin:4px 0 10px">None added yet.</p>`;
+    return `<ul class="attachList extraList">${items.map((a) => `<li>
+        <span>📎 <strong>${esc(a.description || "(no description)")}</strong> — ${esc(a.name)}</span>
+        <span class="attachBtns">
+          ${state.dealStatus === "draft" ? `<button type="button" class="rmBtn" data-extra-remove="${esc(a.slot)}">Remove</button>` : ""}
+        </span></li>`).join("")}</ul>`;
+  }
+
   // ---------- render ----------
   function render() {
     const d = derive();
@@ -193,9 +230,8 @@
         : (d.tierBases[i] > 0 ? fmt(d.tierBases[i]) : "");
       return `<tr>
       <td>${label}</td>
-      <td><input class="cell" data-recalc data-path="comm.tiers.${i}.pct" value="${esc(t.pct)}" placeholder="%" ${num(t.flat)>0?"disabled":""} /></td>
-      <td><input class="cell" data-recalc data-path="comm.tiers.${i}.base" value="${esc(shownBase)}" placeholder="${i===0?"Sale price":"Remainder"}" ${num(t.flat)>0?"disabled":""} /></td>
-      <td><input class="cell r" data-recalc data-path="comm.tiers.${i}.flat" value="${esc(t.flat)}" placeholder="flat $" /></td>
+      <td><input class="cell" data-recalc data-path="comm.tiers.${i}.pct" value="${esc(t.pct)}" placeholder="%" /></td>
+      <td><input class="cell" data-money data-recalc data-path="comm.tiers.${i}.base" value="${esc(shownBase)}" placeholder="${i===0?"Sale price":"Remainder"}" /></td>
       <td class="r mono">${d.tierFees[i]?fmt(d.tierFees[i]):"—"}</td></tr>`;
     }).join("");
 
@@ -211,8 +247,7 @@
     const tpRows = f.thirdParty.map((s,i) => `<tr>
       <td><input class="cell" data-path="thirdParty.${i}.name" value="${esc(s.name)}" placeholder="Office / party" /></td>
       <td><input class="cell" data-recalc data-path="thirdParty.${i}.pct" value="${esc(s.pct)}" placeholder="%" /></td>
-      <td><input class="cell r" data-recalc data-path="thirdParty.${i}.fixed" value="${esc(s.fixed)}" placeholder="fixed $" /></td>
-      <td class="r mono">${(num(s.pct)||num(s.fixed))?fmt(d.tpAmount(s)):"—"}</td></tr>`).join("");
+      <td class="r mono">${num(s.pct)?fmt((num(s.pct)/100)*d.commissionBase):"—"}</td></tr>`).join("");
 
     $("app").innerHTML = `
       <header class="top">
@@ -221,7 +256,8 @@
         <div style="text-align:right">
           <a href="admin.html" class="linkBtn" style="display:inline-block;margin-bottom:8px">← All deal sheets</a>
           <div class="accountsBox"><span class="tag">Completed by accounts</span>
-          <div class="acctFields"><label><span>Deal No.</span><input disabled placeholder="—" /></label></div></div>
+          <div class="acctFields"><label><span>File No.</span><input disabled placeholder="—" /></label>
+          <label><span>Deal No.</span><input disabled placeholder="—" /></label></div></div>
         </div>
       </header>
       <p class="mandate">Complete <strong>all</strong> categories for commission to be paid promptly.
@@ -262,9 +298,9 @@
           ${section("6","Sale details","",`<div class="grid">
             ${txt("sale.dateOfAgreement","Date of agreement",{type:"date",req:true})}
             ${txt("sale.unconditionalDate","Unconditional date",{type:"date",req:true})}
-            ${txt("sale.salePrice","Sale price (excl GST) $",{ph:"0.00",req:true})}
+            ${txt("sale.salePrice","Sale price (excl GST) $",{ph:"0.00",req:true,money:true})}
             ${sel("sale.rentalBasis","Rental basis",["Net","Gross"])}
-            ${txt("sale.rentalIncome",(f.sale.rentalBasis)+" rental income $ p.a.")}
+            ${txt("sale.rentalIncome",(f.sale.rentalBasis)+" rental income $ p.a.",{money:true})}
             <label class="fld"><span class="lbl">${f.sale.rentalBasis} yield %</span>
               <input data-path="sale.yieldManual" value="${esc(f.sale.yieldManual)}" placeholder="${yieldCalcPlaceholder(d)}" /></label>
             ${sel("sale.titleType","Title",TITLES)}${txt("sale.landArea","Land area (sqm)")}
@@ -277,7 +313,7 @@
           ${section("7","Deposit — trust account","Complete if a deposit will be paid into the Colliers trust account.",
             chk("depositToTrust","Deposit paid into the trust account") + (f.depositToTrust?`
               <div class="grid" style="margin-top:12px">
-                ${txt("deposit.amount","Deposit amount $")}${txt("deposit.dateReceived","Date received",{type:"date"})}
+                ${txt("deposit.amount","Deposit amount $",{money:true})}${txt("deposit.dateReceived","Date received",{type:"date"})}
                 ${txt("deposit.receiptNo","Trust receipt no.")}</div>
               <div class="authRow">${chk("deposit.earlyRelease","Early release required")}
               ${f.deposit.earlyRelease?`<div class="authGrid"><span class="authLbl">Authorisation forms</span>
@@ -285,23 +321,23 @@
                 ${chk("deposit.purchaserAuthSent","Purchaser — sent")}${chk("deposit.purchaserAuthReceived","Purchaser — received")}</div>`:""}</div>`:""))}
 
           ${section("8","Commission calculation","Fees calculate automatically from the percentages you enter.",`
-            <table class="tbl"><thead><tr><th>Tier</th><th>%</th><th>Of amount $</th><th class="r">Flat rate $</th><th class="r">Fee $</th></tr></thead>
+            <table class="tbl"><thead><tr><th>Tier</th><th>%</th><th>Of amount $</th><th class="r">Fee $</th></tr></thead>
             <tbody>${commRows}
-              <tr><td>Other</td><td colspan="3"><input class="cell" data-path="comm.otherDesc" value="${esc(f.comm.otherDesc)}" placeholder="Please specify" /></td>
+              <tr><td>Other</td><td colspan="2"><input class="cell" data-path="comm.otherDesc" value="${esc(f.comm.otherDesc)}" placeholder="Please specify" /></td>
                 <td class="r"><input class="cell r" data-path="comm.otherFee" value="${esc(f.comm.otherFee)}" placeholder="0.00" /></td></tr>
-              <tr><td colspan="4"><div class="feeChoice">
+              <tr><td colspan="3"><div class="feeChoice">
                 <label class="chk"><input type="checkbox" id="feeAdmin" ${f.comm.adminFee?"checked":""} /><span>Administration fee ($500)</span></label>
               </div></td><td class="r mono">${fmt(d.adminFee)}</td></tr>
-              <tr><td>Recover marketing costs</td><td colspan="3"><input class="cell" data-path="comm.recoverMarketingDesc" value="${esc(f.comm.recoverMarketingDesc)}" placeholder="Description (optional)" /></td>
+              <tr><td>Recover marketing costs</td><td colspan="2"></td>
                 <td class="r"><input class="cell r" data-path="comm.recoverMarketing" value="${esc(f.comm.recoverMarketing)}" placeholder="0.00" /></td></tr>
-              <tr><td>Recover other costs</td><td colspan="3"><input class="cell" data-path="comm.recoverOtherDesc" value="${esc(f.comm.recoverOtherDesc)}" placeholder="Please specify" /></td>
+              <tr><td>Recover other costs</td><td colspan="2"><input class="cell" data-path="comm.recoverOtherDesc" value="${esc(f.comm.recoverOtherDesc)}" placeholder="Please specify" /></td>
                 <td class="r"><input class="cell r" data-path="comm.recoverOther" value="${esc(f.comm.recoverOther)}" placeholder="0.00" /></td></tr>
             </tbody>
-            <tfoot><tr><td colspan="4">Total amount to be invoiced (excl GST)</td><td class="r mono total">$${fmt(d.totalInvoice)}</td></tr></tfoot></table>`)}
+            <tfoot><tr><td colspan="3">Total amount to be invoiced (excl GST)</td><td class="r mono total">$${fmt(d.totalInvoice)}</td></tr></tfoot></table>`)}
 
-          ${section("9","Commission split","Third parties take a percentage of the commission (excluding the administration fee), plus any fixed dollar amount. Salespeople then split what remains, which must total 100%.",`
-            <h3 class="subHead">Third party / other office <span class="dim">(conjunctional / referral — % of commission and/or a fixed $)</span></h3>
-            <table class="tbl"><thead><tr><th>Company / office</th><th>%</th><th class="r">Fixed $</th><th class="r">Amount $</th></tr></thead><tbody>${tpRows}</tbody></table>
+          ${section("9","Commission split","Third parties take a percentage of the commission (excluding the administration fee). Salespeople then split what remains, which must total 100%.",`
+            <h3 class="subHead">Third party / other office <span class="dim">(conjunctional / referral — % of commission)</span></h3>
+            <table class="tbl"><tbody>${tpRows}</tbody></table>
             ${d.thirdPartyTotal ? `<div class="poolNote">Third party share: <b>$${fmt(d.thirdPartyTotal)}</b> of $${fmt(d.commissionBase)} commission</div>` : ""}
             <h3 class="subHead">Salespeople <span class="dim">(split the remaining $${fmt(d.internalPool)})</span></h3>
             <table class="tbl"><thead><tr><th>Salesperson</th><th>%</th><th class="r">Amount $</th></tr></thead><tbody>${splitRows}</tbody></table>
@@ -318,17 +354,26 @@
             <div class="checkRow">${chk("checklist.agencyAgreement","Signed agency agreement attached")}${uploadSlot("agencyAgreement","")}</div>
             <div class="checkRow">${chk("checklist.unconditionalConfirmation","Confirmation of unconditional attached (from vendor or vendor's solicitor)")}${uploadSlot("unconditionalConfirmation","")}</div>
             <div class="checkRow">${chk("checklist.salePriceConfirmation","Confirmation of sale price attached (e.g. first page of the S&P agreement)")}${uploadSlot("salePriceConfirmation","")}</div>
-            <div class="checkRow">${chk("checklist.marketingReport","Marketing campaign report attached")}${uploadSlot("marketingReport","")}</div>
             <div class="checkRow">${chk("checklist.amlComplete","AML complete")}${uploadSlot("amlComplete","")}</div>
             ${f.depositToTrust?`<div class="checkRow">${chk("checklist.spAgreement","Trust deal — sale and purchase agreement attached")}${uploadSlot("spAgreement","")}</div>`:""}</div>`)}
 
-          ${section("12","Sign-off","",`<div class="grid">
+          ${section("12","Other Documents","Not mandatory — attach anything else useful for the file. Available while this deal sheet is still a draft.",`
+            <div class="checkRow">${chk("checklist.marketingReport","Marketing campaign report attached (optional)")}${uploadSlot("marketingReport","")}</div>
+            <div class="checkRow">${chk("checklist.executedAgreement","Executed sale &amp; purchase agreement attached (optional)")}${uploadSlot("executedAgreement","")}</div>
+            <h3 class="subHead" style="margin-top:14px">Any other document</h3>
+            ${extraAttachmentsList()}
+            ${state.dealStatus === "draft" ? `<div class="extraUpload">
+              <input id="extraDesc" placeholder="Description for the file (required)" />
+              <label class="upBtn">Choose file<input type="file" id="extraFile" hidden /></label>
+              <span id="extraFileName" class="dim"></span>
+              <button id="extraUploadBtn" class="miniBtn" type="button" disabled>Add document</button>
+              <span id="extraUploadStatus" class="miniStatus"></span>
+            </div>` : `<p class="note">Other documents can only be added while this deal sheet is a draft.</p>`}`)}
+
+          ${section("13","Sign-off","",`<div class="grid">
             <label class="fld span2"><span class="lbl">Prepared by</span>
               <input disabled value="${esc(state.userName || "")}" /></label>
             <label class="fld"><span class="lbl">Date</span><input disabled value="${new Date().toLocaleDateString("en-NZ")}" /></label></div>
-            <div class="confidentialRow" style="margin-top:12px">
-              ${chk("confidential","Confidential / Private Sale (exclude from PropCMA)")}
-              <p class="note" style="margin-top:4px">When ticked, this deal will <strong>not</strong> be written to PropCMA comparables or the Excel sheet when invoiced.</p></div>
             <p class="note" style="margin-top:8px">Manager approval to pay commission is completed by accounts / management after submission.</p>`)}
         </main>
 
@@ -346,7 +391,7 @@
           <button class="primary" id="sendBtn">Send to accounts</button>
           <button class="ghostLight" id="printBtn">Print / Save as PDF</button>
           <div class="saveState" id="saveState">${saveState}</div>
-          <p class="tiny">Sends the completed deal sheet to accounts for Deal No. assignment, invoicing and commission processing.</p>
+          <p class="tiny">Sends the completed deal sheet to accounts for File No. / Deal No. assignment, invoicing and commission processing.</p>
         </div></aside>
       </div>
 
@@ -373,16 +418,17 @@
       const path = el.dataset.path;
       if (el.type === "checkbox") {
         el.onchange = () => set(path, el.checked);
-      } else if (el.tagName === "SELECT") {
+      } else if (el.tagName === "SELECT" || el.type === "date") {
         // no typing caret to preserve — safe to re-render
         el.onchange = () => set(path, el.value);
       } else {
-        // text / textarea / date: update state + summary only, NEVER
-        // re-render the form while typing (re-rendering rebuilds the
-        // input and drops focus — for dates, Chrome fires change as
-        // soon as the first year digit makes a valid date, which froze
-        // typed years at 0002; the picker still commits fine via input)
-        el.oninput = () => setNoRender(path, el.value);
+        // text / textarea: update state + summary only, NEVER re-render
+        // the form while typing (that was reversing text as the caret
+        // jumped back to the start on each keystroke)
+        el.oninput = () => {
+          if (el.hasAttribute("data-money")) formatMoneyLive(el);
+          setNoRender(path, el.value);
+        };
         // numeric fields that drive table amounts recalc on blur
         if (el.hasAttribute("data-recalc")) el.onchange = () => set(path, el.value);
       }
@@ -470,6 +516,58 @@
         render();
       };
     });
+
+    // ---- Other Documents: free-form, description required, draft-only ----
+    let pendingExtraFile = null;
+    const descEl = $("extraDesc"), fileBtn = $("extraFile"),
+          fileNameEl = $("extraFileName"), uploadBtn = $("extraUploadBtn"),
+          statusEl = $("extraUploadStatus");
+    const updateExtraReady = () => {
+      if (uploadBtn) uploadBtn.disabled = !(pendingExtraFile && descEl && descEl.value.trim());
+    };
+    if (fileBtn) fileBtn.onchange = () => {
+      pendingExtraFile = fileBtn.files[0] || null;
+      if (fileNameEl) fileNameEl.textContent = pendingExtraFile ? pendingExtraFile.name : "";
+      updateExtraReady();
+    };
+    if (descEl) descEl.oninput = updateExtraReady;
+    if (uploadBtn) uploadBtn.onclick = async () => {
+      const description = descEl.value.trim();
+      if (!description || !pendingExtraFile) return;
+      if (!state.currentId) {
+        try { const r = await api.saveDraft(state.f, null); state.currentId = r.id; }
+        catch (e) { alert("Couldn't start a draft to attach to: " + e.message); return; }
+      }
+      uploadBtn.disabled = true;
+      if (statusEl) statusEl.textContent = "Uploading…";
+      try {
+        const r = await api.uploadExtraAttachment(state.currentId, description, pendingExtraFile);
+        state.f.extraAttachments = state.f.extraAttachments || [];
+        state.f.extraAttachments.push({ slot: r.slot, description, name: r.name, size: r.size });
+        scheduleAutosave();
+        render();
+      } catch (e) {
+        if (statusEl) statusEl.textContent = "Upload failed";
+        uploadBtn.disabled = false;
+        alert("Upload failed: " + e.message);
+      }
+    };
+    $("app").querySelectorAll("[data-extra-remove]").forEach((btn) => {
+      btn.onclick = async () => {
+        const slot = btn.dataset.extraRemove;
+        if (!confirm("Remove this document? This cannot be undone.")) return;
+        btn.disabled = true; btn.textContent = "Removing…";
+        try {
+          await api.removeAttachment(state.currentId, slot);
+          state.f.extraAttachments = (state.f.extraAttachments || []).filter((a) => a.slot !== slot);
+          scheduleAutosave();
+          render();
+        } catch (e) {
+          alert("Could not remove: " + e.message);
+          btn.disabled = false; btn.textContent = "Remove";
+        }
+      };
+    });
   }
 
   async function uploadFile(slot, file) {
@@ -548,7 +646,7 @@
       <div class="doneMark">✓</div>
       <h1>Deal sheet sent to accounts</h1>
       <p><strong>${esc(f.property.address||"—")}</strong> — sale price $${fmt(d.salePrice)}, total to invoice $${fmt(d.totalInvoice)} excl GST.</p>
-      <p class="dim">Accounts will assign the Deal No., raise the invoice and process commission. You'll be copied on the confirmation.</p>
+      <p class="dim">Accounts will assign the File No. and Deal No., raise the invoice and process commission. You'll be copied on the confirmation.</p>
       <div class="doneBtns">
         <button class="primary" id="adminBtn">Return to deal sheets</button>
         <button class="ghost" id="againBtn">Start a new deal sheet</button>
@@ -599,6 +697,7 @@
           return;
         }
         state.currentId = deal.id;
+        state.dealStatus = deal.status;
         state.f = Object.assign(state.f, deal.form || {});
         state.resumed = deal.status === "rejected";
         state.returnNote = (deal.events || []).filter((e) => (e.note || "").startsWith("Returned to broker:")).pop()?.note || "";

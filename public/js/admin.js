@@ -9,11 +9,12 @@
   const when = (t) => t ? new Date(t).toLocaleDateString("en-NZ", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
   const META = {
-    draft:      { label: "Draft",      cls: "" },
-    submitted:  { label: "Submitted",  cls: "sub" },
-    processing: { label: "Processing", cls: "proc" },
-    invoiced:   { label: "Invoiced",   cls: "inv" },
-    rejected:   { label: "Returned",   cls: "rej" },
+    draft:            { label: "Draft",             cls: "" },
+    submitted:        { label: "Submitted",         cls: "sub" },
+    invoiced:         { label: "Invoiced",           cls: "proc" },
+    deposit_received: { label: "Deposit Received",   cls: "dep" },
+    complete:         { label: "Complete",           cls: "inv" },
+    rejected:         { label: "Returned",           cls: "rej" },
   };
 
   const state = { deals: [], filter: "all", userName: "" };
@@ -46,7 +47,7 @@
         ${returned.length===1?"It needs":"They need"} correcting and resubmitting — see below.</div>` : ""}
 
       <div class="tabs">
-        ${[["all","All"],["open","Needs attention"],["submitted","Submitted"],["processing","Processing"],["invoiced","Invoiced"]]
+        ${[["all","All"],["open","Needs attention"],["submitted","Submitted"],["invoiced","Invoiced"],["deposit_received","Deposit Received"],["complete","Complete"]]
           .map(([k,label]) => {
             const n = k === "all" ? state.deals.length
               : k === "open" ? state.deals.filter((d)=>["draft","rejected"].includes(d.status)).length
@@ -56,10 +57,11 @@
       </div>
 
       ${shown.length ? `<table class="compTable">
-        <thead><tr><th>Property</th><th>Type</th><th>Vendor / Lessor</th><th>Purchaser / Tenant</th><th class="r">To invoice</th>
+        <thead><tr><th>Property</th><th>Type</th><th>Vendor / Landlord</th><th>Purchaser / Tenant</th><th class="r">To invoice</th>
           <th>Updated</th><th>Status</th><th></th></tr></thead>
         <tbody>${shown.map((d) => `<tr data-open="${d.id}" data-type="${d.deal_type || "sale"}">
-          <td><strong>${esc(d.property_address || "(no address)")}</strong></td>
+          <td><strong>${esc(d.property_address || "(no address)")}</strong>
+            ${d.accounts_comment ? `<div class="acctComment">💬 ${esc(d.accounts_comment)}</div>` : ""}</td>
           <td><span class="typePill ${d.deal_type === "lease" ? "lease" : "sale"}">${d.deal_type === "lease" ? "Lease" : "Sale"}</span></td>
           <td>${esc(d.vendor_name || "—")}</td>
           <td>${esc(d.purchaser_name || "—")}</td>
