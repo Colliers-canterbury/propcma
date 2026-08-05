@@ -80,8 +80,8 @@ dialog .dlgBody{padding:18px 20px;max-height:70vh;overflow:auto}
 
 <script>
 // ── CONFIG — copy these two values from PropCMA's index.html ──
-window.SUPABASE_URL  = "https://mcurpiuaezilcnnuqvnm.supabase.co";
-window.SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdXJwaXVhZXppbGNubnVxdm5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MTA5MTEsImV4cCI6MjA5NjA4NjkxMX0.nPts4jRqwTm_CZsD2OUmO5ZgjTKIMk1-CLsNqRYCOxw";
+window.SUPABASE_URL  = "YOUR_PROJECT.supabase.co URL HERE";
+window.SUPABASE_ANON = "YOUR ANON KEY HERE";
 // Microsoft sign-in — same Azure app registration as the deal sheets.
 // Used only to identify the user so Template Content can be admin-gated.
 window.MSAL = {
@@ -797,12 +797,12 @@ function buildReport(){
   // Contents — generated from whichever pages are included. Page numbers are
   // filled in during a post-pass (tokens replaced once the layout is known).
   if(inc("contents")){
-    const tocPages=[["letter","Executive summary"],["exec","Key terms"],["teamOverview","Project team overview"],
-      ["collaboration","Collaboration"],["property","The property"],["swot","SWOT analysis"],["comps","Case studies"],
+    const tocPages=[["exec","Executive summary"],["teamOverview","Project team overview"],
+      ["collaboration","Collaboration"],["property","The property"],["comps","Case studies"],
       ["value","Estimated value"],["strategy","Sales strategy"],["origin","Purchaser origin"],["profiles","Purchaser profiles"],
       ["reporting","Reporting structure"],["method","Sales method & remuneration"],["budget","Marketing budget"],
       ["timeline","Marketing timeline"],["digital","Digital marketing overview"],["why","Why Colliers?"],
-      ["team","Colliers team"],["cvs","Curriculum vitae"],["refs","References"]].filter(([k])=>inc(k)&&k!=="swot");
+      ["who","Who is Colliers?"],["team","Colliers team"],["cvs","Curriculum vitae"],["refs","References"]].filter(([k])=>inc(k)&&k!=="swot");
     const third=Math.ceil(tocPages.length/3);
     // Large blue page number + white label, thin centred white rule below.
     const col=(items)=>`<div>${items.map(([k,l])=>`<div style="display:flex;align-items:baseline;gap:4mm;padding:0 0 6mm">
@@ -837,7 +837,7 @@ function buildReport(){
   const cards=[["Agency",f.exec.agency,ICON.agency],["Estimated value",[money0(f.exec.valueLow),money0(f.exec.valueHigh)].filter(Boolean).join(" - ")+"<br/><span class='small dim'>plus GST (if any)</span>",ICON.value],
     ["Recommended timeline",`Marketing campaign commencing:<br/>${esc(f.exec.campaignStart)}<br/><br/>Deadline Private Treaty closing:<br/>${esc(f.exec.deadlineClose)}`,ICON.timeline],
     ["Fee",f.exec.fee,ICON.fee],["Proposed marketing budget",budgetTotalLabel(),ICON.budget],["Method of sale",f.methodOfSale,ICON.method]];
-  if(inc("exec"))P.push(`<div class="pg"><div class="lightWrap" style="width:118mm"></div><div class="pad" style="position:relative">
+  if(inc("exec"))P.push(`<div class="pg"><div class="lightWrap" style="width:130mm"></div><div class="pad" style="position:relative">
     <h1 class="sec">Executive summary</h1>
     <p class="small" style="max-width:120mm">We have proposed an exclusive agency appointment for the sale of the asset. Colliers will provide weekly written marketing reports detailing the marketing initiatives completed that week, the response from buyers, issues arising and objectives for the following week. This will provide you with up-to-the-minute feedback on prospective purchasers' intentions and a clear picture of how the campaign is progressing.</p>
     <p class="small" style="max-width:120mm">Hereunder is a summary of the suggested key terms, for your consideration.</p>
@@ -845,7 +845,7 @@ function buildReport(){
   </div></div>`);
 
   // Project team overview + Collaboration (office boilerplate)
-  if(inc("teamOverview"))P.push(`<div class="pg"><div class="lightWrap" style="width:118mm"></div><div class="pad" style="position:relative">
+  if(inc("teamOverview"))P.push(`<div class="pg"><div class="lightWrap" style="width:130mm"></div><div class="pad" style="position:relative">
     <h1 class="sec">Project team overview</h1>
     <div class="small" style="max-width:120mm">${paras(blockText("team_overview"))}</div>
     <div style="display:flex;gap:10mm;margin-top:8mm">${leads.map(p=>`<div class="teamCell" style="text-align:left">${p.photo_url?`<img src="${esc(p.photo_url)}" style="width:24mm;height:24mm;border-radius:50%;object-fit:cover" />`:""}<div style="margin-top:2mm"><b>${esc(p.name)}</b><br/><span class="dim">${esc(p.title||"")}</span></div></div>`).join("")}</div>
@@ -870,7 +870,7 @@ function buildReport(){
   // 5 · Property + SWOT (SWOT sits under key property info, two columns)
   const props=lines(f.property.photos);
   const swotBlock=(l,t)=>`<div class="colTop" style="margin-bottom:2mm"><h3 class="blue">${l}</h3>${ulOf(t)}</div>`;
-  if(inc("property"))P.push(`<div class="pg"><div class="lightWrap" style="width:118mm"></div><div class="pad" style="position:relative">
+  if(inc("property"))P.push(`<div class="pg"><div class="lightWrap" style="width:130mm"></div><div class="pad" style="position:relative">
     <h1 class="sec">The property</h1><h2 class="st" style="font-size:11.5pt">Key property information</h2>
     <div style="display:grid;grid-template-columns:1fr 1fr 66mm;gap:8mm">
       <div class="small">${[["Address",f.property.address],["Vendor",f.property.vendor],["Legal description",paras(f.property.legal)],["Floor area (approximate)",f.property.floorArea]].map(([l,v])=>`<div class="kcard" style="margin-bottom:5mm"><div style="color:var(--blue);font-weight:700">${l}</div>${v&&v.startsWith&&v.startsWith("<p")?v:esc(v||"—")}</div>`).join("")}</div>
@@ -903,7 +903,7 @@ function buildReport(){
 In considering a fair appraisal value we are mindful of the current lease terms and conditions, contract and market rent positions as well as the underlying fundamentals of the locality and improvements.
 Adopting the net income position as provided (${money(v.netIncome)||"$—"}), we are of the opinion an overall capitalisation rate on net income would fall within the reasonable bounds of ${v.capLow||"—"}%-${v.capHigh||"—"}%. Reflecting our view of the asset, we consider this a fair range for a property of this size, location and quality.
 Subsequently this reflects an appraisal range in the reasonable bounds of ${money0(f.exec.valueLow)} - ${money0(f.exec.valueHigh)} plus GST (if any).`;
-  if(inc("value"))P.push(`<div class="pg"><div class="lightWrap" style="width:118mm"></div><div class="pad" style="position:relative">
+  if(inc("value"))P.push(`<div class="pg"><div class="lightWrap" style="width:130mm"></div><div class="pad" style="position:relative">
     <h1 class="sec">Estimated value</h1>
     <h2 class="st" style="max-width:115mm">It is crucial that the property is given maximum exposure to the local and national market to ensure every potential buyer is aware of the opportunity.</h2>
     <div class="small" style="max-width:112mm">${paras(v.narrative||autoNarr)}</div>
@@ -913,7 +913,7 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
 
   // 8 · Sales strategy (3 + 4 columns over two pages)
   const strat=parseBlocks(blockText("strategy"));
-  if(inc("strategy"))P.push(`<div class="pg"><div class="lightWrap" style="width:118mm"></div><div class="pad" style="position:relative">
+  if(inc("strategy"))P.push(`<div class="pg"><div class="lightWrap" style="width:130mm"></div><div class="pad" style="position:relative">
     <h1 class="sec">Sales strategy</h1>
     <h3 class="blue">Achieving a premium result for this asset will be driven by a disciplined, targeted strategy focused on the right buyers in a controlled campaign environment.</h3>
     <p class="small dim">This is not a passive "list and wait" process; it is an actively managed campaign designed to create multiple buyers at the deadline date.</p>
@@ -952,7 +952,7 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
 
   // 10 · Reporting / Sales method / Remuneration
   const rep=parseBlocks(blockText("reporting"));
-  if(inc("reporting"))P.push(`<div class="pg"><div class="lightWrap" style="width:118mm"></div><div class="pad" style="position:relative">
+  if(inc("reporting"))P.push(`<div class="pg"><div class="lightWrap" style="width:130mm"></div><div class="pad" style="position:relative">
     <h1 class="sec">Reporting structure</h1>
     <h2 class="st" style="max-width:120mm">To ensure transparency and full client confidence throughout the campaign, Colliers will provide regular, structured reporting on all activity and buyer engagement.</h2>
     <div class="cols3 small">${rep.map(b=>`<div class="colTop"><h3 class="blue">${esc(b.title)}</h3>${blockHtml(b)}</div>`).join("")}</div>
@@ -1006,7 +1006,7 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
   // 13 · Why Colliers + stats
   const why=parseBlocks(blockText("why_colliers"));
   let stats={};try{stats=JSON.parse(blockText("colliers_stats"));}catch(e){stats={};}
-  if(inc("why"))P.push(`<div class="pg"><div class="lightWrap" style="width:118mm"></div><div class="pad" style="position:relative">
+  if(inc("why"))P.push(`<div class="pg"><div class="lightWrap" style="width:130mm"></div><div class="pad" style="position:relative">
     <h1 class="sec">Why Colliers?</h1>
     <h2 class="st" style="max-width:125mm">Selecting the right agency will determine whether this sale is adequately executed or fully maximised.</h2>
     <p class="small dim" style="max-width:125mm">This is not about marketing a property, it is about creating competition between the right buyers and controlling the process to drive price.</p>
@@ -1037,7 +1037,7 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
     return `<svg ${S}><circle cx="12" cy="12" r="9"/></svg>`;};
   if(inc("who"))P.push(`<div class="pg"><div class="pad">
     <h1 class="sec">Who is Colliers?</h1>
-    <div style="margin:0 -18mm 8mm">${assets.world?`<img class="photo" src="${esc(assets.world)}" style="height:auto;width:210mm;object-fit:cover" />`:`<div style="width:210mm">${svgWorld()}</div>`}</div>
+    <div style="margin:0 -18mm 8mm">${assets.world?`<img class="photo" src="${esc(assets.world)}" style="height:52mm;width:210mm;object-fit:cover" />`:`<div style="width:210mm">${svgWorld()}</div>`}</div>
     <div style="display:grid;grid-template-columns:1fr 62mm;gap:12mm">
       <div class="small"><h3 class="blue">At Colliers we are enterprising.</h3>${paras(whoBody)}</div>
       <div>${whoStats.map(i=>{const[l,v]=i.x.split("|").map(s=>s.trim());return `<div class="statCard" style="margin-bottom:5mm;display:flex;align-items:center;gap:4mm"><div style="flex:0 0 auto">${figIcon(l)}</div><div><div class="small dim">${esc(l)}</div><div class="big" style="font-size:15pt">${esc(v||"")}</div></div></div>`;}).join("")}</div>
@@ -1046,7 +1046,7 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
   </div></div>`);
 
   // 15 · Team
-  if(inc("team"))P.push(`<div class="pg"><div class="lightWrap" style="width:118mm"></div><div class="pad" style="position:relative">
+  if(inc("team"))P.push(`<div class="pg"><div class="lightWrap" style="width:130mm"></div><div class="pad" style="position:relative">
     <h1 class="sec">Colliers team</h1>
     <h2 class="st" style="font-size:11.5pt">Project directors</h2>
     ${leads.map(p=>`<div class="cvHead" style="max-width:150mm">${p.photo_url?`<img src="${esc(p.photo_url)}" />`:""}
@@ -1113,17 +1113,23 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
 
   // page numbering (skip cover + back cover)
   const numbered=P.map((pg,i)=>(i===0||i===P.length-1)?pg:pg.replace('<div class="pad"',`${pgHead(i+1)}<div class="pad"`));
-  // Resolve Contents page-number tokens (§PG:key§). Each key maps to the
-  // heading text on its page; find the first page whose printed number we know.
+  // Resolve Contents page-number tokens (§PG:key§). Match each key to the
+  // page whose actual SECTION HEADING (h1.sec / h2.st) is that section — not
+  // the Contents page's own list of the same words.
   const keyHeading={letter:"Executive summary",exec:"Executive summary",teamOverview:"Project team overview",
     collaboration:"Collaboration",property:"The property",comps:"Case studies",value:"Estimated value",
     strategy:"Sales strategy",origin:"Purchaser Origin",profiles:"Purchaser Profiles",reporting:"Reporting structure",
     method:"Sales Method",budget:"Marketing budget",timeline:"Marketing timeline",digital:"Digital marketing overview",
-    why:"Why Colliers?",team:"Colliers team",cvs:"Curriculum vitae",refs:"References"};
+    why:"Why Colliers?",who:"Who is Colliers?",team:"Colliers team",cvs:"Curriculum vitae",refs:"References"};
+  const isContents=(pg)=>pg.includes(">Contents<");
   let out=numbered.join("\n");
   Object.entries(keyHeading).forEach(([k,h])=>{
-    // find the page index whose content contains this heading
-    const idx=numbered.findIndex(pg=>pg.includes(`>${h}<`)||pg.includes(`>${h} `)||pg.includes(h+"</h1>"));
+    // Match a page whose section heading STARTS WITH h (so "Purchaser Origin"
+    // matches "Purchaser Origin - Over $5m"). Skip the Contents page.
+    const esc2=h.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+    const idx=numbered.findIndex(pg=>!isContents(pg)&&(
+      new RegExp(`<h1 class="sec"[^>]*>${esc2}`).test(pg)||
+      new RegExp(`<h2 class="st"[^>]*>${esc2}`).test(pg)));
     const pageNo=idx>0?(idx+1):"";
     out=out.replace(new RegExp(`§PG:${k}§`,"g"),pageNo);
   });
