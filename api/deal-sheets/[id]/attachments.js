@@ -52,6 +52,8 @@ const VALID_SLOTS = new Set([
   "salePriceConfirmation", "marketingReport", "amlComplete", "spAgreement",
   // Leasing deal sheet
   "leaseValueConfirmation", "leaseDeed", "appraisals",
+  // Shared — Other Documents section (both forms)
+  "executedAgreement",
 ]);
 // Extra (accounts-added) attachments each get a generated slot of the
 // form extra_<uuid>, so any number can coexist per deal.
@@ -87,10 +89,14 @@ async function initUpload(req, res, id) {
     if (!VALID_SLOTS.has(rawSlot)) throw new HttpError(400, "Invalid attachment slot");
     slot = rawSlot; kind = "checklist";
   } else if (description != null) {
-    if (!["accounts", "manager"].includes(user.role))
-      throw new HttpError(403, "Only accounts or a manager can add extra attachments");
-    if (deal.status === "draft")
-      throw new HttpError(409, "Cannot attach extra documents to a draft");
+    // "Other Documents": the deal's own creator may add these while it's
+    // still a draft; accounts/manager may add them any time after
+    // submission (including after completion) — see confirmUpload() for
+    // the matching check applied again at record-time.
+    const isOwnerOnDraft = deal.created_by === user.oid && deal.status === "draft";
+    const isStaffPostSubmit = ["accounts", "manager"].includes(user.role) && deal.status !== "draft";
+    if (!isOwnerOnDraft && !isStaffPostSubmit)
+      throw new HttpError(403, "Not permitted to add an extra attachment on this deal");
     if (!String(description).trim()) throw new HttpError(400, "A description is required");
     slot = `extra_${randomUUID()}`; kind = "extra";
   } else {
@@ -114,10 +120,10 @@ async function confirmUpload(req, res, deal) {
   if (Number(sizeBytes) > MAX_BYTES) throw new HttpError(413, "File exceeds the 20 MB limit");
 
   if (kind === "extra" || isExtraSlot(slot)) {
-    if (!["accounts", "manager"].includes(user.role))
-      throw new HttpError(403, "Only accounts or a manager can add extra attachments");
-    if (deal.status === "draft")
-      throw new HttpError(409, "Cannot attach extra documents to a draft");
+    const isOwnerOnDraft = deal.created_by === user.oid && deal.status === "draft";
+    const isStaffPostSubmit = ["accounts", "manager"].includes(user.role) && deal.status !== "draft";
+    if (!isOwnerOnDraft && !isStaffPostSubmit)
+      throw new HttpError(403, "Not permitted to add an extra attachment on this deal");
     const desc = String(description || "").trim();
     if (!desc) throw new HttpError(400, "A description is required");
 
@@ -192,11 +198,10 @@ async function loadDealForWrite(req, id) {
 async function remove(req, res, deal) {
   const slot = req.query.slot;
   if (!VALID_SLOTS.has(slot) && !isExtraSlot(slot)) throw new HttpError(400, "Invalid slot");
-
-  // Extra attachments can only be removed by accounts/manager — never a
-  // broker, even on their own deal.
-  if (isExtraSlot(slot) && !["accounts", "manager"].includes(deal._user.role))
-    throw new HttpError(403, "Only accounts or a manager can remove an extra attachment");
+  // No further check needed here: loadDealForWrite() already scoped entry
+  // to either the deal's own creator while it's a draft, or accounts/
+  // manager once it's been submitted — exactly the same rule that
+  // governs adding an extra attachment in the first place.
 
   const { data: rows } = await supabase.from("deal_sheet_attachments")
     .select("storage_path, file_name, description").eq("deal_id", deal.id).eq("slot", slot);

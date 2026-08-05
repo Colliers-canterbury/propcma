@@ -1,9 +1,19 @@
 // /api/deal-sheets/[id]/[action].js
 //
-// POST /api/deal-sheets/:id/submit                    (broker, own draft)
-// POST /api/deal-sheets/:id/process { fileNo, dealNo }(accounts/manager)
-// POST /api/deal-sheets/:id/invoice                   (accounts/manager)
-// POST /api/deal-sheets/:id/return  { note }          (accounts/manager)
+// POST /api/deal-sheets/:id/submit                     (broker, own draft)
+// POST /api/deal-sheets/:id/invoice-client              (accounts/manager) — step 1
+// POST /api/deal-sheets/:id/assign-deal-number { dealNo }(accounts/manager) — step 2
+// POST /api/deal-sheets/:id/complete { comment }         (accounts/manager) — step 3
+// POST /api/deal-sheets/:id/return  { note }             (accounts/manager)
+// POST /api/deal-sheets/:id/receipt { receiptNo }         (accounts/manager)
+//
+// Accounts processing is three steps, each its own button on
+// accounts.html:
+//   1. Invoiced Client   — submitted        -> invoiced          (no deal number yet)
+//   2. Assign Deal Number — invoiced        -> deposit_received  (deal number entered)
+//   3. Mark as complete  — deposit_received -> complete          (optional comment,
+//                          visible to the office admin on admin.html; this is also
+//                          where the deal is written into PropCMA/Excel — see complete())
 //
 // Every transition writes a deal_sheet_events row with the acting
 // user's oid — the audit trail for REAA/AML record-keeping.
@@ -32,11 +42,12 @@ export default async function handler(req, res) {
     if (error || !deal) throw new HttpError(404, "Deal sheet not found");
 
     switch (action) {
-      case "submit":  return await submit(req, res, deal);
-      case "process": return await process_(req, res, deal);
-      case "invoice": return await invoice(req, res, deal);
-      case "return":  return await returnToBroker(req, res, deal);
-      case "receipt": return await setReceiptNo(req, res, deal);
+      case "submit":            return await submit(req, res, deal);
+      case "invoice-client":    return await invoiceClient(req, res, deal);
+      case "assign-deal-number":return await assignDealNumber(req, res, deal);
+      case "complete":          return await complete(req, res, deal);
+      case "return":            return await returnToBroker(req, res, deal);
+      case "receipt":           return await setReceiptNo(req, res, deal);
       default: throw new HttpError(404, `Unknown action: ${action}`);
     }
   } catch (e) {
@@ -102,40 +113,56 @@ async function submit(req, res, deal) {
   return res.status(200).json({ ok: true, status: "submitted", emailed });
 }
 
-// ---------- accounts: assign numbers, start processing ----------
-async function process_(req, res, deal) {
+// ---------- accounts step 1: Invoiced Client ----------
+// No deal number required at this step — that's step 2.
+async function invoiceClient(req, res, deal) {
   const user = await requireUser(req, ["accounts", "manager"]);
   if (deal.status !== "submitted")
-    throw new HttpError(409, `Cannot process from status '${deal.status}'`);
+    throw new HttpError(409, `Cannot invoice from status '${deal.status}'`);
+
+  await transition(deal, { status: "invoiced" }, user.oid, "Invoiced client");
+  return res.status(200).json({ ok: true, status: "invoiced" });
+}
+
+// ---------- accounts step 2: Assign Deal Number ----------
+async function assignDealNumber(req, res, deal) {
+  const user = await requireUser(req, ["accounts", "manager"]);
+  if (deal.status !== "invoiced")
+    throw new HttpError(409, `Cannot assign a deal number from status '${deal.status}'`);
 
   const { dealNo } = req.body || {};
-  if (!dealNo)
-    throw new HttpError(400, "dealNo is required");
+  if (!dealNo) throw new HttpError(400, "dealNo is required");
 
   await transition(
     deal,
-    { status: "processing", deal_no: dealNo, processed_by: user.oid },
+    { status: "deposit_received", deal_no: dealNo, processed_by: user.oid },
     user.oid,
     `Deal ${dealNo} assigned`
   );
-  return res.status(200).json({ ok: true, status: "processing" });
+  return res.status(200).json({ ok: true, status: "deposit_received" });
 }
 
-// ---------- accounts: invoiced / commission approved ----------
-async function invoice(req, res, deal) {
+// ---------- accounts step 3: Mark as complete ----------
+// This is also where the deal is written into PropCMA's comparables
+// and the Excel workbook — moved here (from the old single "invoice"
+// step) because "complete" is now the true terminal, fully-processed
+// state under the new workflow.
+async function complete(req, res, deal) {
   const user = await requireUser(req, ["accounts", "manager"]);
-  if (deal.status !== "processing")
-    throw new HttpError(409, `Cannot invoice from status '${deal.status}'`);
+  if (deal.status !== "deposit_received")
+    throw new HttpError(409, `Cannot complete from status '${deal.status}'`);
+
+  const comment = String(req.body?.comment ?? "").trim();
 
   const updated = await transition(
     deal,
-    { status: "invoiced" },
+    { status: "complete", accounts_comment: comment || null },
     user.oid,
-    "Invoice raised — commission approved"
+    comment ? `Marked complete — ${comment}` : "Marked complete"
   );
 
   // #10 — Confidential / Private Sale deals are excluded from PropCMA and
-  // the Excel comparables sheet entirely. The invoice still processes; we
+  // the Excel comparables sheet entirely. Completion still processes; we
   // simply don't publish the deal as a market comparable.
   const isConfidential = !!(updated.confidential || updated.form?.confidential);
 
@@ -143,16 +170,16 @@ async function invoice(req, res, deal) {
     await supabase.from("deal_sheet_events").insert({
       deal_id: deal.id,
       actor: user.oid,
-      from_status: "invoiced",
-      to_status: "invoiced",
+      from_status: "complete",
+      to_status: "complete",
       note: "Marked Confidential / Private Sale — excluded from PropCMA and Excel comparables",
     });
   }
 
   // Write the completed sale into PropCMA's comparables data as a NEW
-  // row. Deliberately non-fatal: the deal is already invoiced, and a
-  // failed comparable write must not roll that back or block accounts.
-  // The outcome is recorded in the audit trail either way.
+  // row. Deliberately non-fatal: the deal is already marked complete,
+  // and a failed comparable write must not roll that back or block
+  // accounts. The outcome is recorded in the audit trail either way.
   const pushed = isConfidential
     ? { ok: false, skipped: true }
     : await pushToPropCMA(updated);
@@ -160,8 +187,8 @@ async function invoice(req, res, deal) {
     await supabase.from("deal_sheet_events").insert({
       deal_id: deal.id,
       actor: user.oid,
-      from_status: "invoiced",
-      to_status: "invoiced",
+      from_status: "complete",
+      to_status: "complete",
       note: pushed.ok
         ? `Added to PropCMA comparables (properties id ${pushed.id})`
         : `PropCMA comparable write FAILED — needs manual entry: ${pushed.error}`,
@@ -184,21 +211,24 @@ async function invoice(req, res, deal) {
     await supabase.from("deal_sheet_events").insert({
       deal_id: deal.id,
       actor: user.oid,
-      from_status: "invoiced",
-      to_status: "invoiced",
+      from_status: "complete",
+      to_status: "complete",
       note: excelResult.ok
         ? `Added to Sales Data Colliers.xlsx (row ${excelResult.row})`
         : `Excel write FAILED — needs manual entry: ${excelResult.error}`,
     });
   }
 
-  return res.status(200).json({ ok: true, status: "invoiced", propcma: pushed, excel: excelResult });
+  return res.status(200).json({ ok: true, status: "complete", propcma: pushed, excel: excelResult });
 }
 
 // ---------- accounts: return to broker with a reason ----------
+// Scoped to the two earliest post-submission states — once a deal
+// number is assigned (deposit_received) it's too far along to bounce
+// back this way.
 async function returnToBroker(req, res, deal) {
   const user = await requireUser(req, ["accounts", "manager"]);
-  if (!["submitted", "processing"].includes(deal.status))
+  if (!["submitted", "invoiced"].includes(deal.status))
     throw new HttpError(409, `Cannot return from status '${deal.status}'`);
 
   const note = (req.body?.note || "").trim();
@@ -209,47 +239,31 @@ async function returnToBroker(req, res, deal) {
 }
 
 /**
- * Accounts updates the Trust Deposit details — Receipt No. and/or the
- * deposit Amount. Editable at ANY status. The values live inside the
- * form JSONB (form.deposit.*), so we read-modify-write that object
- * rather than a top-level column. Only the fields present in the body
- * are changed, so existing receipt-only calls behave exactly as before.
+ * Accounts updates the Trust Deposit Receipt No. Editable at ANY status.
+ * The value lives inside the form JSONB (form.deposit.receiptNo), so we
+ * read-modify-write that object rather than a top-level column.
  */
 async function setReceiptNo(req, res, deal) {
   const user = await requireUser(req, ["accounts", "manager"]);
-  const body = req.body || {};
-  const has = (k) => Object.prototype.hasOwnProperty.call(body, k);
-  if (!has("receiptNo") && !has("amount"))
-    throw new HttpError(400, "Provide receiptNo and/or amount");
+  const { receiptNo } = req.body || {};
+  const value = String(receiptNo ?? "").trim();
 
   const form = { ...(deal.form || {}) };
-  form.deposit = { ...(form.deposit || {}) };
-  const notes = [];
-
-  if (has("receiptNo")) {
-    const value = String(body.receiptNo ?? "").trim();
-    form.deposit.receiptNo = value;
-    notes.push(value ? `Trust receipt no. set to ${value}` : "Trust receipt no. cleared");
-  }
-  if (has("amount")) {
-    const value = String(body.amount ?? "").trim().replace(/[$,\s]/g, "");
-    form.deposit.amount = value;
-    notes.push(value ? `Trust deposit amount set to $${value}` : "Trust deposit amount cleared");
-  }
+  form.deposit = { ...(form.deposit || {}), receiptNo: value };
 
   const { error } = await supabase
     .from("deal_sheets")
     .update({ form })
     .eq("id", deal.id);
-  if (error) throw new HttpError(500, "Could not save trust deposit details");
+  if (error) throw new HttpError(500, "Could not save receipt number");
 
   await supabase.from("deal_sheet_events").insert({
     deal_id: deal.id,
     actor: user.oid,
     from_status: deal.status,
     to_status: deal.status,
-    note: notes.join("; "),
+    note: value ? `Trust receipt no. set to ${value}` : "Trust receipt no. cleared",
   });
 
-  return res.status(200).json({ ok: true, receiptNo: form.deposit.receiptNo ?? null, amount: form.deposit.amount ?? null });
+  return res.status(200).json({ ok: true, receiptNo: value });
 }

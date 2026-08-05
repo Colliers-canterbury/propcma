@@ -98,6 +98,11 @@ const PRINT_CSS = `
   .sub2 { font-size:9pt; color:#66708A; margin:-2px 0 6px; }
 `;
 
+const STATUS_LABELS = {
+  draft: "Draft", submitted: "Submitted", invoiced: "Invoiced",
+  deposit_received: "Deposit Received", complete: "Complete", rejected: "Returned",
+};
+
 function renderPrintable(deal, splits, attachments, brokers, preparedBy) {
   const f = deal.form || {};
   const sale = f.sale || {};
@@ -129,7 +134,7 @@ function renderPrintable(deal, splits, attachments, brokers, preparedBy) {
   <div class="nums">
     <div>File No. <b>${dash(deal.file_no)}</b></div>
     <div>Deal No. <b>${dash(deal.deal_no)}</b></div>
-    <div class="sub">Status: ${esc(deal.status)}</div>
+    <div class="sub">Status: ${esc(STATUS_LABELS[deal.status] || deal.status)}</div>
   </div>
 </header>
 
@@ -315,7 +320,7 @@ function renderLeasePrintable(deal, splits, attachments, brokers, preparedBy) {
   <div class="nums">
     <div>File No. <b>${dash(deal.file_no)}</b></div>
     <div>Deal No. <b>${dash(deal.deal_no)}</b></div>
-    <div class="sub">Status: ${esc(deal.status)}</div>
+    <div class="sub">Status: ${esc(STATUS_LABELS[deal.status] || deal.status)}</div>
   </div>
 </header>
 
