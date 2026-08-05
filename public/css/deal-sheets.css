@@ -326,3 +326,7 @@ tfoot td{border-top:2px solid var(--navy);border-bottom:none;font-weight:700;pad
 /* ---------- admin: delete draft ---------- */
 .linkBtn.danger{color:#B91C1C;margin-left:8px;}
 .linkBtn.danger:hover{color:#991B1B;text-decoration:underline;}
+
+/* ---------- new accounts workflow: deposit received pill + comment ---------- */
+.pill.dep{background:#EDE9FE;color:#5B21B6;}
+.acctComment{font-size:12px;color:#5B6472;font-style:italic;margin-top:3px;font-weight:400;}
