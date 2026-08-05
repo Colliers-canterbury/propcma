@@ -80,8 +80,8 @@ dialog .dlgBody{padding:18px 20px;max-height:70vh;overflow:auto}
 
 <script>
 // ── CONFIG — copy these two values from PropCMA's index.html ──
-window.SUPABASE_URL  = "https://mcurpiuaezilcnnuqvnm.supabase.co";
-window.SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdXJwaXVhZXppbGNubnVxdm5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MTA5MTEsImV4cCI6MjA5NjA4NjkxMX0.nPts4jRqwTm_CZsD2OUmO5ZgjTKIMk1-CLsNqRYCOxw";
+window.SUPABASE_URL  = "YOUR_PROJECT.supabase.co URL HERE";
+window.SUPABASE_ANON = "YOUR ANON KEY HERE";
 // Microsoft sign-in — same Azure app registration as the deal sheets.
 // Used only to identify the user so Template Content can be admin-gated.
 window.MSAL = {
@@ -908,11 +908,11 @@ Adopting the net income position as provided (${money(v.netIncome)||"$—"}), we
 Subsequently this reflects an appraisal range in the reasonable bounds of ${money0(f.exec.valueLow)} - ${money0(f.exec.valueHigh)} plus GST (if any).`;
   if(inc("value"))P.push(`<div class="pg"><div class="lightWrap" style="width:200mm"></div><div class="pad" style="position:relative">
     <h1 class="sec">Estimated value</h1>
+    ${(()=>{const ph=lines(f.property.photos)[1]||lines(f.property.photos)[0]||f.cover.photo;return ph?`<img class="photo" src="${esc(ph)}" style="position:absolute;right:18mm;top:38mm;width:58mm;height:48mm;object-fit:cover;border-radius:2mm" />`:"";})()}
     <h2 class="st" style="max-width:115mm">It is crucial that the property is given maximum exposure to the local and national market to ensure every potential buyer is aware of the opportunity.</h2>
     <div class="small" style="max-width:112mm">${paras(v.narrative||autoNarr)}</div>
     <div style="max-width:118mm;margin-top:8mm">${svgValueBars(v.scenarios)}</div>
     <p class="small dim" style="margin-top:5mm">Our appraisal range is based on the financial information as provided to us, against our opinion of achievable market rent.</p>
-    ${(()=>{const ph=lines(f.property.photos)[1]||lines(f.property.photos)[0]||f.cover.photo;return ph?`<img class="photo" src="${esc(ph)}" style="position:absolute;left:18mm;right:18mm;bottom:16mm;width:auto;height:58mm;object-fit:cover;border-radius:2mm" />`:"";})()}
   </div></div>`);
 
   // 8 · Sales strategy (3 + 4 columns over two pages)
