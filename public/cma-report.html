@@ -882,18 +882,21 @@ function buildReport(){
       ${swotBlock("Strengths",f.swot.s)}${swotBlock("Weaknesses",f.swot.w)}${swotBlock("Opportunities",f.swot.o)}${swotBlock("Threats",f.swot.t)}</div>`:""}
   </div></div>`);
 
-  // 6 · Case studies (2 per page)
+  // 6 · Case studies (2 per page, left half on a blue band)
   if(inc("comps"))for(let i=0;i<f.comps.length;i+=2){
     const pair=f.comps.slice(i,i+2);
-    P.push(`<div class="pg"><div class="pad">
-      ${i===0?`<h1 class="sec">Case studies</h1>`:`<h1 class="sec">Case studies</h1>`}
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10mm">
-      ${pair.map(c=>`<div>
+    const card=(c,onBlue)=>`<div>
         ${c.photo?`<img class="photo" src="${esc(c.photo)}" style="height:56mm;width:100%;margin-bottom:4mm" />`:""}
-        <h2 class="st" style="font-size:11.5pt">${esc(c.name)}</h2>
-        <p class="small">${esc(c.desc)}</p>
-        <table class="kv" style="margin-top:3mm">${[["Sale price",money0(c.salePrice)||esc(c.salePrice)],["Sale date",esc(c.saleDate)],["Method of sale",esc(c.method)],["Land area",esc(c.landArea)],["Net lettable area",esc(c.nla)],["Initial yield",esc(c.yield)]].map(([l,v])=>`<tr><th>${l}</th><td>${v||"—"}</td></tr>`).join("")}</table>
-      </div>`).join("")}
+        <h2 class="st" style="font-size:11.5pt${onBlue?";color:#fff":""}">${esc(c.name)}</h2>
+        <p class="small"${onBlue?' style="color:#fff"':''}>${esc(c.desc)}</p>
+        <table class="kv" style="margin-top:3mm">${[["Sale price",money0(c.salePrice)||esc(c.salePrice)],["Sale date",esc(c.saleDate)],["Method of sale",esc(c.method)],["Land area",esc(c.landArea)],["Net lettable area",esc(c.nla)],["Initial yield",esc(c.yield)]].map(([l,v])=>`<tr><th${onBlue?' style="color:#cfe0f5"':''}>${l}</th><td${onBlue?' style="color:#fff;border-color:rgba(255,255,255,.25)"':''}>${v||"—"}</td></tr>`).join("")}</table>
+      </div>`;
+    P.push(`<div class="pg">
+      <div style="position:absolute;top:0;bottom:0;left:0;width:50%;background:var(--navy)"></div>
+      <div class="pad" style="position:relative">
+      <h1 class="sec" style="color:#fff;width:45%">Case studies</h1>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12mm">
+      ${card(pair[0],true)}${pair[1]?card(pair[1],false):"<div></div>"}
       </div></div></div>`);
   }
 
@@ -909,6 +912,7 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
     <div class="small" style="max-width:112mm">${paras(v.narrative||autoNarr)}</div>
     <div style="max-width:118mm;margin-top:8mm">${svgValueBars(v.scenarios)}</div>
     <p class="small dim" style="margin-top:5mm">Our appraisal range is based on the financial information as provided to us, against our opinion of achievable market rent.</p>
+    ${(()=>{const ph=lines(f.property.photos)[1]||lines(f.property.photos)[0]||f.cover.photo;return ph?`<img class="photo" src="${esc(ph)}" style="position:absolute;left:18mm;right:18mm;bottom:16mm;width:auto;height:58mm;object-fit:cover;border-radius:2mm" />`:"";})()}
   </div></div>`);
 
   // 8 · Sales strategy (3 + 4 columns over two pages)
@@ -959,10 +963,12 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
   </div></div>`);
   if(inc("method"))P.push(`<div class="pg"><div class="pad">
     <h1 class="sec">Sales Method</h1>
-    <h2 class="st">Recommended method of sale is ${esc(f.methodOfSale)}.</h2>
-    <h3 class="blue">${esc(f.methodOfSale)}</h3>
-    <div class="small" style="max-width:150mm">${paras(blockText(METHOD_KEY[f.methodOfSale]||"method_dpt")||blockText("sales_method"))}</div>
-    <h1 class="sec" style="margin-top:14mm">Remuneration</h1>
+    <div style="background:var(--navy);color:#fff;border-radius:2mm;padding:8mm 9mm;margin-bottom:10mm">
+      <h2 class="st" style="color:#fff;margin-bottom:4mm">Recommended method of sale is ${esc(f.methodOfSale)}.</h2>
+      <h3 style="color:#fff;font-size:10pt;font-weight:700;margin:0 0 2mm">${esc(f.methodOfSale)}</h3>
+      <div class="small" style="color:#fff">${paras(blockText(METHOD_KEY[f.methodOfSale]||"method_dpt")||blockText("sales_method"))}</div>
+    </div>
+    <h1 class="sec">Remuneration</h1>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:9mm" class="small">
       <div><h3 class="blue">Sole agency</h3><ul><li>${esc(f.remuneration.term)}</li></ul>
         <h3 class="blue">Agency fee</h3><p>${esc(f.remuneration.fee)}</p></div>
