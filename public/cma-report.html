@@ -80,8 +80,8 @@ dialog .dlgBody{padding:18px 20px;max-height:70vh;overflow:auto}
 
 <script>
 // ── CONFIG — copy these two values from PropCMA's index.html ──
-window.SUPABASE_URL  = "https://mcurpiuaezilcnnuqvnm.supabase.co";
-window.SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdXJwaXVhZXppbGNubnVxdm5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MTA5MTEsImV4cCI6MjA5NjA4NjkxMX0.nPts4jRqwTm_CZsD2OUmO5ZgjTKIMk1-CLsNqRYCOxw";
+window.SUPABASE_URL  = "YOUR_PROJECT.supabase.co URL HERE";
+window.SUPABASE_ANON = "YOUR ANON KEY HERE";
 // Microsoft sign-in — same Azure app registration as the deal sheets.
 // Used only to identify the user so Template Content can be admin-gated.
 window.MSAL = {
@@ -654,7 +654,7 @@ li{margin-bottom:1.2mm}
 .cols2{column-count:2;column-gap:8mm}.cols3{display:grid;grid-template-columns:repeat(3,1fr);gap:7mm}
 .cols4{display:grid;grid-template-columns:repeat(4,1fr);gap:6mm}
 .colTop{border-top:.6pt solid var(--blue);padding-top:3mm}
-.lightWrap{background:var(--panel);position:absolute;top:0;bottom:0;left:0;right:40%}
+.lightWrap{background:var(--panel);position:absolute;top:0;bottom:0;left:0}
 .small{font-size:8.5pt}.dim{color:var(--ink2)}
 .kcard{border-top:.6pt solid var(--navy);padding-top:3mm;margin-bottom:7mm}
 .kcard .kl{font-weight:700;color:var(--navy);font-size:10pt}
@@ -794,25 +794,27 @@ function buildReport(){
     ${f.cover.photo?`<img class="photo" src="${esc(f.cover.photo)}" style="position:absolute;left:10mm;right:0;bottom:22mm;height:110mm;width:auto;max-width:190mm" />`:""}
   </div>`);
 
-  // Contents — generated from whichever pages are included
+  // Contents — generated from whichever pages are included. Page numbers are
+  // filled in during a post-pass (tokens replaced once the layout is known).
   if(inc("contents")){
     const tocPages=[["letter","Executive summary"],["exec","Key terms"],["teamOverview","Project team overview"],
       ["collaboration","Collaboration"],["property","The property"],["swot","SWOT analysis"],["comps","Case studies"],
       ["value","Estimated value"],["strategy","Sales strategy"],["origin","Purchaser origin"],["profiles","Purchaser profiles"],
       ["reporting","Reporting structure"],["method","Sales method & remuneration"],["budget","Marketing budget"],
       ["timeline","Marketing timeline"],["digital","Digital marketing overview"],["why","Why Colliers?"],
-      ["team","Colliers team"],["cvs","Curriculum vitae"],["refs","References"]].filter(([k])=>inc(k));
+      ["team","Colliers team"],["cvs","Curriculum vitae"],["refs","References"]].filter(([k])=>inc(k)&&k!=="swot");
     const third=Math.ceil(tocPages.length/3);
-    // Each entry: white label, with a thin centred white rule below it and
-    // generous spacing. (Page numbers aren't known at build time, so the
-    // emphasis is on the section names in white per the mark-up.)
-    const col=(items)=>`<div>${items.map(([,l])=>`<div style="padding:0 0 7mm"><div style="color:#fff;font-size:11pt;font-weight:600;margin-bottom:3.5mm">${esc(l)}</div><div style="width:70%;margin:0 auto;border-top:.5pt solid rgba(255,255,255,.55)"></div></div>`).join("")}</div>`;
+    // Large blue page number + white label, thin centred white rule below.
+    const col=(items)=>`<div>${items.map(([k,l])=>`<div style="display:flex;align-items:baseline;gap:4mm;padding:0 0 6mm">
+      <div style="color:var(--cyan);font-size:17pt;font-weight:700;min-width:11mm">§PG:${k}§</div>
+      <div style="flex:1"><div style="color:#fff;font-size:10.5pt;font-weight:600;margin-bottom:2.5mm">${esc(l)}</div>
+      <div style="border-top:.5pt solid rgba(255,255,255,.5)"></div></div></div>`).join("")}</div>`;
     P.push(`<div class="pg navy"><div style="position:absolute;inset:0;background:var(--navy)"></div>
       <div style="position:absolute;top:26mm;left:18mm;right:18mm;color:#fff">
         <h1 class="sec" style="color:#fff">Contents</h1>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10mm;margin-top:12mm">
           ${col(tocPages.slice(0,third))}${col(tocPages.slice(third,2*third))}${col(tocPages.slice(2*third))}</div></div>
-      <div style="position:absolute;top:24mm;right:18mm">${assets.logo?`<img src="${esc(assets.logo)}" style="max-width:40mm;max-height:16mm;object-fit:contain;background:#fff;padding:2mm;border-radius:1.5mm" />`:`<div style="background:#fff;padding:3mm 5mm;font-weight:700;color:var(--navy);font-size:13pt;border-radius:1.5mm">Colliers</div>`}</div>
+      <div style="position:absolute;top:24mm;right:18mm">${assets.logo?`<img src="${esc(assets.logo)}" style="max-width:40mm;max-height:16mm;object-fit:contain;background:#fff;padding:.5mm;border-radius:1mm" />`:`<div style="background:#fff;padding:3mm 5mm;font-weight:700;color:var(--navy);font-size:13pt;border-radius:1mm">Colliers</div>`}</div>
     </div>`);
   }
 
@@ -835,7 +837,7 @@ function buildReport(){
   const cards=[["Agency",f.exec.agency,ICON.agency],["Estimated value",[money0(f.exec.valueLow),money0(f.exec.valueHigh)].filter(Boolean).join(" - ")+"<br/><span class='small dim'>plus GST (if any)</span>",ICON.value],
     ["Recommended timeline",`Marketing campaign commencing:<br/>${esc(f.exec.campaignStart)}<br/><br/>Deadline Private Treaty closing:<br/>${esc(f.exec.deadlineClose)}`,ICON.timeline],
     ["Fee",f.exec.fee,ICON.fee],["Proposed marketing budget",budgetTotalLabel(),ICON.budget],["Method of sale",f.methodOfSale,ICON.method]];
-  if(inc("exec"))P.push(`<div class="pg"><div class="lightWrap" style="inset:0 48% 0 0"></div><div class="pad" style="position:relative">
+  if(inc("exec"))P.push(`<div class="pg"><div class="lightWrap" style="width:118mm"></div><div class="pad" style="position:relative">
     <h1 class="sec">Executive summary</h1>
     <p class="small" style="max-width:120mm">We have proposed an exclusive agency appointment for the sale of the asset. Colliers will provide weekly written marketing reports detailing the marketing initiatives completed that week, the response from buyers, issues arising and objectives for the following week. This will provide you with up-to-the-minute feedback on prospective purchasers' intentions and a clear picture of how the campaign is progressing.</p>
     <p class="small" style="max-width:120mm">Hereunder is a summary of the suggested key terms, for your consideration.</p>
@@ -843,7 +845,7 @@ function buildReport(){
   </div></div>`);
 
   // Project team overview + Collaboration (office boilerplate)
-  if(inc("teamOverview"))P.push(`<div class="pg"><div class="lightWrap" style="inset:0 48% 0 0"></div><div class="pad" style="position:relative">
+  if(inc("teamOverview"))P.push(`<div class="pg"><div class="lightWrap" style="width:118mm"></div><div class="pad" style="position:relative">
     <h1 class="sec">Project team overview</h1>
     <div class="small" style="max-width:120mm">${paras(blockText("team_overview"))}</div>
     <div style="display:flex;gap:10mm;margin-top:8mm">${leads.map(p=>`<div class="teamCell" style="text-align:left">${p.photo_url?`<img src="${esc(p.photo_url)}" style="width:24mm;height:24mm;border-radius:50%;object-fit:cover" />`:""}<div style="margin-top:2mm"><b>${esc(p.name)}</b><br/><span class="dim">${esc(p.title||"")}</span></div></div>`).join("")}</div>
@@ -867,15 +869,15 @@ function buildReport(){
 
   // 5 · Property + SWOT (SWOT sits under key property info, two columns)
   const props=lines(f.property.photos);
-  const swotBlock=(l,t)=>`<div class="colTop" style="margin-bottom:4mm"><h3 class="blue">${l}</h3>${ulOf(t)}</div>`;
-  if(inc("property"))P.push(`<div class="pg"><div class="lightWrap" style="inset:0 48% 0 0"></div><div class="pad" style="position:relative">
+  const swotBlock=(l,t)=>`<div class="colTop" style="margin-bottom:2mm"><h3 class="blue">${l}</h3>${ulOf(t)}</div>`;
+  if(inc("property"))P.push(`<div class="pg"><div class="lightWrap" style="width:118mm"></div><div class="pad" style="position:relative">
     <h1 class="sec">The property</h1><h2 class="st" style="font-size:11.5pt">Key property information</h2>
     <div style="display:grid;grid-template-columns:1fr 1fr 66mm;gap:8mm">
       <div class="small">${[["Address",f.property.address],["Vendor",f.property.vendor],["Legal description",paras(f.property.legal)],["Floor area (approximate)",f.property.floorArea]].map(([l,v])=>`<div class="kcard" style="margin-bottom:5mm"><div style="color:var(--blue);font-weight:700">${l}</div>${v&&v.startsWith&&v.startsWith("<p")?v:esc(v||"—")}</div>`).join("")}</div>
       <div class="small">${[["Land area (more or less)",f.property.landArea],["Net annual rental",f.property.netRental],["Tenure",f.property.tenure],["Zone",f.property.zone]].map(([l,v])=>`<div class="kcard" style="margin-bottom:5mm"><div style="color:var(--blue);font-weight:700">${l}</div>${esc(v||"—")}</div>`).join("")}</div>
       <div>${props.slice(0,2).map(u=>`<img class="photo" src="${esc(u)}" style="height:52mm;width:66mm;margin-bottom:5mm" />`).join("")}</div>
     </div>
-    ${inc("swot")?`<h2 class="st" style="font-size:11.5pt;margin-top:6mm">SWOT analysis</h2>
+    ${inc("swot")?`<h2 class="st" style="font-size:11.5pt;margin-top:2mm">SWOT analysis</h2>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:4mm 10mm" class="small">
       ${swotBlock("Strengths",f.swot.s)}${swotBlock("Weaknesses",f.swot.w)}${swotBlock("Opportunities",f.swot.o)}${swotBlock("Threats",f.swot.t)}</div>`:""}
   </div></div>`);
@@ -901,7 +903,7 @@ function buildReport(){
 In considering a fair appraisal value we are mindful of the current lease terms and conditions, contract and market rent positions as well as the underlying fundamentals of the locality and improvements.
 Adopting the net income position as provided (${money(v.netIncome)||"$—"}), we are of the opinion an overall capitalisation rate on net income would fall within the reasonable bounds of ${v.capLow||"—"}%-${v.capHigh||"—"}%. Reflecting our view of the asset, we consider this a fair range for a property of this size, location and quality.
 Subsequently this reflects an appraisal range in the reasonable bounds of ${money0(f.exec.valueLow)} - ${money0(f.exec.valueHigh)} plus GST (if any).`;
-  if(inc("value"))P.push(`<div class="pg"><div class="lightWrap" style="inset:0 48% 0 0"></div><div class="pad" style="position:relative">
+  if(inc("value"))P.push(`<div class="pg"><div class="lightWrap" style="width:118mm"></div><div class="pad" style="position:relative">
     <h1 class="sec">Estimated value</h1>
     <h2 class="st" style="max-width:115mm">It is crucial that the property is given maximum exposure to the local and national market to ensure every potential buyer is aware of the opportunity.</h2>
     <div class="small" style="max-width:112mm">${paras(v.narrative||autoNarr)}</div>
@@ -911,7 +913,7 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
 
   // 8 · Sales strategy (3 + 4 columns over two pages)
   const strat=parseBlocks(blockText("strategy"));
-  if(inc("strategy"))P.push(`<div class="pg"><div class="lightWrap" style="inset:0 48% 0 0"></div><div class="pad" style="position:relative">
+  if(inc("strategy"))P.push(`<div class="pg"><div class="lightWrap" style="width:118mm"></div><div class="pad" style="position:relative">
     <h1 class="sec">Sales strategy</h1>
     <h3 class="blue">Achieving a premium result for this asset will be driven by a disciplined, targeted strategy focused on the right buyers in a controlled campaign environment.</h3>
     <p class="small dim">This is not a passive "list and wait" process; it is an actively managed campaign designed to create multiple buyers at the deadline date.</p>
@@ -950,7 +952,7 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
 
   // 10 · Reporting / Sales method / Remuneration
   const rep=parseBlocks(blockText("reporting"));
-  if(inc("reporting"))P.push(`<div class="pg"><div class="lightWrap" style="inset:0 48% 0 0"></div><div class="pad" style="position:relative">
+  if(inc("reporting"))P.push(`<div class="pg"><div class="lightWrap" style="width:118mm"></div><div class="pad" style="position:relative">
     <h1 class="sec">Reporting structure</h1>
     <h2 class="st" style="max-width:120mm">To ensure transparency and full client confidence throughout the campaign, Colliers will provide regular, structured reporting on all activity and buyer engagement.</h2>
     <div class="cols3 small">${rep.map(b=>`<div class="colTop"><h3 class="blue">${esc(b.title)}</h3>${blockHtml(b)}</div>`).join("")}</div>
@@ -1004,7 +1006,7 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
   // 13 · Why Colliers + stats
   const why=parseBlocks(blockText("why_colliers"));
   let stats={};try{stats=JSON.parse(blockText("colliers_stats"));}catch(e){stats={};}
-  if(inc("why"))P.push(`<div class="pg"><div class="lightWrap" style="inset:0 48% 0 0"></div><div class="pad" style="position:relative">
+  if(inc("why"))P.push(`<div class="pg"><div class="lightWrap" style="width:118mm"></div><div class="pad" style="position:relative">
     <h1 class="sec">Why Colliers?</h1>
     <h2 class="st" style="max-width:125mm">Selecting the right agency will determine whether this sale is adequately executed or fully maximised.</h2>
     <p class="small dim" style="max-width:125mm">This is not about marketing a property, it is about creating competition between the right buyers and controlling the process to drive price.</p>
@@ -1035,7 +1037,7 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
     return `<svg ${S}><circle cx="12" cy="12" r="9"/></svg>`;};
   if(inc("who"))P.push(`<div class="pg"><div class="pad">
     <h1 class="sec">Who is Colliers?</h1>
-    <div style="margin:0 0 8mm">${assets.world?`<img class="photo" src="${esc(assets.world)}" style="height:38mm;width:100%;object-fit:contain;background:var(--panel)" />`:svgWorld()}</div>
+    <div style="margin:0 -18mm 8mm">${assets.world?`<img class="photo" src="${esc(assets.world)}" style="height:auto;width:210mm;object-fit:cover" />`:`<div style="width:210mm">${svgWorld()}</div>`}</div>
     <div style="display:grid;grid-template-columns:1fr 62mm;gap:12mm">
       <div class="small"><h3 class="blue">At Colliers we are enterprising.</h3>${paras(whoBody)}</div>
       <div>${whoStats.map(i=>{const[l,v]=i.x.split("|").map(s=>s.trim());return `<div class="statCard" style="margin-bottom:5mm;display:flex;align-items:center;gap:4mm"><div style="flex:0 0 auto">${figIcon(l)}</div><div><div class="small dim">${esc(l)}</div><div class="big" style="font-size:15pt">${esc(v||"")}</div></div></div>`;}).join("")}</div>
@@ -1044,14 +1046,14 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
   </div></div>`);
 
   // 15 · Team
-  if(inc("team"))P.push(`<div class="pg"><div class="lightWrap" style="inset:0 48% 0 0"></div><div class="pad" style="position:relative">
+  if(inc("team"))P.push(`<div class="pg"><div class="lightWrap" style="width:118mm"></div><div class="pad" style="position:relative">
     <h1 class="sec">Colliers team</h1>
     <h2 class="st" style="font-size:11.5pt">Project directors</h2>
     ${leads.map(p=>`<div class="cvHead" style="max-width:150mm">${p.photo_url?`<img src="${esc(p.photo_url)}" />`:""}
       <div class="small"><b>${esc(p.name)}</b><br/><span class="dim">${esc(p.title||"")}</span>
       <div class="cols2" style="margin-top:2mm">${paras(p.expertise||"")}</div></div></div>`).join("")}
     ${sups.length?`<h2 class="st" style="font-size:11.5pt;margin-top:6mm">Supporting every facet of our selling strategy.</h2>
-    <div class="cols4">${sups.map(p=>`<div class="teamCell">${p.photo_url?`<img src="${esc(p.photo_url)}" />`:`<div style="width:22mm;height:22mm;border-radius:50%;background:#dfe5f0;margin:0 auto 2mm"></div>`}<b>${esc(p.name)}</b><br/><span class="dim">${esc(p.title||"")}</span></div>`).join("")}</div>`:""}
+    <div class="cols4">${sups.map(p=>`<div class="teamCell">${p.photo_url?`<img src="${esc(p.photo_url)}" />`:`<div style="width:22mm;height:22mm;border-radius:50%;background:#dfe5f0;margin:0 auto 2mm"></div>`}<b style="margin-bottom:1.5mm">${esc(p.name)}</b><span class="dim">${esc(p.title||"")}</span></div>`).join("")}</div>`:""}
   </div></div>`);
 
   // 16 · CVs (2 per page)
@@ -1103,16 +1105,31 @@ Subsequently this reflects an appraisal range in the reasonable bounds of ${mone
   // background with the subject photos arranged artistically. Not in Contents.
   if(P.length%2!==0){
     const photos=[...lines(f.property.photos),f.cover.photo,f.origin.photo].filter(Boolean);
-    const spots=[["8%","10%","46mm"],["54%","18%","54mm"],["22%","52%","58mm"],["60%","58%","44mm"]];
-    const art=photos.slice(0,4).map((u,idx)=>{const[l,t,w]=spots[idx];return `<img src="${esc(u)}" style="position:absolute;left:${l};top:${t};width:${w};height:auto;border-radius:2mm;box-shadow:0 2mm 6mm rgba(10,20,60,.18)" />`;}).join("");
+    const spots=[["6%","8%","78mm","-2deg"],["50%","14%","84mm","2deg"],["12%","54%","88mm","1.5deg"],["56%","60%","74mm","-1.5deg"]];
+    const art=photos.slice(0,4).map((u,idx)=>{const[l,t,w,rot]=spots[idx%spots.length];return `<img src="${esc(u)}" style="position:absolute;left:${l};top:${t};width:${w};height:52mm;object-fit:cover;border-radius:2mm;box-shadow:0 3mm 9mm rgba(10,20,60,.22);transform:rotate(${rot});border:2mm solid #fff" />`;}).join("");
     const filler=`<div class="pg"><div style="position:absolute;inset:0;background:var(--panel)"></div>${art}</div>`;
     P.splice(P.length-1,0,filler); // before the back cover
   }
 
   // page numbering (skip cover + back cover)
   const numbered=P.map((pg,i)=>(i===0||i===P.length-1)?pg:pg.replace('<div class="pad"',`${pgHead(i+1)}<div class="pad"`));
+  // Resolve Contents page-number tokens (§PG:key§). Each key maps to the
+  // heading text on its page; find the first page whose printed number we know.
+  const keyHeading={letter:"Executive summary",exec:"Executive summary",teamOverview:"Project team overview",
+    collaboration:"Collaboration",property:"The property",comps:"Case studies",value:"Estimated value",
+    strategy:"Sales strategy",origin:"Purchaser Origin",profiles:"Purchaser Profiles",reporting:"Reporting structure",
+    method:"Sales Method",budget:"Marketing budget",timeline:"Marketing timeline",digital:"Digital marketing overview",
+    why:"Why Colliers?",team:"Colliers team",cvs:"Curriculum vitae",refs:"References"};
+  let out=numbered.join("\n");
+  Object.entries(keyHeading).forEach(([k,h])=>{
+    // find the page index whose content contains this heading
+    const idx=numbered.findIndex(pg=>pg.includes(`>${h}<`)||pg.includes(`>${h} `)||pg.includes(h+"</h1>"));
+    const pageNo=idx>0?(idx+1):"";
+    out=out.replace(new RegExp(`§PG:${k}§`,"g"),pageNo);
+  });
+  out=out.replace(/§PG:[a-z]+§/gi,""); // clear any unresolved tokens
   return `<!DOCTYPE html><html lang="en-NZ"><head><meta charset="utf-8"><title>${esc(f.cover.propertyName||"CMA Report")} — ${esc(f.cover.title)}</title><style>${PRINT_CSS}</style></head>
-<body><div class="noprint"><button onclick="window.print()">Print / Save as PDF</button></div>${numbered.join("\n")}</body></html>`;
+<body><div class="noprint"><button onclick="window.print()">Print / Save as PDF</button></div>${out}</body></html>`;
 }
 function budgetTotalLabel(){const t=state.f.budget.items.reduce((a,i)=>a+num(i.cost),0);return t?`$${fmt(t)} + GST`:"—";}
 
