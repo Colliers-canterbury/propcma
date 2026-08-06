@@ -222,6 +222,10 @@ tfoot td{border-top:2px solid var(--navy);border-bottom:none;font-weight:700;pad
   padding:5px 12px;border-radius:6px;cursor:pointer;white-space:nowrap;}
 .dlBtn:hover{background:#0B8CC0;}
 .dlBtn:disabled{background:#B9D9E8;cursor:wait;}
+.viewBtn{background:#fff;border:1px solid var(--cyan);color:var(--cyan);font-weight:600;font-size:12.5px;
+  padding:4px 11px;border-radius:6px;cursor:pointer;white-space:nowrap;}
+.viewBtn:hover{background:#EAF7FC;}
+.viewBtn:disabled{opacity:.6;cursor:wait;}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
 /* ---------- v3 additions ---------- */
