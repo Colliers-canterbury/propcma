@@ -218,7 +218,7 @@ ${deal.deposit_to_trust ? `
 <ul class="checks avoid">
   <li class="${chk.agencyAgreement ? "" : "no"}">Signed agency agreement</li>
   <li class="${chk.unconditionalConfirmation ? "" : "no"}">Confirmation of unconditional</li>
-  <li class="${chk.salePriceConfirmation ? "" : "no"}">Confirmation of sale price</li>
+  <li class="${chk.executedAgreement ? "" : "no"}">Executed sale &amp; purchase agreement</li>
   <li class="${chk.marketingReport ? "" : "no"}">Marketing campaign report</li>
   <li class="${chk.amlComplete ? "" : "no"}">AML complete</li>
   ${deal.deposit_to_trust ? `<li class="${chk.spAgreement ? "" : "no"}">S&amp;P agreement (trust deal)</li>` : ""}
