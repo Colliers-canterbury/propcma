@@ -20,7 +20,9 @@
 //   4. GET  /api/deal-sheets/:id/attachments?slot=…            — download URL
 //   5. DELETE /api/deal-sheets/:id/attachments?slot=…          — remove
 //
-// Brokers may attach/remove on their OWN draft; accounts/managers may
+// Brokers may attach/remove checklist items on their OWN deal while it's
+// a draft, or rejected and being fixed up for resubmission — the same
+// edit window as the rest of the form. Accounts/managers may
 // on any non-draft deal.
 //
 // EXTRA attachments (kind='extra') are a separate concept from the
@@ -187,9 +189,14 @@ async function loadDealForWrite(req, id) {
     .from("deal_sheets").select("id, created_by, status").eq("id", id).single();
   if (error || !deal) throw new HttpError(404, "Deal sheet not found");
 
-  const isOwnerDraft = deal.created_by === user.oid && deal.status === "draft";
+  // The deal's own creator can manage checklist attachments whenever
+  // they can otherwise edit the form — draft, or rejected and being
+  // fixed up for resubmission. (The "Other Documents" free-form
+  // uploader is intentionally narrower than this — draft only — and
+  // enforces that separately in initUpload()/confirmUpload().)
+  const isOwnerEditable = deal.created_by === user.oid && ["draft", "rejected"].includes(deal.status);
   const isStaff = ["accounts", "manager"].includes(user.role) && deal.status !== "draft";
-  if (!isOwnerDraft && !isStaff)
+  if (!isOwnerEditable && !isStaff)
     throw new HttpError(403, "Not permitted to change attachments on this deal");
   deal._user = user; // carried through so confirmUpload()/remove() don't re-fetch it
   return deal;
