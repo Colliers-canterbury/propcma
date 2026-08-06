@@ -375,7 +375,7 @@
               ${txt("lease.expiryDate","Expiry date",{type:"date"})}
               ${txt("lease.rentReviewPeriod","Rent review period",{ph:"e.g. 2 yearly"})}
               ${sel("lease.dealType","Deal type",DEAL_TYPES)}
-              ${sel("lease.leaseBasis","Lease basis",["Net","Gross"])}
+              ${sel("lease.leaseBasis","Lease basis",["Net","Gross","Vacant"])}
               ${txt("lease.incentives","Incentives",{span:3,ph:"e.g. 3 months rent free"})}</div>`)}
 
           ${section("7","Trust deposit","Complete only if a deposit is paid into the Colliers trust account.",`
