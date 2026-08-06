@@ -131,7 +131,8 @@
       w.document.open(); w.document.write(html); w.document.close();
     },
     // returns { url } — a short-lived signed download link
-    attachmentUrl: (id, slot) => call(`/${id}/attachments?slot=${encodeURIComponent(slot)}`),
+    attachmentUrl: (id, slot, opts = {}) =>
+      call(`/${id}/attachments?slot=${encodeURIComponent(slot)}${opts.view ? "&mode=view" : ""}`),
   };
 
   // ───────────────────────── demo backend ────────────────────
@@ -280,7 +281,7 @@
       if (d) { d.attachments = d.attachments || []; d.attachments.push(row); }
       return delay({ id: slot, slot, name: file.name, description, size: file.size });
     },
-    attachmentUrl: (id, slot) => delay({ url: "#demo-file-" + slot }),
+    attachmentUrl: (id, slot, opts) => delay({ url: "#demo-file-" + slot }),
 
     listBrokers: () => delay(demoBrokers.filter((b) => b.active)),
     listAllBrokers: () => delay(demoBrokers),

@@ -17,6 +17,7 @@
   };
 
   const state = { tab: "queue", queue: [], completed: [], drafts: [], selectedId: null, deal: null,
+    completedViewId: null,
     filter: "all", note: "", completeComment: "", pendingNums: {},
     brokers: [], admins: [], userRole: "" };
 
@@ -122,6 +123,7 @@
     $("app").querySelectorAll("[data-tab]").forEach((b) =>
       b.onclick = async () => {
         state.tab = b.dataset.tab;
+        state.deal = null; state.selectedId = null; state.completedViewId = null;
         if (state.tab === "completed" && !state.completed.length) await loadCompleted();
         if (state.tab === "settings" && !state.brokers.length) await loadSettings();
         render();
@@ -153,12 +155,23 @@
   }
 
   function renderCompleted() {
+    // Viewing a single completed deal's full detail (read-only —
+    // renderDetail() already shows no action buttons for a 'complete'
+    // status deal, just the checklist, attachments, splits and history).
+    if (state.completedViewId && state.deal && state.deal.id === state.completedViewId) {
+      $("tabBody").innerHTML = `<button class="linkBtn" id="backToCompleted" style="margin-bottom:10px">← Back to Completed</button>
+        <div class="detail" id="detail"></div>`;
+      renderDetail();
+      $("backToCompleted").onclick = () => { state.completedViewId = null; state.deal = null; render(); };
+      return;
+    }
+
     const rows = [...state.completed].sort((a, b) =>
       new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
     $("tabBody").innerHTML = rows.length ? `
       <table class="compTable">
         <thead><tr><th>Property</th><th>Vendor</th><th>Salespeople</th>
-          <th class="r">Invoiced</th><th>Deal no.</th><th>Date</th><th></th></tr></thead>
+          <th class="r">Invoiced</th><th>Deal no.</th><th>Date</th><th colspan="2"></th></tr></thead>
         <tbody>${rows.map((d) => `<tr>
           <td><strong>${esc(d.property_address || "—")}</strong></td>
           <td>${esc(d.vendor_name || "—")}</td>
@@ -166,11 +179,24 @@
           <td class="r mono">$${fmt(d.total_invoice_ex_gst)}</td>
           <td>${esc(d.deal_no || "—")}</td>
           <td>${d.submitted_at ? new Date(d.submitted_at).toLocaleDateString("en-NZ",{day:"2-digit",month:"short",year:"numeric"}) : "—"}</td>
+          <td class="r"><button class="linkBtn" data-view="${d.id}">View</button></td>
           <td class="r"><button class="linkBtn" data-print="${d.id}">Print</button></td>
         </tr>`).join("")}</tbody></table>`
       : `<p class="empty">No completed deals yet.</p>`;
     $("tabBody").querySelectorAll("[data-print]").forEach((b) =>
       b.onclick = () => api.openPrint(b.dataset.print));
+    $("tabBody").querySelectorAll("[data-view]").forEach((b) =>
+      b.onclick = async () => {
+        b.disabled = true; b.textContent = "Opening…";
+        try {
+          state.completedViewId = b.dataset.view;
+          await loadDeal(b.dataset.view);
+          render();
+        } catch (e) {
+          alert("Could not open deal: " + e.message);
+          b.disabled = false; b.textContent = "View";
+        }
+      });
   }
 
   // ---------- settings ----------
@@ -311,13 +337,17 @@
           ${(checklistAttachments.length) ? `<h3>Attachments</h3>
           <ul class="attachList">${checklistAttachments.map((a) =>
             `<li><span>📎 ${esc(a.file_name)} <span class="dim">(${fmtSize(a.size_bytes)})</span></span>
-             <button class="dlBtn" data-slot="${esc(a.slot)}">Download</button></li>`).join("")}</ul>` : ""}
+             <span class="attachBtns">
+               <button class="viewBtn" data-slot="${esc(a.slot)}">View</button>
+               <button class="dlBtn" data-slot="${esc(a.slot)}">Download</button>
+             </span></li>`).join("")}</ul>` : ""}
 
           <h3>Additional attachments <span class="dim">(for accounts / audit)</span></h3>
           ${extraAttachments.length ? `<ul class="attachList extraList">${extraAttachments.map((a) => `<li>
               <span>📎 <strong>${esc(a.description||"(no description)")}</strong> — ${esc(a.file_name)}
                 <span class="dim">(${fmtSize(a.size_bytes)}${a.uploaded_at?" · "+new Date(a.uploaded_at).toLocaleDateString("en-NZ"):""})</span></span>
               <span class="attachBtns">
+                <button class="viewBtn" data-slot="${esc(a.slot)}">View</button>
                 <button class="dlBtn" data-slot="${esc(a.slot)}">Download</button>
                 <button class="rmBtn" data-extra-remove="${esc(a.slot)}">Remove</button>
               </span></li>`).join("")}</ul>` : `<p class="dim" style="margin:4px 0 10px">None added yet.</p>`}
@@ -410,6 +440,16 @@
           window.open(url, "_blank");
         } catch (e) { alert("Could not get download link: " + e.message); }
         finally { b.disabled = false; b.textContent = "Download"; }
+      };
+    });
+    el.querySelectorAll(".viewBtn").forEach((b) => {
+      b.onclick = async () => {
+        b.disabled = true; b.textContent = "Opening…";
+        try {
+          const { url } = await api.attachmentUrl(state.deal.id, b.dataset.slot, { view: true });
+          window.open(url, "_blank");
+        } catch (e) { alert("Could not open file: " + e.message); }
+        finally { b.disabled = false; b.textContent = "View"; }
       };
     });
 
