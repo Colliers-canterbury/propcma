@@ -146,7 +146,7 @@
     if (!f.listingSource) m.push("Listing source");
     if (!f.checklist.agencyAgreement) m.push("Checklist — signed agency agreement");
     if (!f.checklist.unconditionalConfirmation) m.push("Checklist — confirmation of unconditional");
-    if (!f.checklist.salePriceConfirmation) m.push("Checklist — confirmation of sale price");
+    if (!f.checklist.executedAgreement) m.push("Checklist — executed sale & purchase agreement");
     if (!f.checklist.amlComplete) m.push("Checklist — AML complete");
     if (f.depositToTrust && !f.checklist.spAgreement) m.push("Checklist — S&P agreement (trust deal)");
     return m;
@@ -261,8 +261,7 @@
         <div style="text-align:right">
           <a href="admin.html" class="linkBtn" style="display:inline-block;margin-bottom:8px">← All deal sheets</a>
           <div class="accountsBox"><span class="tag">Completed by accounts</span>
-          <div class="acctFields"><label><span>File No.</span><input disabled placeholder="—" /></label>
-          <label><span>Deal No.</span><input disabled placeholder="—" /></label></div></div>
+          <div class="acctFields"><label><span>Deal No.</span><input disabled placeholder="—" /></label></div></div>
         </div>
       </header>
       <p class="mandate">Complete <strong>all</strong> categories for commission to be paid promptly.
@@ -358,13 +357,13 @@
           ${section("11","Mandatory checklist","Tick each item. You may optionally attach the document — accounts can download it.",`<div class="checkStack">
             <div class="checkRow">${chk("checklist.agencyAgreement","Signed agency agreement attached")}${uploadSlot("agencyAgreement","")}</div>
             <div class="checkRow">${chk("checklist.unconditionalConfirmation","Confirmation of unconditional attached (from vendor or vendor's solicitor)")}${uploadSlot("unconditionalConfirmation","")}</div>
-            <div class="checkRow">${chk("checklist.salePriceConfirmation","Confirmation of sale price attached (e.g. first page of the S&P agreement)")}${uploadSlot("salePriceConfirmation","")}</div>
+            <div class="checkRow">${chk("checklist.executedAgreement","Executed sale &amp; purchase agreement attached")}${uploadSlot("executedAgreement","")}</div>
             <div class="checkRow">${chk("checklist.amlComplete","AML complete")}${uploadSlot("amlComplete","")}</div>
             ${f.depositToTrust?`<div class="checkRow">${chk("checklist.spAgreement","Trust deal — sale and purchase agreement attached")}${uploadSlot("spAgreement","")}</div>`:""}</div>`)}
 
           ${section("12","Other Documents","Not mandatory — attach anything else useful for the file. Available while this deal sheet is still a draft.",`
             <div class="checkRow">${chk("checklist.marketingReport","Marketing campaign report attached (optional)")}${uploadSlot("marketingReport","")}</div>
-            <div class="checkRow">${chk("checklist.executedAgreement","Executed sale &amp; purchase agreement attached (optional)")}${uploadSlot("executedAgreement","")}</div>
+            <div class="checkRow">${chk("checklist.salePriceConfirmation","Confirmation of sale price attached (e.g. first page of the S&amp;P agreement) (optional)")}${uploadSlot("salePriceConfirmation","")}</div>
             <h3 class="subHead" style="margin-top:14px">Any other document</h3>
             ${extraAttachmentsList()}
             ${state.dealStatus === "draft" ? `<div class="extraUpload">
@@ -396,7 +395,7 @@
           <button class="primary" id="sendBtn">Send to accounts</button>
           <button class="ghostLight" id="printBtn">Print / Save as PDF</button>
           <div class="saveState" id="saveState">${saveState}</div>
-          <p class="tiny">Sends the completed deal sheet to accounts for File No. / Deal No. assignment, invoicing and commission processing.</p>
+          <p class="tiny">Sends the completed deal sheet to accounts for Deal No. assignment, invoicing and commission processing.</p>
         </div></aside>
       </div>
 
@@ -659,7 +658,7 @@
       <div class="doneMark">✓</div>
       <h1>Deal sheet sent to accounts</h1>
       <p><strong>${esc(f.property.address||"—")}</strong> — sale price $${fmt(d.salePrice)}, total to invoice $${fmt(d.totalInvoice)} excl GST.</p>
-      <p class="dim">Accounts will assign the File No. and Deal No., raise the invoice and process commission. You'll be copied on the confirmation.</p>
+      <p class="dim">Accounts will invoice the client, assign the Deal No., and process commission. You'll be copied on the confirmation.</p>
       <div class="doneBtns">
         <button class="primary" id="adminBtn">Return to deal sheets</button>
         <button class="ghost" id="againBtn">Start a new deal sheet</button>

@@ -740,7 +740,7 @@
       <div class="doneMark">✓</div>
       <h1>Leasing deal sheet sent to accounts</h1>
       <p><strong>${esc(f.property.address||"—")}</strong> — gross rental $${fmt(d.grossRental)} p.a., total to invoice $${fmt(d.totalInvoice)} excl GST.</p>
-      <p class="dim">Accounts will assign the File No. and Deal No., raise the invoice and process commission. You'll be copied on the confirmation.</p>
+      <p class="dim">Accounts will invoice the client, assign the Deal No., and process commission. You'll be copied on the confirmation.</p>
       <div class="doneBtns">
         <button class="primary" id="adminBtn">Return to deal sheets</button>
         <button class="ghost" id="againBtn">Start a new deal sheet</button>

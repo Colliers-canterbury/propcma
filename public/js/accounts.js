@@ -64,7 +64,7 @@
       : [
           ["agencyAgreement", "Signed agency agreement"],
           ["unconditionalConfirmation", "Confirmation of unconditional"],
-          ["salePriceConfirmation", "Confirmation of sale price"],
+          ["executedAgreement", "Executed sale & purchase agreement"],
           ["marketingReport", "Marketing campaign report"],
           ["amlComplete", "AML complete"],
         ];
