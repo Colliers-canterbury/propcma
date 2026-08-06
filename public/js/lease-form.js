@@ -143,16 +143,21 @@
       .reduce((a,l) => a + num((r[l.key]||{}).qty), 0);
 
     const adminFee = f.comm.adminFee ? 500 : 0;
+    const recoverMarketing = num(f.comm.recoverMarketing);
+    const recoverOther = num(f.comm.recoverOther);
     const totalInvoice = num(f.comm.fee) + num(f.comm.otherFee) + adminFee
-      + num(f.comm.recoverMarketing) + num(f.comm.recoverOther);
+      + recoverMarketing + recoverOther;
 
-    const commissionBase = totalInvoice - adminFee;
+    // commissionBase is the actual commission-earning amount — the admin
+    // fee and cost recoveries are pass-throughs, not commission, so
+    // neither third parties nor salespeople take a share of them.
+    const commissionBase = totalInvoice - adminFee - recoverMarketing - recoverOther;
 
     // A split can be a fixed $ amount OR a percentage. Fixed wins when set.
     const tpAmount = (s, base) => num(s.fixed) > 0 ? num(s.fixed) : (num(s.pct)/100)*base;
     const thirdPartyPctTotal = f.thirdParty.reduce((a,s) => a + num(s.pct), 0);
     const thirdPartyTotal = f.thirdParty.reduce((a,s) => a + tpAmount(s, commissionBase), 0);
-    const internalPool = totalInvoice - thirdPartyTotal;
+    const internalPool = commissionBase - thirdPartyTotal;
     const internalPctTotal = f.splits.reduce((a,s) => a + num(s.pct), 0);
     const internalFixedTotal = f.splits.reduce((a,s) => a + (num(s.fixed) > 0 ? num(s.fixed) : 0), 0);
     // With fixed amounts in the mix, "100%" no longer strictly applies —

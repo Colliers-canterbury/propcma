@@ -110,13 +110,18 @@
     });
     const tierFees = f.comm.tiers.map((t,i) => (num(t.pct)/100) * tierBases[i]);
     const adminFee = f.comm.adminFee ? 500 : 0;
+    const recoverMarketing = num(f.comm.recoverMarketing);
+    const recoverOther = num(f.comm.recoverOther);
     const totalInvoice = tierFees.reduce((a,b)=>a+b,0) + num(f.comm.otherFee) + adminFee
-      + num(f.comm.recoverMarketing) + num(f.comm.recoverOther);
+      + recoverMarketing + recoverOther;
 
-    const commissionBase = totalInvoice - adminFee;
+    // commissionBase is the actual commission-earning amount — the admin
+    // fee and cost recoveries are pass-throughs, not commission, so
+    // neither third parties nor salespeople take a share of them.
+    const commissionBase = totalInvoice - adminFee - recoverMarketing - recoverOther;
     const thirdPartyPctTotal = f.thirdParty.reduce((a,s)=>a+num(s.pct),0);
     const thirdPartyTotal = f.thirdParty.reduce((a,s)=>a + (num(s.pct)/100)*commissionBase, 0);
-    const internalPool = totalInvoice - thirdPartyTotal;
+    const internalPool = commissionBase - thirdPartyTotal;
     const internalPctTotal = f.splits.reduce((a,s)=>a+num(s.pct),0);
     const internalOk = internalPctTotal === 0 || Math.abs(internalPctTotal-100) < 0.01;
 
@@ -324,14 +329,14 @@
             <table class="tbl"><thead><tr><th>Tier</th><th>%</th><th>Of amount $</th><th class="r">Fee $</th></tr></thead>
             <tbody>${commRows}
               <tr><td>Other</td><td colspan="2"><input class="cell" data-path="comm.otherDesc" value="${esc(f.comm.otherDesc)}" placeholder="Please specify" /></td>
-                <td class="r"><input class="cell r" data-path="comm.otherFee" value="${esc(f.comm.otherFee)}" placeholder="0.00" /></td></tr>
+                <td class="r"><input class="cell r" data-money data-recalc data-path="comm.otherFee" value="${esc(f.comm.otherFee)}" placeholder="0.00" /></td></tr>
               <tr><td colspan="3"><div class="feeChoice">
                 <label class="chk"><input type="checkbox" id="feeAdmin" ${f.comm.adminFee?"checked":""} /><span>Administration fee ($500)</span></label>
               </div></td><td class="r mono">${fmt(d.adminFee)}</td></tr>
               <tr><td>Recover marketing costs</td><td colspan="2"></td>
-                <td class="r"><input class="cell r" data-path="comm.recoverMarketing" value="${esc(f.comm.recoverMarketing)}" placeholder="0.00" /></td></tr>
+                <td class="r"><input class="cell r" data-money data-recalc data-path="comm.recoverMarketing" value="${esc(f.comm.recoverMarketing)}" placeholder="0.00" /></td></tr>
               <tr><td>Recover other costs</td><td colspan="2"><input class="cell" data-path="comm.recoverOtherDesc" value="${esc(f.comm.recoverOtherDesc)}" placeholder="Please specify" /></td>
-                <td class="r"><input class="cell r" data-path="comm.recoverOther" value="${esc(f.comm.recoverOther)}" placeholder="0.00" /></td></tr>
+                <td class="r"><input class="cell r" data-money data-recalc data-path="comm.recoverOther" value="${esc(f.comm.recoverOther)}" placeholder="0.00" /></td></tr>
             </tbody>
             <tfoot><tr><td colspan="3">Total amount to be invoiced (excl GST)</td><td class="r mono total">$${fmt(d.totalInvoice)}</td></tr></tfoot></table>`)}
 
