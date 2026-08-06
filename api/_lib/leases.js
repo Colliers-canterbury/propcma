@@ -75,15 +75,20 @@ export function computeLeaseDerived(form) {
   // ---- commission (manual amounts) ----
   const adminFee = form.comm?.adminFee ? 500 : 0;
   const commissionFee = num(form.comm?.fee);
+  const recoverMarketing = num(form.comm?.recoverMarketing);
+  const recoverOther = num(form.comm?.recoverOther);
   const totalInvoice =
     commissionFee +
     num(form.comm?.otherFee) +
     adminFee +
-    num(form.comm?.recoverMarketing) +
-    num(form.comm?.recoverOther);
+    recoverMarketing +
+    recoverOther;
 
   // ---- splits (Option B, identical to sales) ----
-  const commissionBase = totalInvoice - adminFee;
+  // commissionBase is the actual commission-earning amount — the admin
+  // fee and cost recoveries are pass-throughs, not commission, so
+  // neither third parties nor salespeople take a share of them.
+  const commissionBase = totalInvoice - adminFee - recoverMarketing - recoverOther;
 
   // A split can be a fixed $ amount OR a percentage. Fixed wins when set.
   const splitAmt = (s, base) => num(s.fixed) > 0 ? num(s.fixed) : +((num(s.pct) / 100) * base).toFixed(2);
@@ -99,7 +104,7 @@ export function computeLeaseDerived(form) {
 
   const thirdPartyTotal = thirdPartyRows.reduce((a, s) => a + s.split_amount, 0);
   const thirdPartyPctTotal = thirdPartyRows.reduce((a, s) => a + s.split_pct, 0);
-  const internalPool = +(totalInvoice - thirdPartyTotal).toFixed(2);
+  const internalPool = +(commissionBase - thirdPartyTotal).toFixed(2);
 
   const internalRows = (form.splits || [])
     .filter((s) => num(s.pct) > 0 || num(s.fixed) > 0)

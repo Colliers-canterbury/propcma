@@ -31,38 +31,40 @@ export function computeDerived(form) {
     const typed = t.base !== "" && t.base != null;
     const base = typed ? num(t.base) : Math.max(remaining, 0);
     remaining -= base;
-    // A flat $ rate wins over the % calculation when set (mirrors the form).
-    return num(t.flat) > 0 ? num(t.flat) : (num(t.pct) / 100) * base;
+    return (num(t.pct) / 100) * base;
   });
 
   const adminFee = form.comm?.adminFee ? 500 : 0;
+  const recoverMarketing = num(form.comm?.recoverMarketing);
+  const recoverOther = num(form.comm?.recoverOther);
 
   const totalInvoice =
     tierFees.reduce((a, b) => a + b, 0) +
     num(form.comm?.otherFee) +
     adminFee +
-    num(form.comm?.recoverMarketing) +
-    num(form.comm?.recoverOther);
+    recoverMarketing +
+    recoverOther;
 
-  // Base the third-party share is calculated on.
-  const commissionBase = totalInvoice - adminFee;
+  // Base the third-party share (and, in turn, the internal pool) is
+  // calculated on. The admin fee and cost recoveries are pass-throughs,
+  // not commission, so neither third parties nor salespeople take a
+  // share of them.
+  const commissionBase = totalInvoice - adminFee - recoverMarketing - recoverOther;
 
   const thirdPartyRows = (form.thirdParty || [])
-    .filter((s) => num(s.pct) > 0 || num(s.fixed) > 0)
+    .filter((s) => num(s.pct) > 0)
     .map((s) => ({
       party_type: "third_party",
       party_name: s.name || "(unnamed)",
       split_pct: num(s.pct),
-      // % of commission PLUS any fixed $ — both apply together
-      // (e.g. 10% + $500), mirroring the form's tpAmount().
-      split_amount: +((num(s.pct) / 100) * commissionBase + num(s.fixed)).toFixed(2),
+      split_amount: +((num(s.pct) / 100) * commissionBase).toFixed(2),
     }));
 
   const thirdPartyTotal = thirdPartyRows.reduce((a, s) => a + s.split_amount, 0);
   const thirdPartyPctTotal = thirdPartyRows.reduce((a, s) => a + s.split_pct, 0);
 
   // What internal brokers divide between them.
-  const internalPool = +(totalInvoice - thirdPartyTotal).toFixed(2);
+  const internalPool = +(commissionBase - thirdPartyTotal).toFixed(2);
 
   const internalRows = (form.splits || [])
     .filter((s) => num(s.pct) > 0)
@@ -109,9 +111,7 @@ export function toRow(form, derived) {
     total_invoice_ex_gst: derived.totalInvoice || null,
     wale_years: form.sale?.wale ? parseFloat(String(form.sale.wale).replace(/[^\d.]/g, "")) || null : null,
     deposit_to_trust: !!form.depositToTrust,
-    // The form stores this at the top level (form.confidential); the old
-    // form.press path never existed, so the flag silently never persisted.
-    confidential: !!(form.confidential ?? form.press?.confidential),
+    confidential: !!form.press?.confidential,
     property_id: form.propertyId || null, // uuid from PropCMA properties table
     form,
   };
@@ -133,8 +133,6 @@ export function validateForSubmit(form, derived) {
     missing.push("Salesperson split must total 100%");
   if (derived.thirdPartyPctTotal >= 100)
     missing.push("Third-party share must be under 100% of commission");
-  else if (derived.totalInvoice && derived.thirdPartyTotal >= derived.totalInvoice)
-    missing.push("Third-party share can't exceed the commission");
   if (!form.buyerSource) missing.push("Buyer source");
   if (!form.listingSource) missing.push("Listing source");
 
@@ -142,7 +140,6 @@ export function validateForSubmit(form, derived) {
   if (!c.agencyAgreement) missing.push("Checklist — signed agency agreement");
   if (!c.unconditionalConfirmation) missing.push("Checklist — confirmation of unconditional");
   if (!c.salePriceConfirmation) missing.push("Checklist — confirmation of sale price");
-  if (!c.marketingReport) missing.push("Checklist — marketing campaign report");
   if (!c.amlComplete) missing.push("Checklist — AML complete");
   if (form.depositToTrust && !c.spAgreement)
     missing.push("Checklist — S&P agreement (trust deal)");
