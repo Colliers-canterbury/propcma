@@ -139,7 +139,7 @@ export function validateForSubmit(form, derived) {
   const c = form.checklist || {};
   if (!c.agencyAgreement) missing.push("Checklist — signed agency agreement");
   if (!c.unconditionalConfirmation) missing.push("Checklist — confirmation of unconditional");
-  if (!c.salePriceConfirmation) missing.push("Checklist — confirmation of sale price");
+  if (!c.executedAgreement) missing.push("Checklist — executed sale & purchase agreement");
   if (!c.amlComplete) missing.push("Checklist — AML complete");
   if (form.depositToTrust && !c.spAgreement)
     missing.push("Checklist — S&P agreement (trust deal)");
