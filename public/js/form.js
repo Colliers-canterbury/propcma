@@ -304,10 +304,10 @@
             ${txt("sale.dateOfAgreement","Date of agreement",{type:"date",req:true})}
             ${txt("sale.unconditionalDate","Unconditional date",{type:"date",req:true})}
             ${txt("sale.salePrice","Sale price (excl GST) $",{ph:"0.00",req:true,money:true})}
-            ${sel("sale.rentalBasis","Rental basis",["Net","Gross"])}
-            ${txt("sale.rentalIncome",(f.sale.rentalBasis)+" rental income $ p.a.",{money:true})}
+            ${sel("sale.rentalBasis","Rental basis",["Net","Gross","Vacant"])}
+            ${f.sale.rentalBasis!=="Vacant" ? `${txt("sale.rentalIncome",(f.sale.rentalBasis)+" rental income $ p.a.",{money:true})}
             <label class="fld"><span class="lbl">${f.sale.rentalBasis} yield %</span>
-              <input data-path="sale.yieldManual" value="${esc(f.sale.yieldManual)}" placeholder="${yieldCalcPlaceholder(d)}" /></label>
+              <input data-path="sale.yieldManual" value="${esc(f.sale.yieldManual)}" placeholder="${yieldCalcPlaceholder(d)}" /></label>` : ""}
             ${sel("sale.titleType","Title",TITLES)}${txt("sale.landArea","Land area (sqm)")}
             ${txt("sale.wale","WALE (Years)")}
             ${txt("sale.tenancies","No. of tenancies (incl. sub-tenancies)")}${txt("sale.occupiedArea","Occupied by area (sqm)")}</div>
@@ -388,7 +388,7 @@
             <div><dt>Property</dt><dd>${f.property.address?esc(f.property.address):"—"}</dd></div>
             <div><dt>Vendor</dt><dd>${esc(f.vendor.name||"—")}</dd></div>
             <div><dt>Sale price</dt><dd>${d.salePrice?"$"+fmt(d.salePrice):"—"}</dd></div>
-            <div><dt>${f.sale.rentalBasis} yield</dt><dd>${d.yieldPct?d.yieldPct.toFixed(2)+"%":"—"}</dd></div>
+            <div><dt>${f.sale.rentalBasis==="Vacant"?"Yield":f.sale.rentalBasis+" yield"}</dt><dd>${d.yieldPct?d.yieldPct.toFixed(2)+"%":"—"}</dd></div>
             <div class="hl"><dt>Total to invoice</dt><dd>$${fmt(d.totalInvoice)}</dd></div>
             <div><dt>Salesperson split</dt><dd class="${d.internalPctTotal&&!d.internalOk?"bad":""}">${d.internalPctTotal.toFixed(0)}%</dd></div>
           </dl>
@@ -425,7 +425,15 @@
         el.onchange = () => set(path, el.checked);
       } else if (el.tagName === "SELECT" || el.type === "date") {
         // no typing caret to preserve — safe to re-render
-        el.onchange = () => set(path, el.value);
+        el.onchange = () => {
+          if (path === "sale.rentalBasis" && el.value === "Vacant") {
+            // Don't leave a stale rental figure sitting in the data once
+            // the fields showing it are hidden.
+            state.f.sale.rentalIncome = "";
+            state.f.sale.yieldManual = "";
+          }
+          set(path, el.value);
+        };
       } else {
         // text / textarea: update state + summary only, NEVER re-render
         // the form while typing (that was reversing text as the caret
