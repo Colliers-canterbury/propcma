@@ -176,9 +176,19 @@ async function signedUrl(req, res, id) {
     .select("storage_path, file_name").eq("deal_id", id).eq("slot", slot);
   if (!rows || !rows.length) throw new HttpError(404, "No file for that slot");
 
+  // "view" opens the file in the browser (e.g. its native PDF viewer);
+  // anything else (the default) forces a Save dialog via
+  // Content-Disposition: attachment. Whether "view" actually renders
+  // inline vs. still downloads depends on the browser and file type —
+  // PDFs and images typically render inline, Word/Excel usually still
+  // save, since most browsers have no inline viewer for those.
+  const wantsInline = req.query.mode === "view";
   const { data: signed, error: sErr } = await supabase.storage
-    .from(BUCKET).createSignedUrl(rows[0].storage_path, 300, { download: rows[0].file_name });
-  if (sErr) throw new HttpError(500, "Could not create download link");
+    .from(BUCKET).createSignedUrl(
+      rows[0].storage_path, 300,
+      wantsInline ? {} : { download: rows[0].file_name }
+    );
+  if (sErr) throw new HttpError(500, "Could not create link");
 
   return res.status(200).json({ url: signed.signedUrl, name: rows[0].file_name });
 }
