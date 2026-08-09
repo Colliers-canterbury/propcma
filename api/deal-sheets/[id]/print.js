@@ -14,8 +14,14 @@ import { supabase } from "../../_lib/supabase.js";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const money = (n) => n == null ? "—" :
-  "$" + Number(n).toLocaleString("en-NZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = (n) => {
+  if (n == null || n === "") return "—";
+  // Values coming straight from deal.form.* may now be comma-formatted
+  // strings (the forms live-format $ fields as the user types) — strip
+  // that before parsing, or Number() returns NaN for e.g. "2,000.00".
+  const v = typeof n === "number" ? n : parseFloat(String(n).replace(/[$,\s]/g, ""));
+  return isNaN(v) ? "—" : "$" + v.toLocaleString("en-NZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
 const yn = (b) => b ? "Yes" : "No";
 const nzDate = (v) => {
   if (!v) return "—";
@@ -111,6 +117,25 @@ function renderPrintable(deal, splits, attachments, brokers, preparedBy) {
   const nameOf = (code) => (brokers.find((b) => b.code === code) || {}).first_name || code;
   const dealBrokers = (f.ownership?.salespeople || []).map(nameOf).join(", ");
 
+  // Comma-safe number parsing — form fields live-format with thousands
+  // separators as the user types, so this strips that before parsing.
+  const num = (v) => { const x = parseFloat(String(v ?? "").replace(/[$,\s]/g, "")); return isNaN(x) ? 0 : x; };
+
+  // Tiered commission: mirrors the same calculation used in the form
+  // itself (public/js/form.js) and at submit time (api/_lib/deals.js) —
+  // each tier's base is whatever's left of the sale price after the
+  // tiers above it, unless a tier has an explicit typed amount.
+  const salePrice = num(deal.sale_price_ex_gst ?? sale.salePrice);
+  const tierBases = [];
+  let remaining = salePrice;
+  (comm.tiers || []).forEach((t, i) => {
+    const typed = t.base !== "" && t.base != null;
+    const base = typed ? num(t.base) : Math.max(remaining, 0);
+    tierBases[i] = base;
+    remaining -= base;
+  });
+  const tierFees = (comm.tiers || []).map((t, i) => (num(t.pct) / 100) * tierBases[i]);
+
   const row = (label, value) => `<tr><th>${label}</th><td>${value}</td></tr>`;
   const party = (p, title, solicitor) => !p?.name ? "" : `
     <h3>${title}</h3>
@@ -190,7 +215,7 @@ ${deal.deposit_to_trust ? `
   <thead><tr><th>Item</th><th class="r">%</th><th class="r">Amount</th></tr></thead>
   <tbody>
     ${(comm.tiers || []).map((t, i) => t.pct ? `<tr><td>${["Commission","Second tier","Third tier"][i]}</td>
-      <td class="r">${esc(t.pct)}%</td><td class="r">—</td></tr>` : "").join("")}
+      <td class="r">${esc(t.pct)}%</td><td class="r">${money(tierFees[i])}</td></tr>` : "").join("")}
     ${comm.otherFee ? `<tr><td>Other — ${dash(comm.otherDesc)}</td><td class="r"></td><td class="r">${money(comm.otherFee)}</td></tr>` : ""}
     ${comm.adminFee ? `<tr><td>Administration fee</td><td class="r"></td><td class="r">${money(500)}</td></tr>` : ""}
     ${comm.recoverMarketing ? `<tr><td>Recover marketing costs</td><td class="r"></td><td class="r">${money(comm.recoverMarketing)}</td></tr>` : ""}
