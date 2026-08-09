@@ -82,8 +82,8 @@ dialog .dlgBody{padding:18px 20px;max-height:70vh;overflow:auto}
 
 <script>
 // ── CONFIG — copy these two values from PropCMA's index.html ──
-window.SUPABASE_URL  = "https://mcurpiuaezilcnnuqvnm.supabase.co";
-window.SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdXJwaXVhZXppbGNubnVxdm5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MTA5MTEsImV4cCI6MjA5NjA4NjkxMX0.nPts4jRqwTm_CZsD2OUmO5ZgjTKIMk1-CLsNqRYCOxw";
+window.SUPABASE_URL  = "YOUR_PROJECT.supabase.co URL HERE";
+window.SUPABASE_ANON = "YOUR ANON KEY HERE";
 // Microsoft sign-in — same Azure app registration as the deal sheets.
 // Used only to identify the user so Template Content can be admin-gated.
 window.MSAL = {
@@ -631,11 +631,22 @@ async function saveReport(){
     client_name:f.letter.salutation,property_address:f.property.address||f.cover.addressLine,
     form:{...f,__reportName:state.reportName},updated_at:new Date().toISOString()};
   let res;
-  if(state.reportId)res=await sb.from("cma_reports").update(row).eq("id",state.reportId).select("id").single();
-  else res=await sb.from("cma_reports").insert(row).select("id").single();
-  if(res.error){toast("Save failed: "+res.error.message);return;}
+  if(state.reportId)res=await sb.from("cma_reports").update(row).eq("id",state.reportId).select("id").maybeSingle();
+  else res=await sb.from("cma_reports").insert(row).select("id").maybeSingle();
+  if(res.error){toast("Save failed: "+res.error.message);console.error("cma_reports save error:",res.error);return;}
+  if(!res.data||!res.data.id){
+    // Insert reported no error but returned no row — almost always an RLS
+    // policy that blocks the row (WITH CHECK) or the SELECT after insert.
+    toast("Save didn't persist — check cma_reports table policies (see console)");
+    console.error("cma_reports save returned no row. Sent:",row,"Response:",res);
+    return;
+  }
   state.reportId=res.data.id;
-  await loadAll();toast("Saved: "+state.reportName);
+  await loadAll();
+  // Confirm it actually shows in the reloaded list.
+  const inList=state.reports.some(x=>x.id===state.reportId);
+  toast(inList?("Saved: "+state.reportName):"Saved, but not appearing in the list — check console");
+  if(!inList)console.error("Saved id",state.reportId,"not in reloaded reports:",state.reports);
 }
 // Modal asking for a report name; resolves to the name, or null if cancelled.
 function promptReportName(suggested){
