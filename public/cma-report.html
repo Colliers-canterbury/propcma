@@ -82,8 +82,8 @@ dialog .dlgBody{padding:18px 20px;max-height:70vh;overflow:auto}
 
 <script>
 // ── CONFIG — copy these two values from PropCMA's index.html ──
-window.SUPABASE_URL  = "https://mcurpiuaezilcnnuqvnm.supabase.co";
-window.SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdXJwaXVhZXppbGNubnVxdm5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MTA5MTEsImV4cCI6MjA5NjA4NjkxMX0.nPts4jRqwTm_CZsD2OUmO5ZgjTKIMk1-CLsNqRYCOxw";
+window.SUPABASE_URL  = "YOUR_PROJECT.supabase.co URL HERE";
+window.SUPABASE_ANON = "YOUR ANON KEY HERE";
 // Microsoft sign-in — same Azure app registration as the deal sheets.
 // Used only to identify the user so Template Content can be admin-gated.
 window.MSAL = {
@@ -244,9 +244,19 @@ async function loadProps(){
   // Case studies are sold comparables — exclude leases. PropCMA stores the
   // type in lease_or_sale ("Sale"/"Lease"); keep anything that isn't a lease
   // so blank/legacy rows still appear.
-  const {data}=await sb.from("properties").select("*").limit(2000);
-  state.props=(data||[]).filter(r=>String(r.lease_or_sale||"").toLowerCase()!=="lease")
+  // PostgREST caps each request at 1000 rows, so page through with range().
+  let all=[],from=0,page=1000;
+  for(let i=0;i<20;i++){ // safety cap: up to 20,000 properties
+    const {data,error}=await sb.from("properties").select("*").range(from,from+page-1);
+    if(error){console.error("loadProps page error:",error.message);break;}
+    if(!data||!data.length)break;
+    all=all.concat(data);
+    if(data.length<page)break; // last page
+    from+=page;
+  }
+  state.props=all.filter(r=>String(r.lease_or_sale||"").toLowerCase()!=="lease")
     .sort((a,b)=>String(b.sale_date||"").localeCompare(String(a.sale_date||"")));
+  console.log(`loadProps: ${all.length} fetched, ${state.props.length} sales shown`);
   return state.props;
 }
 function blockText(key){return state.f.overrides[key] ?? state.blocks[key] ?? "";}
@@ -613,8 +623,10 @@ async function propertyPicker(onPick){
     // Search the human fields only — searching the whole JSON row matched
     // stray "sale"/"lease" text and other noise.
     const hay=(p)=>[p.address,p.vendor,p.purchaser,p.category,p.broker].filter(Boolean).join(" ").toLowerCase();
-    const hits=props.filter(p=>!ql||hay(p).includes(ql)).slice(0,40);
-    $("ppList").innerHTML=hits.map((p,i)=>`<div class="pickRow" data-i="${props.indexOf(p)}"><span>${esc(p.address||"(no address)")}</span><span class="mini">${p.sale_price?money0(p.sale_price):""} ${esc(p.sale_date||"")}</span></div>`).join("")||"No matches.";
+    const matches=props.filter(p=>!ql||hay(p).includes(ql));
+    const hits=matches.slice(0,200);
+    const notice=matches.length>hits.length?`<div class="mini" style="padding:6px 10px;color:var(--ink2)">Showing ${hits.length} of ${matches.length} — type to narrow the search.</div>`:"";
+    $("ppList").innerHTML=notice+(hits.map((p,i)=>`<div class="pickRow" data-i="${props.indexOf(p)}"><span>${esc(p.address||"(no address)")}</span><span class="mini">${p.sale_price?money0(p.sale_price):""} ${esc(p.sale_date||"")}</span></div>`).join("")||"No matches.");
     $("ppList").querySelectorAll(".pickRow").forEach(r=>r.onclick=()=>{d.close();onPick(props[+r.dataset.i]);});
   };
   draw("");
