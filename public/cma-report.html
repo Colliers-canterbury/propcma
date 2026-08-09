@@ -24,9 +24,11 @@ header.top select,header.top button,header.top input{font:inherit}
 .btn:disabled{opacity:.5;cursor:default}
 .layout{display:flex;min-height:calc(100vh - 54px)}
 nav.side{width:230px;background:#fff;border-right:1px solid var(--line);padding:14px 0;position:sticky;top:54px;align-self:flex-start;max-height:calc(100vh - 54px);overflow:auto}
-nav.side a{display:block;padding:7px 18px;color:var(--ink2);text-decoration:none;font-size:13px;border-left:3px solid transparent}
+nav.side a{display:flex;align-items:center;gap:8px;padding:7px 18px;color:var(--ink2);text-decoration:none;font-size:13px;border-left:3px solid transparent}
 nav.side a.on{color:var(--navy);border-left-color:var(--blue);background:var(--panel);font-weight:600}
 nav.side .grp{padding:12px 18px 4px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#9aa3b8}
+.navnum{flex:0 0 auto;width:18px;height:18px;border-radius:50%;background:var(--panel);color:var(--navy);font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line)}
+nav.side a.on .navnum{background:var(--blue);color:#fff;border-color:var(--blue)}
 main.body{flex:1;padding:22px;max-width:980px}
 section.card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:20px 22px;margin-bottom:18px}
 section.card h2{margin:0 0 4px;font-size:16px;color:var(--navy)}
@@ -80,8 +82,8 @@ dialog .dlgBody{padding:18px 20px;max-height:70vh;overflow:auto}
 
 <script>
 // ── CONFIG — copy these two values from PropCMA's index.html ──
-window.SUPABASE_URL  = "https://mcurpiuaezilcnnuqvnm.supabase.co";
-window.SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdXJwaXVhZXppbGNubnVxdm5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MTA5MTEsImV4cCI6MjA5NjA4NjkxMX0.nPts4jRqwTm_CZsD2OUmO5ZgjTKIMk1-CLsNqRYCOxw";
+window.SUPABASE_URL  = "YOUR_PROJECT.supabase.co URL HERE";
+window.SUPABASE_ANON = "YOUR ANON KEY HERE";
 // Microsoft sign-in — same Azure app registration as the deal sheets.
 // Used only to identify the user so Template Content can be admin-gated.
 window.MSAL = {
@@ -222,7 +224,7 @@ function defaultForm(){
 }
 
 // ── state + data ─────────────────────────────────────────────
-const state={reportId:null,f:defaultForm(),profiles:[],blocks:{},reports:[],props:[],section:"cover"};
+const state={reportId:null,reportName:"",f:defaultForm(),profiles:[],blocks:{},reports:[],props:[],section:"cover"};
 
 async function loadAll(){
   const [p,b,r]=await Promise.all([
@@ -327,8 +329,15 @@ function renderNav(){
   });
   // if a non-admin is parked on a gated section, bounce to cover
   if(!auth.isAdmin&&adminOnly.has(state.section))state.section="cover";
-  $("sideNav").innerHTML=items.map(s=>s.grp?`<div class="grp">${s.grp}</div>`:
-    `<a href="#" data-s="${s.id}" class="${state.section===s.id?"on":""}">${s.label}</a>`).join("");
+  // Number the Report-group items (not the Office library ones) with circles.
+  let curGrp="";let n=0;
+  $("sideNav").innerHTML=items.map(s=>{
+    if(s.grp){curGrp=s.grp;return `<div class="grp">${s.grp}</div>`;}
+    const numbered=curGrp==="Report";
+    if(numbered)n++;
+    const badge=numbered?`<span class="navnum">${n}</span>`:"";
+    return `<a href="#" data-s="${s.id}" class="${state.section===s.id?"on":""}">${badge}${s.label}</a>`;
+  }).join("");
   $("sideNav").querySelectorAll("[data-s]").forEach(a=>a.onclick=(e)=>{e.preventDefault();state.section=a.dataset.s;render();});
 }
 const txt=(p,label,cls="",ph="")=>`<label class="fld ${cls}"><span>${label}</span><input data-path="${p}" value="${esc(get(state.f,p)??"")}" placeholder="${esc(ph)}" /></label>`;
@@ -611,22 +620,45 @@ async function propertyPicker(onPick){
 // ── save / load ──────────────────────────────────────────────
 async function saveReport(){
   const f=state.f;
-  const row={title:(f.cover.propertyName||f.property.address||"Untitled")+" — "+f.cover.title,
+  // Ensure the report has a sensible name before saving.
+  if(!state.reportName||!state.reportName.trim()){
+    const suggested=f.cover.propertyName||f.property.address||f.cover.addressLine||"";
+    const name=await promptReportName(suggested);
+    if(name===null)return; // cancelled
+    state.reportName=name.trim()||suggested||"Untitled proposal";
+  }
+  const row={title:state.reportName,
     client_name:f.letter.salutation,property_address:f.property.address||f.cover.addressLine,
-    form:f,updated_at:new Date().toISOString()};
+    form:{...f,__reportName:state.reportName},updated_at:new Date().toISOString()};
   let res;
   if(state.reportId)res=await sb.from("cma_reports").update(row).eq("id",state.reportId).select("id").single();
   else res=await sb.from("cma_reports").insert(row).select("id").single();
   if(res.error){toast("Save failed: "+res.error.message);return;}
   state.reportId=res.data.id;
-  await loadAll();toast("Report saved");
+  await loadAll();toast("Saved: "+state.reportName);
+}
+// Modal asking for a report name; resolves to the name, or null if cancelled.
+function promptReportName(suggested){
+  return new Promise(resolve=>{
+    const d=$("dlg");$("dlgHead").textContent="Name this proposal";
+    $("dlgBody").innerHTML=`<p class="mini" style="margin:0 0 10px">Give this marketing proposal a name so you can find it again.</p>
+      <input id="rnInput" value="${esc(suggested||"")}" placeholder="e.g. 12 High Street — Marketing Proposal" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font:13px inherit;margin-bottom:14px" />
+      <div class="rowBtns"><button class="btn primary" id="rnSave">Save proposal</button><button class="btn" id="rnCancel">Cancel</button></div>`;
+    d.showModal();
+    const inp=$("rnInput");inp.focus();inp.select();
+    const done=(val)=>{d.close();resolve(val);};
+    $("rnSave").onclick=()=>done(inp.value);
+    $("rnCancel").onclick=()=>done(null);
+    inp.onkeydown=(e)=>{if(e.key==="Enter")done(inp.value);};
+  });
 }
 async function openReport(id){
-  if(!id){state.reportId=null;state.f=defaultForm();render();return;}
+  if(!id){state.reportId=null;state.reportName="";state.f=defaultForm();render();return;}
   const{data,error}=await sb.from("cma_reports").select("*").eq("id",id).single();
   if(error){toast("Couldn't open: "+error.message);return;}
   state.reportId=id;
   state.f=Object.assign(defaultForm(),data.form||{});
+  state.reportName=data.title||data.form?.__reportName||"";
   render();
 }
 
@@ -1191,6 +1223,14 @@ $("reportPick").onchange=(e)=>openReport(e.target.value);
       else toast("Couldn't load the selected properties — add them with the button");
     }catch(e){toast("Case study pre-fill failed: "+e.message);}
     render(); // re-render to show the pre-filled case studies
+  }
+  // Arriving from PropCMA with selected properties = starting a real proposal,
+  // so ask for a name up front. (A plain visit doesn't prompt; the name is
+  // requested on first save instead.)
+  if(compIds.length&&!state.reportId&&!state.reportName){
+    const suggested=state.f.comps[0]?.name||"";
+    const name=await promptReportName(suggested);
+    if(name!==null)state.reportName=name.trim();
   }
 })();
 </script>
