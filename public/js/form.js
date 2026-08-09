@@ -121,7 +121,10 @@
     const commissionBase = totalInvoice - adminFee - recoverMarketing - recoverOther;
     const thirdPartyPctTotal = f.thirdParty.reduce((a,s)=>a+num(s.pct),0);
     const thirdPartyTotal = f.thirdParty.reduce((a,s)=>a + (num(s.pct)/100)*commissionBase, 0);
-    const internalPool = commissionBase - thirdPartyTotal;
+    // Salespeople DO split the admin fee between them (third parties
+    // still don't) — added back in here, after the third-party share
+    // is taken out of the pure commission.
+    const internalPool = (commissionBase - thirdPartyTotal) + adminFee;
     const internalPctTotal = f.splits.reduce((a,s)=>a+num(s.pct),0);
     const internalOk = internalPctTotal === 0 || Math.abs(internalPctTotal-100) < 0.01;
 

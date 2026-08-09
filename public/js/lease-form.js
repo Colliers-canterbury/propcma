@@ -157,7 +157,10 @@
     const tpAmount = (s, base) => num(s.fixed) > 0 ? num(s.fixed) : (num(s.pct)/100)*base;
     const thirdPartyPctTotal = f.thirdParty.reduce((a,s) => a + num(s.pct), 0);
     const thirdPartyTotal = f.thirdParty.reduce((a,s) => a + tpAmount(s, commissionBase), 0);
-    const internalPool = commissionBase - thirdPartyTotal;
+    // Salespeople DO split the admin fee between them (third parties
+    // still don't) — added back in here, after the third-party share
+    // is taken out of the pure commission.
+    const internalPool = (commissionBase - thirdPartyTotal) + adminFee;
     const internalPctTotal = f.splits.reduce((a,s) => a + num(s.pct), 0);
     const internalFixedTotal = f.splits.reduce((a,s) => a + (num(s.fixed) > 0 ? num(s.fixed) : 0), 0);
     // With fixed amounts in the mix, "100%" no longer strictly applies —
