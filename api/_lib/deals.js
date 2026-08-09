@@ -64,7 +64,10 @@ export function computeDerived(form) {
   const thirdPartyPctTotal = thirdPartyRows.reduce((a, s) => a + s.split_pct, 0);
 
   // What internal brokers divide between them.
-  const internalPool = +(commissionBase - thirdPartyTotal).toFixed(2);
+  // Salespeople DO split the admin fee between them (third parties
+  // still don't) — added back in here, after the third-party share
+  // is taken out of the pure commission.
+  const internalPool = +((commissionBase - thirdPartyTotal) + adminFee).toFixed(2);
 
   const internalRows = (form.splits || [])
     .filter((s) => num(s.pct) > 0)
