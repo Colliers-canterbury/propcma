@@ -82,8 +82,8 @@ dialog .dlgBody{padding:18px 20px;max-height:70vh;overflow:auto}
 
 <script>
 // ── CONFIG — copy these two values from PropCMA's index.html ──
-window.SUPABASE_URL  = "https://mcurpiuaezilcnnuqvnm.supabase.co";
-window.SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdXJwaXVhZXppbGNubnVxdm5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MTA5MTEsImV4cCI6MjA5NjA4NjkxMX0.nPts4jRqwTm_CZsD2OUmO5ZgjTKIMk1-CLsNqRYCOxw";
+window.SUPABASE_URL  = "YOUR_PROJECT.supabase.co URL HERE";
+window.SUPABASE_ANON = "YOUR ANON KEY HERE";
 // Microsoft sign-in — same Azure app registration as the deal sheets.
 // Used only to identify the user so Template Content can be admin-gated.
 window.MSAL = {
@@ -590,6 +590,10 @@ function wire(m){
 }
 // Map a PropCMA properties row (real column names) to an editable case study.
 function compFromProp(p){
+  // Pick the first usable image URL: skip empties and legacy graph:// refs
+  // (OneDrive) that won't render outside PropCMA.
+  const firstPhoto=(p.photos||"").split(/[\n,]/).map(s=>s.trim())
+    .find(u=>u && /^https?:\/\//i.test(u)) || "";
   return{name:p.address||"",desc:p.notes||"",
     salePrice:p.sale_price?String(p.sale_price):"",
     saleDate:p.sale_date||"",
@@ -597,7 +601,7 @@ function compFromProp(p){
     landArea:p.land_area?`${fmt0(p.land_area)} sq m`:"",
     nla:p.sqm?`${fmt0(p.sqm)} sq m`:"",
     yield:p.initial_yield?`Circa ${p.initial_yield}%`:"",
-    photo:(p.photos||"").split(/[\n,]/)[0]?.trim()||""};
+    photo:firstPhoto};
 }
 async function propertyPicker(onPick){
   const d=$("dlg");$("dlgHead").textContent="Select a PropCMA property";
@@ -1229,6 +1233,11 @@ $("reportPick").onchange=(e)=>openReport(e.target.value);
       // so match loosely on string form.
       const {data}=await sb.from("properties").select("*").in("id",compIds);
       const rows=data||[];
+      // Diagnostic: log each selected property's photo field so a missing
+      // image can be traced to empty data vs a parsing issue.
+      compIds.forEach(id=>{const p=rows.find(x=>String(x.id)===String(id));
+        if(p)console.log("Comp photo for",p.address||id,":",JSON.stringify(p.photos));
+        else console.log("Comp id not found in fetch:",id);});
       compIds.forEach(id=>{const p=rows.find(x=>String(x.id)===String(id));if(p)state.f.comps.push(compFromProp(p));});
       if(state.f.comps.length){state.section="comps";toast(`${state.f.comps.length} case stud${state.f.comps.length===1?"y":"ies"} pre-filled from PropCMA — edit as needed`);}
       else toast("Couldn't load the selected properties — add them with the button");
