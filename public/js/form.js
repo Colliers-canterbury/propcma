@@ -66,7 +66,7 @@
       sale: { dateOfAgreement:"", unconditionalDate:"", salePrice:"", rentalBasis:"Net", rentalIncome:"", yieldManual:"", titleType:"Freehold", landArea:"", wale:"", tenancies:"", occupiedArea:"", auction:false, tenancySchedule:false },
       depositToTrust: false,
       deposit: { amount:"", dateReceived:"", receiptNo:"", earlyRelease:false, vendorAuthSent:false, vendorAuthReceived:false, purchaserAuthSent:false, purchaserAuthReceived:false },
-      comm: { tiers:[{pct:"",base:""},{pct:"",base:""},{pct:"",base:""}], otherDesc:"", otherFee:"", adminFee:true, recoverMarketing:"", recoverOtherDesc:"", recoverOther:"" },
+      comm: { flatFee:false, flatFeeAmount:"", tiers:[{pct:"",base:""},{pct:"",base:""},{pct:"",base:""}], otherDesc:"", otherFee:"", adminFee:true, recoverMarketing:"", recoverOtherDesc:"", recoverOther:"" },
       splits: [ {person:"",pct:""},{person:"",pct:""},{person:"",pct:""},{person:"",pct:""},{person:"",pct:""} ],
       thirdParty: [ {name:"",pct:""},{name:"",pct:""},{name:"",pct:""} ],
       buyerSource:"", buyerSourceOther:"",
@@ -99,7 +99,8 @@
     // Tiered commission: each tier's base auto-fills with whatever's
     // left of the sale price after the tiers above it, unless the user
     // has typed an explicit amount (which always wins). tierBases holds
-    // the effective base shown/used per tier.
+    // the effective base shown/used per tier. Skipped entirely in Flat
+    // Fee mode — the tiers aren't used, so nothing to compute.
     const tierBases = [];
     let remaining = salePrice;
     f.comm.tiers.forEach((t, i) => {
@@ -109,10 +110,13 @@
       remaining -= base;
     });
     const tierFees = f.comm.tiers.map((t,i) => (num(t.pct)/100) * tierBases[i]);
+    // Flat Fee mode: a single typed dollar figure replaces the whole
+    // tiered %-of-sale-price calculation.
+    const commissionFee = f.comm.flatFee ? num(f.comm.flatFeeAmount) : tierFees.reduce((a,b)=>a+b,0);
     const adminFee = f.comm.adminFee ? 500 : 0;
     const recoverMarketing = num(f.comm.recoverMarketing);
     const recoverOther = num(f.comm.recoverOther);
-    const totalInvoice = tierFees.reduce((a,b)=>a+b,0) + num(f.comm.otherFee) + adminFee
+    const totalInvoice = commissionFee + num(f.comm.otherFee) + adminFee
       + recoverMarketing + recoverOther;
 
     // commissionBase is the actual commission-earning amount — the admin
@@ -128,7 +132,7 @@
     const internalPctTotal = f.splits.reduce((a,s)=>a+num(s.pct),0);
     const internalOk = internalPctTotal === 0 || Math.abs(internalPctTotal-100) < 0.01;
 
-    return { salePrice, yieldCalc, yieldPct, tierFees, tierBases, adminFee, totalInvoice,
+    return { salePrice, yieldCalc, yieldPct, tierFees, tierBases, commissionFee, adminFee, totalInvoice,
              commissionBase, thirdPartyPctTotal, thirdPartyTotal, internalPool,
              internalPctTotal, internalOk };
   }
@@ -146,14 +150,19 @@
     // easy to do by mistake (typing the flat fee into the threshold
     // "base" box instead of setting a %), and the $500 admin fee alone
     // can make totalInvoice look non-zero even though the real
-    // commission is $0. Catch both patterns explicitly.
-    f.comm.tiers.forEach((t, i) => {
-      if (t.base !== "" && t.base != null && !num(t.pct)) {
-        m.push(`Commission tier ${i+1} has an amount but no % — it will charge $0`);
-      }
-    });
+    // commission is $0. Only relevant when NOT using Flat Fee mode.
+    if (f.comm.flatFee) {
+      if (!num(f.comm.flatFeeAmount)) m.push("Flat fee amount");
+    } else {
+      f.comm.tiers.forEach((t, i) => {
+        if (t.base !== "" && t.base != null && !num(t.pct)) {
+          m.push(`Commission tier ${i+1} has an amount but no % — it will charge $0`);
+        }
+      });
+    }
     if (d.salePrice > 0 && d.commissionBase <= 0) {
-      m.push("Commission works out to $0 — check the tier percentages");
+      m.push(f.comm.flatFee ? "Commission works out to $0 — check the flat fee amount"
+                             : "Commission works out to $0 — check the tier percentages");
     }
     if (d.internalPctTotal === 0) m.push("Commission split");
     else if (!d.internalOk) m.push("Salesperson split must total 100%");
@@ -242,7 +251,10 @@
     const missing = validate(d);
     const f = state.f;
 
-    const commRows = ["Commission","Second tier","Third tier"].map((label,i) => {
+    const commRows = f.comm.flatFee
+      ? `<tr><td>Commission (flat fee)</td><td colspan="2"></td>
+          <td class="r"><input class="cell r" data-money data-recalc data-path="comm.flatFeeAmount" value="${esc(f.comm.flatFeeAmount)}" placeholder="0.00" /></td></tr>`
+      : ["Commission","Second tier","Third tier"].map((label,i) => {
       const t = f.comm.tiers[i];
       const typed = t.base !== "" && t.base != null;
       // Show the typed amount, or the auto-calculated remainder for this
@@ -340,7 +352,8 @@
                 ${chk("deposit.vendorAuthSent","Vendor — sent")}${chk("deposit.vendorAuthReceived","Vendor — received")}
                 ${chk("deposit.purchaserAuthSent","Purchaser — sent")}${chk("deposit.purchaserAuthReceived","Purchaser — received")}</div>`:""}</div>`:""))}
 
-          ${section("8","Commission calculation","Fees calculate automatically from the percentages you enter.",`
+          ${section("8","Commission calculation",f.comm.flatFee?"A single flat commission amount — the tiered % fields are hidden while this is on.":"Fees calculate automatically from the percentages you enter.",`
+            <label class="chk flatFeeToggle"><input type="checkbox" id="flatFeeToggle" ${f.comm.flatFee?"checked":""} /><span>Flat Fee</span></label>
             <table class="tbl"><thead><tr><th>Tier</th><th>%</th><th>Of amount $</th><th class="r">Fee $</th></tr></thead>
             <tbody>${commRows}
               <tr><td>Other</td><td colspan="2"><input class="cell" data-path="comm.otherDesc" value="${esc(f.comm.otherDesc)}" placeholder="Please specify" /></td>
@@ -464,6 +477,9 @@
 
     const feeAdmin = $("feeAdmin");
     if (feeAdmin) feeAdmin.onchange = () => { state.f.comm.adminFee = feeAdmin.checked; scheduleAutosave(); render(); };
+
+    const flatFeeToggle = $("flatFeeToggle");
+    if (flatFeeToggle) flatFeeToggle.onchange = () => { state.f.comm.flatFee = flatFeeToggle.checked; scheduleAutosave(); render(); };
 
     // Broker multi-select
     $("app").querySelectorAll(".brokerBox").forEach((box) => {
