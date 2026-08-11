@@ -38,8 +38,12 @@ export function computeDerived(form) {
   const recoverMarketing = num(form.comm?.recoverMarketing);
   const recoverOther = num(form.comm?.recoverOther);
 
+  // Flat Fee mode: a single typed dollar figure replaces the whole
+  // tiered %-of-sale-price calculation.
+  const commissionFee = form.comm?.flatFee ? num(form.comm?.flatFeeAmount) : tierFees.reduce((a, b) => a + b, 0);
+
   const totalInvoice =
-    tierFees.reduce((a, b) => a + b, 0) +
+    commissionFee +
     num(form.comm?.otherFee) +
     adminFee +
     recoverMarketing +
@@ -134,14 +138,19 @@ export function validateForSubmit(form, derived) {
   // Same reasoning as the client: a tier with a typed amount but no %
   // silently computes to $0, and the $500 admin fee alone can make
   // totalInvoice look non-zero even when the real commission is $0.
-  const num = (v) => { const n = parseFloat(String(v ?? "").replace(/[$,\s]/g, "")); return isNaN(n) ? 0 : n; };
-  (form.comm?.tiers || []).forEach((t, i) => {
-    if (t.base !== "" && t.base != null && !num(t.pct)) {
-      missing.push(`Commission tier ${i+1} has an amount but no % — it will charge $0`);
-    }
-  });
+  // Only relevant when NOT using Flat Fee mode.
+  if (form.comm?.flatFee) {
+    if (!num(form.comm?.flatFeeAmount)) missing.push("Flat fee amount");
+  } else {
+    (form.comm?.tiers || []).forEach((t, i) => {
+      if (t.base !== "" && t.base != null && !num(t.pct)) {
+        missing.push(`Commission tier ${i+1} has an amount but no % — it will charge $0`);
+      }
+    });
+  }
   if (derived.salePrice > 0 && derived.commissionBase <= 0) {
-    missing.push("Commission works out to $0 — check the tier percentages");
+    missing.push(form.comm?.flatFee ? "Commission works out to $0 — check the flat fee amount"
+                                     : "Commission works out to $0 — check the tier percentages");
   }
   if (derived.internalPctTotal === 0) missing.push("Commission split");
   else if (Math.abs(derived.internalPctTotal - 100) > 0.01)
