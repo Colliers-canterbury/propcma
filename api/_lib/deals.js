@@ -131,6 +131,18 @@ export function validateForSubmit(form, derived) {
   if (!form.sale?.unconditionalDate) missing.push("Unconditional date");
   if (!derived.salePrice) missing.push("Sale price");
   if (!derived.totalInvoice) missing.push("Commission calculation");
+  // Same reasoning as the client: a tier with a typed amount but no %
+  // silently computes to $0, and the $500 admin fee alone can make
+  // totalInvoice look non-zero even when the real commission is $0.
+  const num = (v) => { const n = parseFloat(String(v ?? "").replace(/[$,\s]/g, "")); return isNaN(n) ? 0 : n; };
+  (form.comm?.tiers || []).forEach((t, i) => {
+    if (t.base !== "" && t.base != null && !num(t.pct)) {
+      missing.push(`Commission tier ${i+1} has an amount but no % — it will charge $0`);
+    }
+  });
+  if (derived.salePrice > 0 && derived.commissionBase <= 0) {
+    missing.push("Commission works out to $0 — check the tier percentages");
+  }
   if (derived.internalPctTotal === 0) missing.push("Commission split");
   else if (Math.abs(derived.internalPctTotal - 100) > 0.01)
     missing.push("Salesperson split must total 100%");
