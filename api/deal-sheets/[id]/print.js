@@ -214,7 +214,9 @@ ${deal.deposit_to_trust ? `
 <table class="grid avoid">
   <thead><tr><th>Item</th><th class="r">%</th><th class="r">Amount</th></tr></thead>
   <tbody>
-    ${(comm.tiers || []).map((t, i) => t.pct ? `<tr><td>${["Commission","Second tier","Third tier"][i]}</td>
+    ${comm.flatFee
+      ? `<tr><td>Commission (flat fee)</td><td class="r"></td><td class="r">${money(comm.flatFeeAmount)}</td></tr>`
+      : (comm.tiers || []).map((t, i) => t.pct ? `<tr><td>${["Commission","Second tier","Third tier"][i]}</td>
       <td class="r">${esc(t.pct)}%</td><td class="r">${money(tierFees[i])}</td></tr>` : "").join("")}
     ${comm.otherFee ? `<tr><td>Other — ${dash(comm.otherDesc)}</td><td class="r"></td><td class="r">${money(comm.otherFee)}</td></tr>` : ""}
     ${comm.adminFee ? `<tr><td>Administration fee</td><td class="r"></td><td class="r">${money(500)}</td></tr>` : ""}
