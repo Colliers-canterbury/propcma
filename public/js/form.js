@@ -142,6 +142,19 @@
     if (!f.sale.unconditionalDate) m.push("Unconditional date");
     if (!d.salePrice) m.push("Sale price");
     if (!d.totalInvoice) m.push("Commission calculation");
+    // A tier with an amount typed but no percentage computes to $0 —
+    // easy to do by mistake (typing the flat fee into the threshold
+    // "base" box instead of setting a %), and the $500 admin fee alone
+    // can make totalInvoice look non-zero even though the real
+    // commission is $0. Catch both patterns explicitly.
+    f.comm.tiers.forEach((t, i) => {
+      if (t.base !== "" && t.base != null && !num(t.pct)) {
+        m.push(`Commission tier ${i+1} has an amount but no % — it will charge $0`);
+      }
+    });
+    if (d.salePrice > 0 && d.commissionBase <= 0) {
+      m.push("Commission works out to $0 — check the tier percentages");
+    }
     if (d.internalPctTotal === 0) m.push("Commission split");
     else if (!d.internalOk) m.push("Salesperson split must total 100%");
     if (d.thirdPartyPctTotal >= 100) m.push("Third-party share must be under 100%");
