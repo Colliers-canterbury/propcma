@@ -118,16 +118,22 @@ create table public.db_deal_events (
 create index db_deal_events_deal on public.db_deal_events(deal_id, occurred_at desc);
 create index db_deal_events_type on public.db_deal_events(event_type, occurred_at desc);
 
-create or replace function public.db_log_deal_change() returns trigger
+create or replace function public.db_log_deal_insert() returns trigger
 language plpgsql set search_path = public as $$
 begin
-  if TG_OP = 'INSERT' then
-    insert into public.db_deal_events(deal_id, actor_oid, event_type, to_value)
-    values (new.id, new.created_by_oid, 'created',
-            jsonb_build_object('address', new.address, 'stage_id', new.stage_id));
-    return new;
-  end if;
+  insert into public.db_deal_events(deal_id, actor_oid, event_type, to_value)
+  values (new.id, new.created_by_oid, 'created',
+          jsonb_build_object('address', new.address, 'stage_id', new.stage_id));
+  return null;
+end $$;
 
+-- AFTER insert: the row must exist before an event can reference it.
+create trigger db_deals_audit_ins after insert on public.db_deals
+for each row execute function public.db_log_deal_insert();
+
+create or replace function public.db_log_deal_update() returns trigger
+language plpgsql set search_path = public as $$
+begin
   if new.stage_id is distinct from old.stage_id then
     insert into public.db_deal_events(deal_id, actor_oid, event_type, from_value, to_value)
     values (new.id, new.updated_by_oid, 'stage_changed',
@@ -159,8 +165,9 @@ begin
   return new;
 end $$;
 
-create trigger db_deals_audit before insert or update on public.db_deals
-for each row execute function public.db_log_deal_change();
+-- BEFORE update: needed so the assignment to new.updated_at takes effect.
+create trigger db_deals_audit_upd before update on public.db_deals
+for each row execute function public.db_log_deal_update();
 
 -- ---------------------------------------------------------------------
 -- 5. Meetings, fines, minutes
@@ -330,8 +337,10 @@ where d.slug = 'investment';
 -- ---------------------------------------------------------------------
 -- drop view  if exists public.db_v_board;
 -- drop function if exists public.db_roll_forward(uuid, date, text);
--- drop trigger if exists db_deals_audit on public.db_deals;
--- drop function if exists public.db_log_deal_change();
+-- drop trigger if exists db_deals_audit_ins on public.db_deals;
+-- drop trigger if exists db_deals_audit_upd on public.db_deals;
+-- drop function if exists public.db_log_deal_insert();
+-- drop function if exists public.db_log_deal_update();
 -- drop table if exists public.db_ranking_sync_issues;
 -- drop table if exists public.db_broker_rankings;
 -- drop table if exists public.db_broker_ranking_names;
