@@ -131,7 +131,10 @@ function renderBoard(){
     };
     if(!collapsed[st]){
       const tb=sec.querySelector('tbody');
-      rows.forEach(d=>tb.appendChild(dealRow(d)));
+      rows.forEach(d=>{
+        try{ tb.appendChild(dealRow(d)); }
+        catch(err){ console.error('row failed:', d, err); }
+      });
       sec.querySelector('.addrow').onclick=()=>{
         const d={id:'tmp'+Date.now(),s:st,a:'',t:'',f:0,b:'',st:'',aml:'',isNew:true};
         S().deals.push(d);renderBoard();renderTally();
@@ -165,7 +168,12 @@ function dealRow(d){
     <td class="brk"><div contenteditable data-k="b" data-ph="—">${esc(d.b)}</div></td>
     <td><div contenteditable data-k="aml" data-ph="—">${esc(d.aml)}</div></td>
     <td><button class="x">×</button></td>`;
-  const stt=tr.querySelector('.stt');if(d.st)stt.classList.add('tag',tagClass(d.st));
+  // classList.add('') throws — only add the colour class when there is one.
+  const stt=tr.querySelector('.stt');
+  if(d.st){
+    stt.classList.add('tag');
+    const tc=tagClass(d.st); if(tc) stt.classList.add(tc);
+  }
   tr.querySelectorAll('[contenteditable]').forEach(el=>{
     /* highlight while editing so the room can see what's being changed */
     el.addEventListener('focus',()=>tr.classList.add('editing'));
