@@ -1,97 +1,96 @@
 /* =====================================================================
-   Prototype. Persists locally so it is fully clickable with no backend.
-   To go live, replace save()/load() with fetch() against
-   /api/deal-board — the render layer below does not change.
+   Deal board — render + interaction.
+
+   Persistence goes through window.DealBoardApi (js/deal-board-api.js),
+   which calls /api/deal-board/*. Every edit writes through immediately
+   on blur; the indicator top-right shows Saved / NOT SAVED.
+
+   State is kept in the shape the render code uses (short keys: a, t, f,
+   b, st, aml) and mapped to and from API field names in fromApi() /
+   toApi() below. Only those two functions know both shapes.
    ===================================================================== */
-const MEETINGS={
- industrial:{title:'Industrial Meeting',
-  stages:['Submissions','Campaigns','Advanced','Under contract','Unconditional'],
-  deals:[
-   {s:'Campaigns',a:'121 Worcester St',t:'Asking $970,000',f:0,b:'PM/ML',st:'Live',aml:'Y'},
-   {s:'Campaigns',a:'756 Halswell Junction Rd',t:'PBN',f:0,b:'OS/CK',st:'Live',aml:'Y'},
-   {s:'Campaigns',a:'27a Tanya St',t:'Deadline 5 Oct',f:0,b:'RM',st:'Live',aml:'Y'},
-   {s:'Campaigns',a:'198 Yaldhurst Rd',t:'Auction 30 Nov',f:0,b:'RM',st:'Live',aml:'Y'},
-   {s:'Campaigns',a:'596 Ferry Rd',t:'Auction 30 Nov',f:0,b:'OS/CK',st:'Live',aml:'Y'},
-   {s:'Campaigns',a:'209 Hilton Highway',t:'Deadline',f:0,b:'CK/WF',st:'Upcoming',aml:'Y'},
-   {s:'Under contract',a:'29 Kilmarnock St',t:'',f:100000,b:'OS/CK',st:'',aml:'Y'},
-   {s:'Under contract',a:'7 Waimakariri Park Dr',t:'23 Nov',f:70000,b:'OS/CK/JM',st:'',aml:'Y'},
-   {s:'Under contract',a:'39 Hands Rd',t:'',f:20000,b:'CK/OS',st:'',aml:'WIP'},
-   {s:'Advanced',a:'19 Hynds Dr (Development)',t:'',f:70000,b:'HP',st:'DBL',aml:'Y'},
-   {s:'Advanced',a:'8 Holt Place',t:'',f:0,b:'CK',st:'Sale',aml:''},
-   {s:'Unconditional',a:'22 Clarence St South',t:'Invoiced',f:85000,b:'SS/EC',st:'',aml:'Y'},
-   {s:'Unconditional',a:'264 Russley Rd (Airpark Lease)',t:'',f:200000,b:'OS/CK',st:'',aml:'Y'},
-   {s:'Unconditional',a:'7, 11 Pereita Dr & 135 Hoskyns Rd',t:'',f:190000,b:'SS',st:'',aml:'Y'},
-   {s:'Submissions',a:'888 Colombo St',t:'',f:0,b:'',st:'',aml:''},
-   {s:'Submissions',a:'46 Belfast Rd',t:'',f:50000,b:'',st:'Investment',aml:''}],
-  fines:[['SS',0],['PM',20],['CK',0],['OS',0],['RM',10],['EC',0],['HP',0],['JM',0]],
-  register:[
-   {n:'Storerite Logistics & LK Transport',r:'Tenant — 2,500-3,000m² warehouse with decent yard',ag:'EC',h:'Motivated'},
-   {n:'Trade Direct',r:'Tenant — 1,000m² storage, any location',ag:'CK',h:'Luke warm'},
-   {n:'Adairs',r:'Tenant — 6,000-10,000m² warehouse',ag:'EC',h:'Motivated'},
-   {n:'Fabrum Solutions',r:'Tenant — 16,500m² yard, Hornby',ag:'EC',h:'Motivated'},
-   {n:'Tourism Holdings',r:'Tenant — 27,000m² yard area, 30 March',ag:'CK',h:'Motivated'},
-   {n:'Kitchen Concepts',r:'Buyer — 1,200m² warehouse, 100m² showroom',ag:'SS',h:'Slow'},
-   {n:'Masons Engineering',r:'Buyer — 250-500m² warehouse, 150-250m² office',ag:'HP',h:'Luke warm'}]},
- investment:{title:'Investment Sales Meeting',
-  stages:['Submissions','Campaigns / sole agency','Advanced','Conditional','Unconditional','Tracking / WIP'],
-  deals:[
-   {s:'Submissions',a:'183 William St, Kaiapoi',t:'',f:0,b:'BC',st:'Submitted',aml:''},
-   {s:'Submissions',a:'273 Cashel St',t:'',f:0,b:'CD/LW',st:'Pending',aml:''},
-   {s:'Submissions',a:'20 Moorhouse Ave',t:'',f:0,b:'MM/MO',st:'Committed',aml:''},
-   {s:'Campaigns / sole agency',a:'56 Langdons Rd (MSD)',t:'2026',f:0,b:'CD/HD',st:'Deadline',aml:''},
-   {s:'Campaigns / sole agency',a:'188 Main Rd',t:'',f:125000,b:'CD',st:'',aml:''},
-   {s:'Campaigns / sole agency',a:'394 Colombo St',t:'',f:40000,b:'WF',st:'',aml:''},
-   {s:'Campaigns / sole agency',a:'310 Tuam St',t:'',f:30000,b:'BC/MM',st:'',aml:''},
-   {s:'Advanced',a:'295 Blenheim Rd',t:'June',f:70000,b:'WF/BB',st:'',aml:''},
-   {s:'Advanced',a:'214 Main South Rd',t:'Late June',f:80000,b:'WF/ND',st:'',aml:''},
-   {s:'Advanced',a:'Woolston Club',t:'22 June',f:150000,b:'CD',st:'',aml:''},
-   {s:'Advanced',a:'Athol St',t:'',f:90000,b:'HD',st:'',aml:''},
-   {s:'Conditional',a:'99 Packe St',t:'Late June',f:157500,b:'CD/WF',st:'',aml:''},
-   {s:'Conditional',a:'10 Show Place',t:'July',f:500000,b:'MM',st:'',aml:''},
-   {s:'Conditional',a:'14 Kirkwood Ave',t:'17 Jul',f:250000,b:'WF/CD',st:'',aml:''},
-   {s:'Conditional',a:'25 Link Drive',t:'This week',f:190000,b:'WF/SS',st:'',aml:''},
-   {s:'Unconditional',a:'85 D\u2019Archiac',t:'Late June',f:90000,b:'MO/ML/MM',st:'',aml:''},
-   {s:'Unconditional',a:'98-100 Leinster',t:'May',f:80000,b:'CD/LW',st:'',aml:''},
-   {s:'Unconditional',a:'177 Cashel St',t:'Mid June',f:60000,b:'MO/MM',st:'',aml:''},
-   {s:'Tracking / WIP',a:'Hanmer Springs Motel',t:'Paused',f:140000,b:'MM/WF',st:'',aml:''},
-   {s:'Tracking / WIP',a:'Temuka Pub',t:'',f:30000,b:'ML',st:'',aml:''}],
-  fines:[['MM',0],['HD',10],['NG',10],['LW',20],['CD',25],['WF',100],['ML',45],['MO',35],['BC',35]],
-  register:[
-   {n:'James Murdoch',r:'Buyer — $3.5m on an investment before year end',ag:'CK',h:'Motivated'},
-   {n:'Geoff Hay',r:'Buyer — investment with a national tenant',ag:'CK',h:'Luke warm'},
-   {n:'Irene Hayward',r:'Buyer — $500-700k investment',ag:'OS',h:'Luke warm'}]}
-};
 const HEAT=['Motivated','Luke warm','Slow'], KEY='dealboard:v3';
 let mem=null,state=null,which='industrial',tab='board',collapsed={},current=null,proj=false;
 
 const $=s=>document.querySelector(s);
 const money=n=>n?'$'+Math.round(n).toLocaleString():'—';
 const esc=s=>(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const M=()=>MEETINGS[which], S=()=>state[which];
+const TITLES={industrial:'Industrial Meeting',investment:'Investment Sales Meeting'};
+const S=()=>state[which];
+const M=()=>({title:TITLES[which], stages:(S().stages||[]).map(x=>x.name)});
 function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('on');setTimeout(()=>e.classList.remove('on'),1900)}
 
 /* --- save indicator: a failure must be loud, never a silent revert --- */
-function setSaver(s,msg){const e=$('#saver');e.className='saver '+s;e.textContent=msg}
-async function save(){
+function setSaver(st,msg){const e=$('#saver');e.className='saver '+st;e.textContent=msg}
+
+/* Every write goes through here. On 401 the token is refreshed once and
+   the call retried — a token expiring mid-meeting is the likeliest real
+   failure, and it should be invisible rather than red. */
+async function persist(fn, what){
   setSaver('','Saving…');
-  try{ await window.storage.set(KEY,JSON.stringify(state)); setSaver('ok','Saved'); }
-  catch(err){
-    mem=JSON.stringify(state);
-    setSaver('err','NOT SAVED — copy your changes');
-    console.error(err);
+  try{
+    const r = await fn();
+    setSaver('ok','Saved');
+    return r;
+  }catch(err){
+    if(err.status===401){
+      try{
+        const r = await fn();
+        setSaver('ok','Saved');
+        return r;
+      }catch(e2){ err.status = e2.status; }
+    }
+    console.error(what, err);
+    setSaver('err','NOT SAVED — '+(err.message||'check your connection'));
+    toast('Not saved: '+what);
+    throw err;
   }
 }
-async function load(){
-  try{const r=await window.storage.get(KEY); if(r&&r.value)return JSON.parse(r.value);}
-  catch(e){ if(mem)return JSON.parse(mem); }
-  return null;
+
+/* --- shape mapping: API field names <-> the short keys render uses --- */
+function fromApi(dept, payload){
+  const stageName = {};
+  payload.stages.forEach(st=>{ stageName[st.id]=st.name; });
+  return {
+    stages: payload.stages,
+    stageIdByName: Object.fromEntries(payload.stages.map(st=>[st.name, st.id])),
+    date: payload.meeting?.meeting_date || new Date().toISOString().slice(0,10),
+    apologies: payload.meeting?.apologies || '',
+    notes: payload.meeting?.minutes || '',
+    deals: payload.deals.map(d=>({
+      id:d.id, s:stageName[d.stage_id]||'', a:d.address||'', t:d.timing||'',
+      f:Number(d.fee_nzd)||0, b:d.brokers||'', st:d.status_note||'',
+      aml:AML_OUT[d.aml]||''
+    })),
+    fines: (payload.fines||[]).map(f=>({b:f.broker_code, amt:Number(f.amount_nzd)||0})),
+    register: payload.requirements.map(r=>({
+      id:r.id, n:r.party_name, r:r.requirement, ag:r.broker_code||'',
+      h:HEAT_OUT[r.temperature]||'Motivated'
+    }))
+  };
 }
-function fresh(){const o={};for(const k in MEETINGS){const m=MEETINGS[k];
-  o[k]={date:new Date().toISOString().slice(0,10),apologies:'',notes:'',
-    deals:m.deals.map((d,i)=>({id:k+i,...d})),
-    fines:m.fines.map(f=>({b:f[0],amt:f[1]})),
-    register:m.register.map((r,i)=>({id:'r'+k+i,...r}))};}
-  return o;}
+const AML_IN  = {'Y':'complete','WIP':'wip','N':'not_required','':'not_started'};
+const AML_OUT = {complete:'Y', wip:'WIP', not_required:'N', not_started:''};
+const HEAT_IN = {'Motivated':'motivated','Luke warm':'luke_warm','Slow':'slow'};
+const HEAT_OUT= {motivated:'Motivated', luke_warm:'Luke warm', slow:'Slow'};
+
+/* Field-level write for one deal. k is the short key that changed. */
+function saveDealField(d, k){
+  const map = {
+    a:  () => ({address: d.a}),
+    t:  () => ({timing: d.t}),
+    f:  () => ({fee_nzd: d.f}),
+    st: () => ({status_note: d.st}),
+    aml:() => ({aml: AML_IN[(d.aml||'').toUpperCase()] || 'not_started'}),
+    b:  () => ({brokers: d.b.split('/').map(x=>x.trim()).filter(Boolean)}),
+  };
+  if(!map[k]) return Promise.resolve();
+  return persist(()=>DealBoardApi.editDeal(d.id, map[k]()), d.a||'deal');
+}
+
+function saveMeetingField(patch){
+  return persist(()=>DealBoardApi.saveMeeting(which, S().date, patch), 'meeting notes');
+}
 const stageTotal=st=>S().deals.filter(d=>d.s===st).reduce((a,d)=>a+(+d.f||0),0);
 const tagClass=v=>{v=(v||'').toLowerCase();return v.includes('live')?'live':(v.includes('pend')||v.includes('upcom'))?'pending':''};
 
@@ -134,8 +133,8 @@ function renderBoard(){
       const tb=sec.querySelector('tbody');
       rows.forEach(d=>tb.appendChild(dealRow(d)));
       sec.querySelector('.addrow').onclick=()=>{
-        const d={id:'d'+Date.now(),s:st,a:'',t:'',f:0,b:'',st:'',aml:''};
-        S().deals.push(d);save();renderBoard();renderTally();
+        const d={id:'tmp'+Date.now(),s:st,a:'',t:'',f:0,b:'',st:'',aml:'',isNew:true};
+        S().deals.push(d);renderBoard();renderTally();
         const c=wrap.querySelector(`[data-id="${d.id}"] [contenteditable]`);if(c)c.focus();
       };
     }
@@ -143,9 +142,13 @@ function renderBoard(){
     sec.addEventListener('dragleave',()=>sec.classList.remove('drop-target'));
     sec.addEventListener('drop',()=>{
       sec.classList.remove('drop-target');
-      const d=S().deals.find(x=>x.id===dragId);if(!d)return;
-      if(d.s!==st){d.s=st;toast(`${d.a||'Deal'} → ${st}`)}
-      save();renderBoard();renderTally();
+      const d=S().deals.find(x=>x.id===dragId);if(!d||d.isNew)return;
+      if(d.s===st)return;
+      const from=d.s; d.s=st; renderBoard(); renderTally();
+      persist(()=>DealBoardApi.moveDeal(d.id, S().stageIdByName[st], null),
+              d.a||'deal')
+        .then(()=>toast(`${d.a||'Deal'} → ${st}`))
+        .catch(()=>{ d.s=from; renderBoard(); renderTally(); });
     });
     wrap.appendChild(sec);
   });
@@ -172,17 +175,29 @@ function dealRow(d){
       const was=d[k];
       d[k]= k==='f' ? (parseFloat(v.replace(/[^0-9.]/g,''))||0) : v;
       if(String(was)!==String(d[k])){
-        save();
-        tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500);
-        if(k==='f'||k==='st'){renderBoard();renderTally()}
+        const done=()=>{
+          tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500);
+          if(k==='f'||k==='st'){renderBoard();renderTally()}
+        };
+        if(d.isNew){
+          // A new row is only created server-side once it has an address.
+          if(!d.a) return;
+          persist(()=>DealBoardApi.addDeal(which, S().stageIdByName[d.s], {
+            address:d.a, timing:d.t, fee_nzd:d.f, status_note:d.st,
+            brokers:d.b.split('/').map(x=>x.trim()).filter(Boolean)
+          }), d.a).then(row=>{ d.id=row.id; delete d.isNew; done(); }).catch(()=>{});
+        }else{
+          saveDealField(d,k).then(done).catch(()=>{});
+        }
       }
     });
     el.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();el.blur()}});
   });
   tr.querySelector('.x').onclick=()=>{
     if(!confirm(`Remove ${d.a||'this deal'}?`))return;
-    state[which].deals=S().deals.filter(x=>x.id!==d.id);
-    save();renderBoard();renderTally();
+    const go=()=>{state[which].deals=S().deals.filter(x=>x.id!==d.id);renderBoard();renderTally()};
+    if(d.isNew){go();return}
+    persist(()=>DealBoardApi.removeDeal(d.id), d.a||'deal').then(go).catch(()=>{});
   };
   tr.addEventListener('dragstart',()=>{dragId=d.id;tr.classList.add('dragging')});
   tr.addEventListener('dragend',()=>tr.classList.remove('dragging'));
@@ -192,9 +207,17 @@ function dealRow(d){
     e.preventDefault();e.stopPropagation();tr.classList.remove('over');
     const arr=S().deals,from=arr.findIndex(x=>x.id===dragId);
     if(from<0||dragId===d.id)return;
-    const moved=arr.splice(from,1)[0];moved.s=d.s;
-    arr.splice(arr.findIndex(x=>x.id===d.id),0,moved);
-    save();renderBoard();renderTally();
+    const moved=arr[from]; if(moved.isNew)return;
+    const prevStage=moved.s;
+    arr.splice(from,1);moved.s=d.s;
+    const at=arr.findIndex(x=>x.id===d.id);
+    arr.splice(at,0,moved);
+    renderBoard();renderTally();
+    // afterId = the row it now sits below, or null for top of the stage
+    const above=arr.slice(0,at).reverse().find(x=>x.s===moved.s);
+    persist(()=>DealBoardApi.moveDeal(moved.id, S().stageIdByName[moved.s],
+                                      above?above.id:null), moved.a||'deal')
+      .catch(()=>{ moved.s=prevStage; renderBoard(); renderTally(); });
   });
   return tr;
 }
@@ -206,15 +229,23 @@ function renderFines(){
     el.className='fine'+(f.amt>0?' hot':'');
     el.innerHTML=`<b>${esc(f.b)}</b> $<span contenteditable>${f.amt}</span><button>×</button>`;
     el.querySelector('span[contenteditable]').addEventListener('blur',e=>{
-      f.amt=parseInt(e.target.textContent.replace(/\D/g,''))||0;save();renderFines();renderTally();
+      f.amt=parseInt(e.target.textContent.replace(/\D/g,''))||0;
+      renderFines();renderTally();
+      persist(()=>DealBoardApi.setFine(which,S().date,f.b,f.amt),'fine for '+f.b).catch(()=>{});
     });
-    el.querySelector('button').onclick=()=>{S().fines.splice(i,1);save();renderFines();renderTally()};
+    el.querySelector('button').onclick=()=>{
+      S().fines.splice(i,1);renderFines();renderTally();
+      persist(()=>DealBoardApi.setFine(which,S().date,f.b,0),'fine for '+f.b).catch(()=>{});
+    };
     box.appendChild(el);
   });
   $('#fineTot').textContent='$'+S().fines.reduce((a,f)=>a+(+f.amt||0),0);
 }
 $('#addFine').onclick=()=>{const b=prompt('Broker initials');if(!b)return;
-  S().fines.push({b:b.toUpperCase(),amt:10});save();renderFines();renderTally()};
+  const code=b.toUpperCase();
+  S().fines.push({b:code,amt:10});renderFines();renderTally();
+  persist(()=>DealBoardApi.setFine(which,S().date,code,10),'fine for '+code).catch(()=>{});
+};
 
 let regQ='',regAgent='';
 function renderRegister(){
@@ -232,27 +263,51 @@ function renderRegister(){
       <td><select class="mini">${HEAT.map(h=>`<option${h===r.h?' selected':''}>${h}</option>`).join('')}</select></td>
       <td><button class="x">×</button></td>`;
     tr.querySelectorAll('[contenteditable]').forEach(el=>el.addEventListener('blur',()=>{
-      if(r[el.dataset.k]!==el.textContent.trim()){r[el.dataset.k]=el.textContent.trim();save()}}));
-    tr.querySelector('select').onchange=e=>{r.h=e.target.value;save()};
-    tr.querySelector('.x').onclick=()=>{state[which].register=S().register.filter(x=>x.id!==r.id);
-      save();renderRegister();renderTally()};
+      const k=el.dataset.k, v=el.textContent.trim();
+      if(r[k]===v) return;
+      r[k]=v;
+      const field={n:'party_name',r:'requirement',ag:'broker_code'}[k];
+      if(r.isNew){
+        if(!r.n) return;
+        persist(()=>DealBoardApi.addRequirement(which,{
+          party_name:r.n, requirement:r.r, broker_code:r.ag||null,
+          temperature:HEAT_IN[r.h]||'motivated'
+        }), r.n).then(row=>{r.id=row.id;delete r.isNew}).catch(()=>{});
+      }else{
+        persist(()=>DealBoardApi.editRequirement(r.id,{[field]:v}), r.n||'requirement').catch(()=>{});
+      }
+    }));
+    tr.querySelector('select').onchange=e=>{
+      r.h=e.target.value;
+      if(r.isNew)return;
+      persist(()=>DealBoardApi.editRequirement(r.id,{temperature:HEAT_IN[r.h]}), r.n||'requirement').catch(()=>{});
+    };
+    tr.querySelector('.x').onclick=()=>{
+      const go=()=>{state[which].register=S().register.filter(x=>x.id!==r.id);renderRegister();renderTally()};
+      if(r.isNew){go();return}
+      persist(()=>DealBoardApi.removeRequirement(r.id), r.n||'requirement').then(go).catch(()=>{});
+    };
     tb.appendChild(tr);
   });
 }
 $('#regSearch').oninput=e=>{regQ=e.target.value;renderRegister()};
-$('#addReg').onclick=()=>{S().register.unshift({id:'r'+Date.now(),n:'',r:'',ag:'',h:'Motivated'});
-  save();renderRegister();renderTally();
+$('#addReg').onclick=()=>{
+  S().register.unshift({id:'tmp'+Date.now(),n:'',r:'',ag:'',h:'Motivated',isNew:true});
+  renderRegister();renderTally();
   const f=$('#regBody').querySelector('[contenteditable]');if(f)f.focus()};
 
 $('#rollBtn').onclick=()=>{
   const last=M().stages.find(s=>/uncondition/i.test(s))||M().stages[M().stages.length-1];
   const n=S().deals.filter(d=>d.s===last).length;
   if(!confirm(`Start next week's agenda?\n\n• ${n} unconditional deal(s) archive out\n• everything else carries over in place\n• fines reset, minutes clear`))return;
-  const s=S();
-  s.deals=s.deals.filter(d=>d.s!==last);
-  s.fines.forEach(f=>f.amt=0);s.notes='';s.apologies='';
-  s.date=new Date().toISOString().slice(0,10);
-  current=null;save();renderAll();toast(`Rolled forward — ${n} archived`);
+  const next=new Date();next.setDate(next.getDate()+7);
+  const nextDate=next.toISOString().slice(0,10);
+  persist(()=>DealBoardApi.rollForward(which,nextDate),'roll forward')
+    .then(async r=>{
+      current=null;
+      await loadBoard();
+      toast(`Rolled forward — ${r?.archived_count ?? n} archived`);
+    }).catch(()=>{});
 };
 
 $('#projBtn').onclick=()=>{
@@ -266,7 +321,8 @@ $('#projBtn').onclick=()=>{
 $('#swapMeeting').onclick=()=>{
   which=which==='industrial'?'investment':'industrial';
   $('#swapMeeting').textContent=which==='industrial'?'Switch to Investment':'Switch to Industrial';
-  collapsed={};current=null;renderAll();
+  collapsed={};current=null;
+  loadBoard().catch(()=>{});
 };
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
@@ -274,8 +330,16 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   ['board','register'].forEach(t=>$('#tab-'+t).hidden=t!==tab);
   if(tab==='register')renderRegister();
 });
-$('#apologies').addEventListener('blur',e=>{S().apologies=e.target.textContent.trim();save()});
-$('#notes').addEventListener('blur',e=>{S().notes=e.target.value;save()});
+$('#apologies').addEventListener('blur',e=>{
+  const v=e.target.textContent.trim();
+  if(v===S().apologies)return;
+  S().apologies=v; saveMeetingField({apologies:v}).catch(()=>{});
+});
+$('#notes').addEventListener('blur',e=>{
+  const v=e.target.value;
+  if(v===S().notes)return;
+  S().notes=v; saveMeetingField({minutes:v}).catch(()=>{});
+});
 
 function renderAll(){
   $('#mtgTitle').textContent=M().title;
@@ -286,4 +350,24 @@ function renderAll(){
   renderTally();renderBoard();renderFines();
   if(tab==='register')renderRegister();
 }
-(async()=>{state=await load()||fresh();renderAll();})();
+async function loadBoard(){
+  setSaver('','Loading…');
+  const payload=await DealBoardApi.getBoard(which);
+  state[which]=fromApi(which,payload);
+  setSaver('ok','Ready');
+  renderAll();
+}
+
+(async()=>{
+  try{
+    const account=await window.DealSheetAuth.init();
+    if(!account) return;               // redirecting to sign in
+    document.getElementById('gate').style.display='none';
+    state={};
+    await loadBoard();
+  }catch(err){
+    console.error(err);
+    document.getElementById('gate').innerHTML=
+      '<div class="inner">Could not sign in — '+(err.message||'try reloading')+'</div>';
+  }
+})();
