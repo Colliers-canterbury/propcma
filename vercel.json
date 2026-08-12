@@ -2,6 +2,7 @@
   "version": 2,
   "routes": [
     { "src": "/api/generate-pdf", "dest": "/api/generate_pdf.py" },
+    { "src": "/api/deal-board/(.*)", "dest": "/api/deal-board?path=$1" },
     { "src": "/api/(.*)",         "dest": "/api/$1" },
     { "src": "/(.*)",             "dest": "/public/$1" }
   ]
