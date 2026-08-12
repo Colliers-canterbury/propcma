@@ -29,7 +29,13 @@ const EDITABLE = [
 
 export default async function handler(req, res) {
   try {
-    const seg = (req.query.path || []); // [] | [id] | [id,'move'] | ['roll-forward']
+    // vercel.json uses legacy `routes`, which passes the sub-path as a
+    // single string ("abc123/move"). A `rewrites` config would pass an
+    // array. Accept either.
+    const raw = req.query.path;
+    const seg = Array.isArray(raw)
+      ? raw
+      : String(raw || "").split("/").filter(Boolean);
 
     if (req.method === "GET"  && !seg.length) return await getBoard(req, res);
     if (req.method === "POST" && !seg.length) return await addDeal(req, res);
