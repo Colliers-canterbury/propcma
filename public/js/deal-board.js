@@ -63,6 +63,8 @@ function fromApi(dept, payload){
       aml:AML_OUT[d.aml]||''
     })),
     fines: (payload.fines||[]).map(f=>({b:f.broker_code, amt:Number(f.amount_nzd)||0})),
+    noteSections: payload.noteSections||[],
+    notes: (payload.notes||[]).map(n=>({id:n.id, section:n.section, body:n.body||''})),
     register: payload.requirements.map(r=>({
       id:r.id, n:r.party_name, r:r.requirement, ag:r.broker_code||'',
       h:HEAT_OUT[r.temperature]||'Motivated'
@@ -155,6 +157,64 @@ function renderBoard(){
     });
     wrap.appendChild(sec);
   });
+  renderNoteSections(wrap);
+}
+
+/* Free-text lists that sit between the stages. Each item is one line
+   the EA types; the × ticks it off once actioned. */
+function renderNoteSections(wrap){
+  const secs=S().noteSections||[];
+  const stageCount=(S().stages||[]).length;
+  secs.slice().sort((a,b)=>a.position-b.position).forEach(ns=>{
+    const items=(S().notes||[]).filter(n=>n.section===ns.name)
+      .sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+    const sec=document.createElement('section');
+    sec.className='notes';
+    sec.innerHTML=`<header><h2>${esc(ns.name)}</h2>
+        <span class="pill">${items.length}</span></header>
+      <ul></ul>
+      <button class="addrow">+ Add to ${esc(ns.name.toLowerCase())}</button>`;
+    const ul=sec.querySelector('ul');
+    if(!items.length) ul.innerHTML='<li class="empty">Nothing this week.</li>';
+    items.forEach(n=>ul.appendChild(noteRow(n,ns.name)));
+    sec.querySelector('.addrow').onclick=()=>{
+      const n={id:'tmp'+Date.now(),section:ns.name,body:'',isNew:true};
+      S().notes.push(n);renderBoard();
+      const el=wrap.querySelector(`[data-nid="${n.id}"] [contenteditable]`);if(el)el.focus();
+    };
+    // sit this section after the stage at the same position
+    const before=[...wrap.children].find((c,i)=>i<stageCount &&
+      (S().stages[i]||{}).position>ns.position);
+    wrap.insertBefore(sec, before||null);
+  });
+}
+
+function noteRow(n, section){
+  const li=document.createElement('li');
+  li.dataset.nid=n.id;
+  li.innerHTML=`<div contenteditable data-ph="Type here…">${esc(n.body)}</div>
+    <button class="x" title="Actioned — clear it">×</button>`;
+  const ed=li.querySelector('[contenteditable]');
+  ed.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();ed.blur()}});
+  ed.addEventListener('blur',()=>{
+    const v=ed.textContent.trim();
+    if(v===n.body) return;
+    n.body=v;
+    const flash=()=>{li.classList.add('saved');setTimeout(()=>li.classList.remove('saved'),1500)};
+    if(n.isNew){
+      if(!v) return;
+      persist(()=>DealBoardApi.addNote(which,section,v),'note')
+        .then(row=>{n.id=row.id;delete n.isNew;flash()}).catch(()=>{});
+    }else{
+      persist(()=>DealBoardApi.editNote(n.id,v),'note').then(flash).catch(()=>{});
+    }
+  });
+  li.querySelector('.x').onclick=()=>{
+    const go=()=>{state[which].notes=S().notes.filter(x=>x.id!==n.id);renderBoard()};
+    if(n.isNew){go();return}
+    persist(()=>DealBoardApi.clearNote(n.id),'note').then(go).catch(()=>{});
+  };
+  return li;
 }
 let dragId=null;
 function dealRow(d){
@@ -230,30 +290,137 @@ function dealRow(d){
   return tr;
 }
 
-function renderFines(){
+function renderFines(bumped){
   const box=$('#fines');box.innerHTML='';
-  S().fines.forEach((f,i)=>{
+  const list=S().fines.filter(f=>f.amt>0)
+    .sort((a,b)=>b.amt-a.amt || a.b.localeCompare(b.b));
+  if(!list.length){
+    box.innerHTML='<span style="color:var(--ink-3);font-size:12px">No fines yet this week.</span>';
+  }
+  list.forEach((f,i)=>{
     const el=document.createElement('span');
-    el.className='fine'+(f.amt>0?' hot':'');
-    el.innerHTML=`<b>${esc(f.b)}</b> $<span contenteditable>${f.amt}</span><button>×</button>`;
+    el.className='fine hot'+(f.b===bumped?' bumped':'');
+    el.title='Click the amount to correct it';
+    el.innerHTML=`<b>${esc(f.b)}</b> $<span contenteditable>${f.amt}</span><button title="Clear">×</button>`;
+    // Editing the number in place SETS the total — for corrections.
+    // The Add row below ADDS to it — for the normal case.
     el.querySelector('span[contenteditable]').addEventListener('blur',e=>{
-      f.amt=parseInt(e.target.textContent.replace(/\D/g,''))||0;
-      renderFines();renderTally();
-      persist(()=>DealBoardApi.setFine(which,S().date,f.b,f.amt),'fine for '+f.b).catch(()=>{});
+      const v=parseInt(e.target.textContent.replace(/\D/g,''))||0;
+      if(v===f.amt){renderFines();return}
+      f.amt=v;renderFines();renderTally();
+      persist(()=>DealBoardApi.setFine(which,S().date,f.b,f.amt),'fine for '+f.b)
+        .then(renderFinesYtd).catch(()=>{});
     });
     el.querySelector('button').onclick=()=>{
-      S().fines.splice(i,1);renderFines();renderTally();
-      persist(()=>DealBoardApi.setFine(which,S().date,f.b,0),'fine for '+f.b).catch(()=>{});
+      if(!confirm(`Clear ${f.b}'s fine of $${f.amt}?`))return;
+      f.amt=0;renderFines();renderTally();
+      persist(()=>DealBoardApi.setFine(which,S().date,f.b,0),'fine for '+f.b)
+        .then(renderFinesYtd).catch(()=>{});
     };
     box.appendChild(el);
   });
   $('#fineTot').textContent='$'+S().fines.reduce((a,f)=>a+(+f.amt||0),0);
 }
-$('#addFine').onclick=()=>{const b=prompt('Broker initials');if(!b)return;
-  const code=b.toUpperCase();
-  S().fines.push({b:code,amt:10});renderFines();renderTally();
-  persist(()=>DealBoardApi.setFine(which,S().date,code,10),'fine for '+code).catch(()=>{});
-};
+
+/* Broker rankings — read-only mirror of the commission workbook.
+   Rendered as a panel under the Targets stage. */
+async function renderRankings(){
+  const wrap=$('#stages'); if(!wrap) return;
+  let d;
+  try{ d=await DealBoardApi.rankings(which); }catch(e){ return; }
+  if(!d.brokers.length) return;
+
+  const asAt=d.synced_at
+    ? new Date(d.synced_at).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'})
+    : '';
+  const sec=document.createElement('section');
+  sec.className='ranks';
+  sec.innerHTML=`<header><h2>${d.year} rankings</h2>
+      <span class="as-at">${asAt?'as at '+asAt:''}</span>
+      ${d.url?`<a class="src" href="${d.url}" target="_blank" rel="noopener">Open workbook</a>`:''}
+      </header>
+    <table><thead><tr>
+      <th style="width:34px"></th><th>Broker</th>
+      <th style="width:104px" class="num">Fees</th>
+      <th style="width:104px" class="num">Budget</th>
+      <th>Progress</th><th class="pc"></th>
+    </tr></thead><tbody>${d.brokers.map(b=>{
+      const pct=b.budget?Math.min(100,b.fees/b.budget*100):0;
+      const short=b.budget&&pct<50;
+      return `<tr><td class="brk">${esc(b.code)}</td><td>${esc(b.name)}</td>
+        <td class="num">${money(b.fees)}</td>
+        <td class="num">${b.budget?money(b.budget):'—'}</td>
+        <td><div class="bar"><i class="${short?'short':''}" style="width:${pct}%"></i></div></td>
+        <td class="pc">${b.budget?pct.toFixed(0)+'%':''}</td></tr>`;
+    }).join('')}</tbody></table>`;
+  wrap.appendChild(sec);
+}
+
+/* Season-to-date pot — fines accumulate across meetings until settled. */
+async function renderFinesYtd(){
+  const box=$('#finesYtd'); if(!box) return;
+  let d;
+  try{ d=await DealBoardApi.finesYtd(which); }
+  catch(e){ box.innerHTML=''; return; }
+  if(!d.brokers.length){
+    box.innerHTML=`<div class="hd">${d.year} to date <b>$0</b></div>`+
+      '<div class="none">Nothing owing.</div>';
+    return;
+  }
+  box.innerHTML=`<div class="hd">${d.year} to date <b>$${d.total.toLocaleString()}</b></div>`+
+    '<table>'+d.brokers.map(b=>
+      `<tr><td class="c">${esc(b.code)}</td><td class="n">$${b.total.toLocaleString()}</td>`+
+      `<td class="act"><button class="settle" data-c="${esc(b.code)}" data-a="${b.total}">settle</button></td></tr>`
+    ).join('')+'</table>';
+  box.querySelectorAll('button.settle').forEach(btn=>btn.onclick=()=>{
+    const code=btn.dataset.c, owed=Number(btn.dataset.a);
+    const raw=prompt(`Record a payment from ${code}.\n\nOutstanding: $${owed.toLocaleString()}\nAmount paid:`, owed);
+    if(raw===null) return;
+    const amt=parseFloat(String(raw).replace(/[^0-9.]/g,''));
+    if(!amt||amt<=0) return;
+    persist(()=>DealBoardApi.settleFine(which,code,amt),'settlement for '+code)
+      .then(()=>{ toast(`${code} settled $${amt.toLocaleString()}`); renderFinesYtd(); })
+      .catch(()=>{});
+  });
+}
+
+/* Broker dropdown, loaded once from public.brokers */
+let brokerList=[];
+async function loadBrokers(){
+  try{
+    brokerList=await DealBoardApi.listBrokers();
+  }catch(e){
+    // Fall back to whoever already has a fine, so the picker still works.
+    brokerList=S().fines.map(f=>({code:f.b,first_name:f.b}));
+  }
+  const sel=$('#fineBroker');
+  sel.innerHTML='<option value="">Broker…</option>'+
+    brokerList.map(b=>`<option value="${b.code}">${b.code} — ${esc(b.first_name)}</option>`).join('');
+}
+
+/* Adds to the broker's running total rather than replacing it. */
+function addFine(){
+  const code=$('#fineBroker').value;
+  const amt=parseInt($('#fineAmount').value,10);
+  if(!code){ $('#fineBroker').focus(); return; }
+  if(!amt||amt<0){ $('#fineAmount').focus(); return; }
+
+  let f=S().fines.find(x=>x.b===code);
+  if(!f){ f={b:code,amt:0}; S().fines.push(f); }
+  const was=f.amt;
+  f.amt=was+amt;
+
+  renderFines(code);renderTally();
+  toast(`${code} +$${amt} → $${f.amt}`);
+  $('#fineAmount').value=10;
+  $('#fineBroker').focus();
+
+  persist(()=>DealBoardApi.setFine(which,S().date,code,f.amt),'fine for '+code)
+    .then(renderFinesYtd)
+    .catch(()=>{ f.amt=was; renderFines(); renderTally(); });
+}
+$('#addFine').onclick=addFine;
+$('#fineAmount').addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault();addFine()} });
 
 let regQ='',regAgent='';
 function renderRegister(){
@@ -355,7 +522,7 @@ function renderAll(){
     .toLocaleDateString('en-NZ',{weekday:'long',day:'numeric',month:'long',year:'numeric'}).toUpperCase();
   $('#apologies').textContent=S().apologies;
   $('#notes').value=S().notes;
-  renderTally();renderBoard();renderFines();
+  renderTally();renderBoard();renderFines();renderFinesYtd();renderRankings();
   if(tab==='register')renderRegister();
 }
 async function loadBoard(){
@@ -373,6 +540,7 @@ async function loadBoard(){
     document.getElementById('gate').style.display='none';
     state={};
     await loadBoard();
+    await loadBrokers();
   }catch(err){
     console.error(err);
     document.getElementById('gate').innerHTML=
