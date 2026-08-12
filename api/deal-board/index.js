@@ -46,6 +46,10 @@ export default async function handler(req, res) {
     if (req.method === "POST" && seg[0] === "meeting") return await saveMeeting(req, res);
     if (req.method === "POST" && seg[0] === "fine") return await setFine(req, res);
     if (req.method === "GET"  && seg[0] === "brokers") return await listBrokers(req, res);
+    if (req.method === "GET"  && seg[0] === "fines-ytd") return await finesYtd(req, res);
+    if (req.method === "POST" && seg[0] === "settle-fine") return await settleFine(req, res);
+    if (req.method === "GET"  && seg[0] === "rankings") return await rankings(req, res);
+    if (seg[0] === "notes") return await notes(req, res, seg[1]);
     if (seg[0] === "requirements") return await requirements(req, res, seg[1]);
 
     res.setHeader("Allow", "GET, POST, PATCH, DELETE");
@@ -68,7 +72,7 @@ async function getBoard(req, res) {
   const id = await deptId(req.query.dept);
 
   const today = new Date().toISOString().slice(0, 10);
-  const [stages, deals, reqs, mtg] = await Promise.all([
+  const [stages, deals, reqs, mtg, noteSections, noteRows] = await Promise.all([
     supabase.from("db_stages")
       .select("id, name, position, is_terminal")
       .eq("department_id", id).order("position"),
@@ -82,6 +86,11 @@ async function getBoard(req, res) {
       .select("id, meeting_date, apologies, minutes")
       .eq("department_id", id).lte("meeting_date", today)
       .order("meeting_date", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("db_note_sections")
+      .select("name, position").eq("department_id", id).order("position"),
+    supabase.from("db_notes")
+      .select("id, section, body, sort_order")
+      .eq("department_id", id).eq("is_done", false).order("sort_order"),
   ]);
 
   if (stages.error || deals.error || reqs.error)
@@ -100,6 +109,8 @@ async function getBoard(req, res) {
     requirements: reqs.data,
     meeting: mtg.data || null,
     fines,
+    noteSections: noteSections.data || [],
+    notes: noteRows.data || [],
   });
 }
 
@@ -302,6 +313,150 @@ async function listBrokers(req, res) {
     .select("code, first_name").eq("active", true).order("first_name");
   if (error) throw new HttpError(500, "Broker list failed");
   return res.status(200).json(data);
+}
+
+// ── fines, year to date ───────────────────────────────────────────
+// Fines are stored per meeting, so the season total is a sum across
+// meetings. This is what someone settles up against.
+async function finesYtd(req, res) {
+  await requireUser(req, ROLES_READ);
+  const id = await deptId(req.query.dept);
+  const year = Number(req.query.year) || new Date().getFullYear();
+
+  const { data, error } = await supabase.from("db_fines")
+    .select("broker_code, amount_nzd, db_meetings!inner(department_id, meeting_date)")
+    .eq("db_meetings.department_id", id)
+    .gte("db_meetings.meeting_date", `${year}-01-01`)
+    .lte("db_meetings.meeting_date", `${year}-12-31`);
+  if (error) throw new HttpError(500, "Could not load the fines total");
+
+  const byBroker = {};
+  for (const row of data || []) {
+    byBroker[row.broker_code] =
+      (byBroker[row.broker_code] || 0) + Number(row.amount_nzd || 0);
+  }
+  // Net off anything already settled.
+  const { data: paid } = await supabase.from("db_fine_settlements")
+    .select("broker_code, amount_nzd")
+    .eq("department_id", id)
+    .gte("settled_at", `${year}-01-01`)
+    .lte("settled_at", `${year}-12-31T23:59:59`);
+  for (const p of paid || []) {
+    byBroker[p.broker_code] =
+      (byBroker[p.broker_code] || 0) - Number(p.amount_nzd || 0);
+  }
+
+  const brokers = Object.entries(byBroker)
+    .map(([code, total]) => ({ code, total }))
+    .filter((b) => b.total > 0)
+    .sort((a, b) => b.total - a.total);
+
+  return res.status(200).json({
+    year,
+    total: brokers.reduce((a, b) => a + b.total, 0),
+    brokers,
+  });
+}
+
+// ── note lists (Problem Property, Marketing Reports, auctions…) ────
+// Free text the EA types in and ticks off. Ticking sets is_done rather
+// than deleting, so last week's list is still there if anyone asks.
+async function notes(req, res, id) {
+  if (req.method === "POST" && !id) {
+    const user = await requireUser(req, ROLES_WRITE);
+    const b = req.body || {};
+    if (!b.section) throw new HttpError(400, "A section is required");
+    const dept = await deptId(b.dept);
+
+    const { data: last } = await supabase.from("db_notes")
+      .select("sort_order").eq("department_id", dept).eq("section", b.section)
+      .eq("is_done", false)
+      .order("sort_order", { ascending: false }).limit(1).maybeSingle();
+
+    const { data, error } = await supabase.from("db_notes").insert({
+      department_id: dept, section: b.section,
+      body: (b.body || "").trim(),
+      sort_order: (last?.sort_order ?? 0) + 1000,
+      created_by_oid: user.oid,
+    }).select().single();
+    if (error) throw new HttpError(500, "Could not add the note");
+    return res.status(200).json(data);
+  }
+
+  if (req.method === "PATCH" && id) {
+    await requireUser(req, ROLES_WRITE);
+    const b = req.body || {};
+    const patch = { updated_at: new Date().toISOString() };
+    if ("body" in b) patch.body = String(b.body).trim();
+    const { data, error } = await supabase.from("db_notes")
+      .update(patch).eq("id", id).select().single();
+    if (error) throw new HttpError(500, "Could not save the note");
+    return res.status(200).json(data);
+  }
+
+  if (req.method === "DELETE" && id) {
+    await requireUser(req, ROLES_WRITE);
+    const { error } = await supabase.from("db_notes")
+      .update({ is_done: true, updated_at: new Date().toISOString() })
+      .eq("id", id);
+    if (error) throw new HttpError(500, "Could not clear the note");
+    return res.status(200).json({ ok: true });
+  }
+
+  throw new HttpError(405, "Not allowed");
+}
+
+// ── settle a broker's outstanding fines ───────────────────────────
+// Records a payment rather than clearing the fines, so the history of
+// who owed what in which week stays readable.
+async function settleFine(req, res) {
+  const user = await requireUser(req, ROLES_WRITE);
+  const { dept, brokerCode, amount, note } = req.body || {};
+  if (!brokerCode) throw new HttpError(400, "A broker is required");
+  const amt = Number(amount);
+  if (!amt || amt <= 0) throw new HttpError(400, "An amount is required");
+
+  const id = await deptId(dept);
+  const { error } = await supabase.from("db_fine_settlements").insert({
+    department_id: id,
+    broker_code: String(brokerCode).toUpperCase(),
+    amount_nzd: amt,
+    settled_by_oid: user.oid,
+    note: note || null,
+  });
+  if (error) throw new HttpError(400, "Could not record the settlement");
+  return res.status(200).json({ ok: true });
+}
+
+// ── broker rankings (read-only mirror of the commission workbook) ──
+async function rankings(req, res) {
+  await requireUser(req, ROLES_READ);
+  const id = await deptId(req.query.dept);
+  const year = Number(req.query.year) || new Date().getFullYear();
+
+  const { data, error } = await supabase.from("db_broker_rankings")
+    .select("broker_code, fees_nzd, budget_nzd, synced_at")
+    .eq("department_id", id).eq("financial_year", year)
+    .order("fees_nzd", { ascending: false });
+  if (error) throw new HttpError(500, "Could not load the rankings");
+
+  const { data: dept } = await supabase.from("db_departments")
+    .select("rankings_url").eq("id", id).single();
+  const { data: names } = await supabase.from("brokers")
+    .select("code, first_name");
+  const nameBy = Object.fromEntries((names || []).map((b) => [b.code, b.first_name]));
+
+  return res.status(200).json({
+    year,
+    url: dept?.rankings_url || null,
+    synced_at: data?.[0]?.synced_at || null,
+    brokers: (data || []).map((r) => ({
+      code: r.broker_code,
+      name: nameBy[r.broker_code] || r.broker_code,
+      fees: Number(r.fees_nzd) || 0,
+      budget: Number(r.budget_nzd) || 0,
+    })),
+  });
 }
 
 // ── roll forward ──────────────────────────────────────────────────
