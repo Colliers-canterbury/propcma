@@ -13,6 +13,14 @@ const HEAT=['Motivated','Luke warm','Slow'], KEY='dealboard:v3';
 let mem=null,state=null,which='industrial',tab='board',collapsed={},current=null,proj=false;
 
 const $=s=>document.querySelector(s);
+/* Bind only if the element is present. A page/script version mismatch
+   should degrade to a missing button, not a blank screen. */
+function on(sel, ev, fn){
+  const el=$(sel);
+  if(!el){ console.warn('deal-board: missing element', sel); return; }
+  el.addEventListener(ev, fn);
+}
+function click(sel, fn){ on(sel,'click',fn); }
 const money=n=>n?'$'+Math.round(n).toLocaleString():'—';
 const esc=s=>(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const TITLES={industrial:'Industrial Meeting',investment:'Investment Sales Meeting'};
@@ -291,7 +299,8 @@ function dealRow(d){
 }
 
 function renderFines(bumped){
-  const box=$('#fines');box.innerHTML='';
+  const box=$('#fines'); if(!box) return;
+  box.innerHTML='';
   const list=S().fines.filter(f=>f.amt>0)
     .sort((a,b)=>b.amt-a.amt || a.b.localeCompare(b.b));
   if(!list.length){
@@ -319,7 +328,7 @@ function renderFines(bumped){
     };
     box.appendChild(el);
   });
-  $('#fineTot').textContent='$'+S().fines.reduce((a,f)=>a+(+f.amt||0),0);
+  const ft=$('#fineTot'); if(ft) ft.textContent='$'+S().fines.reduce((a,f)=>a+(+f.amt||0),0);
 }
 
 /* Broker rankings — read-only mirror of the commission workbook.
@@ -394,16 +403,19 @@ async function loadBrokers(){
     brokerList=S().fines.map(f=>({code:f.b,first_name:f.b}));
   }
   const sel=$('#fineBroker');
+  if(!sel) return;
   sel.innerHTML='<option value="">Broker…</option>'+
     brokerList.map(b=>`<option value="${b.code}">${b.code} — ${esc(b.first_name)}</option>`).join('');
 }
 
 /* Adds to the broker's running total rather than replacing it. */
 function addFine(){
-  const code=$('#fineBroker').value;
-  const amt=parseInt($('#fineAmount').value,10);
-  if(!code){ $('#fineBroker').focus(); return; }
-  if(!amt||amt<0){ $('#fineAmount').focus(); return; }
+  const selEl=$('#fineBroker'), amtEl=$('#fineAmount');
+  if(!selEl||!amtEl) return;
+  const code=selEl.value;
+  const amt=parseInt(amtEl.value,10);
+  if(!code){ selEl.focus(); return; }
+  if(!amt||amt<0){ amtEl.focus(); return; }
 
   let f=S().fines.find(x=>x.b===code);
   if(!f){ f={b:code,amt:0}; S().fines.push(f); }
@@ -412,15 +424,15 @@ function addFine(){
 
   renderFines(code);renderTally();
   toast(`${code} +$${amt} → $${f.amt}`);
-  $('#fineAmount').value=10;
-  $('#fineBroker').focus();
+  amtEl.value=10;
+  selEl.focus();
 
   persist(()=>DealBoardApi.setFine(which,S().date,code,f.amt),'fine for '+code)
     .then(renderFinesYtd)
     .catch(()=>{ f.amt=was; renderFines(); renderTally(); });
 }
-$('#addFine').onclick=addFine;
-$('#fineAmount').addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault();addFine()} });
+click('#addFine', addFine);
+on('#fineAmount','keydown',e=>{ if(e.key==='Enter'){e.preventDefault();addFine()} });
 
 let regQ='',regAgent='';
 function renderRegister(){
@@ -465,13 +477,13 @@ function renderRegister(){
     tb.appendChild(tr);
   });
 }
-$('#regSearch').oninput=e=>{regQ=e.target.value;renderRegister()};
-$('#addReg').onclick=()=>{
+on('#regSearch','input',e=>{regQ=e.target.value;renderRegister()});
+click('#addReg', ()=>{
   S().register.unshift({id:'tmp'+Date.now(),n:'',r:'',ag:'',h:'Motivated',isNew:true});
   renderRegister();renderTally();
-  const f=$('#regBody').querySelector('[contenteditable]');if(f)f.focus()};
+  const f=$('#regBody').querySelector('[contenteditable]');if(f)f.focus()});
 
-$('#rollBtn').onclick=()=>{
+click('#rollBtn', ()=>{
   const last=M().stages.find(s=>/uncondition/i.test(s))||M().stages[M().stages.length-1];
   const n=S().deals.filter(d=>d.s===last).length;
   if(!confirm(`Start next week's agenda?\n\n• ${n} unconditional deal(s) archive out\n• everything else carries over in place\n• fines reset, minutes clear`))return;
@@ -483,34 +495,34 @@ $('#rollBtn').onclick=()=>{
       await loadBoard();
       toast(`Rolled forward — ${r?.archived_count ?? n} archived`);
     }).catch(()=>{});
-};
+});
 
-$('#projBtn').onclick=()=>{
+click('#projBtn', ()=>{
   proj=!proj;document.body.classList.toggle('proj',proj);
   $('#projBtn').classList.toggle('on',proj);
   $('#projBtn').textContent=proj?'Exit projector':'Projector';
   if(proj&&document.documentElement.requestFullscreen)
     document.documentElement.requestFullscreen().catch(()=>{});
   else if(!proj&&document.fullscreenElement)document.exitFullscreen().catch(()=>{});
-};
-$('#swapMeeting').onclick=()=>{
+});
+click('#swapMeeting', ()=>{
   which=which==='industrial'?'investment':'industrial';
   $('#swapMeeting').textContent=which==='industrial'?'Switch to Investment':'Switch to Industrial';
   collapsed={};current=null;
   loadBoard().catch(()=>{});
-};
+});
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   b.classList.add('on');tab=b.dataset.tab;
   ['board','register'].forEach(t=>$('#tab-'+t).hidden=t!==tab);
   if(tab==='register')renderRegister();
 });
-$('#apologies').addEventListener('blur',e=>{
+on('#apologies','blur',e=>{
   const v=e.target.textContent.trim();
   if(v===S().apologies)return;
   S().apologies=v; saveMeetingField({apologies:v}).catch(()=>{});
 });
-$('#notes').addEventListener('blur',e=>{
+on('#notes','blur',e=>{
   const v=e.target.value;
   if(v===S().notes)return;
   S().notes=v; saveMeetingField({minutes:v}).catch(()=>{});
@@ -532,6 +544,9 @@ async function loadBoard(){
   setSaver('ok','Ready');
   renderAll();
 }
+
+const BOARD_VERSION='2026-08-13d';
+console.info('deal-board.js', BOARD_VERSION);
 
 (async()=>{
   try{
