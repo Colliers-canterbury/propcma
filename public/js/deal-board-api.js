@@ -56,6 +56,18 @@
       call("/roll-forward", { method: "POST", body: { dept, nextDate } }),
 
     listBrokers: () => call("/brokers"),
+    addNote: (dept, section, body) =>
+      call("/notes", { method: "POST", body: { dept, section, body } }),
+    editNote: (id, body) =>
+      call(`/notes/${id}`, { method: "PATCH", body: { body } }),
+    clearNote: (id) => call(`/notes/${id}`, { method: "DELETE" }),
+
+    settleFine: (dept, brokerCode, amount, note) =>
+      call("/settle-fine", { method: "POST", body: { dept, brokerCode, amount, note } }),
+    rankings: (dept, year) =>
+      call(`/rankings?dept=${encodeURIComponent(dept)}${year?`&year=${year}`:""}`),
+    finesYtd: (dept, year) =>
+      call(`/fines-ytd?dept=${encodeURIComponent(dept)}${year?`&year=${year}`:""}`),
   };
 
   // ── demo backend ────────────────────────────────────────────────
@@ -86,6 +98,12 @@
       removeRequirement: () => wait({ ok: true }),
       rollForward: () => wait({ archived_count: 0 }),
       listBrokers: () => wait([]),
+      finesYtd: () => wait({ year: new Date().getFullYear(), total: 0, brokers: [] }),
+      settleFine: () => wait({ ok: true }),
+      addNote: (d, section, body) => wait({ id: "n" + Date.now(), section, body }),
+      editNote: (id, body) => wait({ id, body }),
+      clearNote: () => wait({ ok: true }),
+      rankings: () => wait({ year: new Date().getFullYear(), brokers: [] }),
     };
   })();
 
