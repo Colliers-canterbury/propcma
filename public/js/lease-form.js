@@ -42,7 +42,7 @@
   }
 
   const DIVISIONS = ["Industrial","Office","Retail","Investment Sales","Land","Rural & Agribusiness","Other"];
-  const DEAL_TYPES = ["Relocation","Expansion","Assignment","Renegotiation"];
+  const DEAL_TYPES = ["Standard Lease","Relocation","Expansion","Assignment","Renegotiation"];
   let BROKERS = [];
 
   // Rental schedule lines — mirrors api/_lib/leases.js RENTAL_LINES.
