@@ -211,8 +211,8 @@ body.proj .notes h2{font-size:20px}
 
 /* masthead logo — public/img/colliers-logo.png
    Hidden automatically if the file is absent. */
-.top .logo{height:30px;width:auto;display:block}
-body.proj .top .logo{height:44px}
+.top .logo{height:45px;width:auto;display:block}
+body.proj .top .logo{height:66px}
 
 /* date-range filter */
 .filterbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
