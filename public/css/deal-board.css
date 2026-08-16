@@ -209,8 +209,8 @@ body.proj .notes h2{font-size:20px}
 .card h3 .clear:hover{color:var(--red)}
 @media print{.card h3 .clear{display:none}}
 
-/* masthead logo — drop your file at public/img/colliers-logo.svg
-   (or .png and change the src). Hidden automatically if absent. */
+/* masthead logo — public/img/colliers-logo.png
+   Hidden automatically if the file is absent. */
 .top .logo{height:30px;width:auto;display:block}
 body.proj .top .logo{height:44px}
 
@@ -238,3 +238,24 @@ input.dateinput:hover{border-color:var(--line);background:var(--paper)}
 .legacy{display:block;font-size:.78em;color:var(--ink-3);margin-top:1px}
 @media print{.filterbar{display:none}
   select.stagepick,input.dateinput{border:none;background:none;-webkit-appearance:none;appearance:none}}
+
+/* status picker */
+select.statuspick{font:inherit;font-size:.86em;width:100%;border:1px solid transparent;
+  background:none;color:var(--ink-2);border-radius:3px;padding:1px 2px;cursor:pointer}
+select.statuspick:hover{border-color:var(--line);background:var(--paper)}
+select.statuspick.live{color:var(--green);font-weight:600}
+select.statuspick.pending{color:var(--amber);font-weight:600}
+body.proj select.statuspick{font-size:.9em}
+
+/* AML tick */
+td.amlcell{text-align:center}
+input.amlbox{width:15px;height:15px;cursor:pointer;accent-color:var(--navy);margin:2px 0 0}
+body.proj input.amlbox{width:19px;height:19px}
+input.amlbox:indeterminate{opacity:.55}
+
+@media print{
+  select.statuspick{-webkit-appearance:none;appearance:none;border:none;background:none}
+  input.amlbox{-webkit-appearance:none;appearance:none;width:auto;height:auto}
+  input.amlbox:checked:before{content:'Y'}
+  input.amlbox:indeterminate:before{content:'WIP';font-size:7pt}
+}
