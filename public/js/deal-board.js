@@ -64,10 +64,11 @@ function fromApi(dept, payload){
     stageIdByName: Object.fromEntries(payload.stages.map(st=>[st.name, st.id])),
     date: payload.meeting?.meeting_date || new Date().toISOString().slice(0,10),
     apologies: payload.meeting?.apologies || '',
-    notes: payload.meeting?.minutes || '',
+    minutes: payload.meeting?.minutes || '',
     deals: payload.deals.map(d=>({
       id:d.id, s:stageName[d.stage_id]||'', a:d.address||'', t:d.timing||'',
       f:Number(d.fee_nzd)||0, b:d.brokers||'', st:d.status_note||'',
+      td:d.timing_date||'',
       aml:AML_OUT[d.aml]||''
     })),
     fines: (payload.fines||[]).map(f=>({b:f.broker_code, amt:Number(f.amount_nzd)||0})),
@@ -90,6 +91,7 @@ function saveDealField(d, k){
     a:  () => ({address: d.a}),
     t:  () => ({timing: d.t}),
     f:  () => ({fee_nzd: d.f}),
+    td: () => ({timing_date: d.td || null}),
     st: () => ({status_note: d.st}),
     aml:() => ({aml: AML_IN[(d.aml||'').toUpperCase()] || 'not_started'}),
     b:  () => ({brokers: d.b.split('/').map(x=>x.trim()).filter(Boolean)}),
@@ -101,16 +103,16 @@ function saveDealField(d, k){
 function saveMeetingField(patch){
   return persist(()=>DealBoardApi.saveMeeting(which, S().date, patch), 'meeting notes');
 }
-const stageTotal=st=>S().deals.filter(d=>d.s===st).reduce((a,d)=>a+(+d.f||0),0);
+const stageTotal=st=>visibleDeals().filter(d=>d.s===st).reduce((a,d)=>a+(+d.f||0),0);
 const tagClass=v=>{v=(v||'').toLowerCase();return v.includes('live')?'live':(v.includes('pend')||v.includes('upcom'))?'pending':''};
 
 function renderTally(){
-  const st=M().stages,s=S();
+  const st=M().stages,s=S(),vis=visibleDeals();
   const banked=stageTotal(st.find(x=>/uncondition/i.test(x))||st[st.length-1]);
-  const pipe=s.deals.reduce((a,d)=>a+(+d.f||0),0);
+  const pipe=vis.reduce((a,d)=>a+(+d.f||0),0);
   const fines=s.fines.reduce((a,f)=>a+(+f.amt||0),0);
   $('#tally').innerHTML=`
-   <div><div class="k">Deals</div><div class="v">${s.deals.length}</div></div>
+   <div><div class="k">Deals</div><div class="v">${vis.length}</div></div>
    <div><div class="k">Unconditional</div><div class="v">${money(banked)}</div></div>
    <div><div class="k">Pipeline</div><div class="v">${money(pipe)}</div></div>
    <div><div class="k">Fines pot</div><div class="v">$${fines}</div></div>
@@ -121,7 +123,7 @@ function renderTally(){
 function renderBoard(){
   const wrap=$('#stages');wrap.innerHTML='';
   M().stages.forEach(st=>{
-    const rows=S().deals.filter(d=>d.s===st);
+    const rows=visibleDeals().filter(d=>d.s===st);
     const sec=document.createElement('section');
     sec.className='stage'+(current===st?' current':'');
     sec.innerHTML=`<header>
@@ -129,7 +131,8 @@ function renderBoard(){
         <h2>${esc(st)}</h2><span class="pill">${rows.length}</span>
         <span class="tot">${money(stageTotal(st))}</span></header>
       ${collapsed[st]?'':`<table><thead><tr>
-        <th style="width:16px"></th><th>Address</th><th style="width:15%">Timing</th>
+        <th style="width:16px"></th><th style="width:120px">Stage</th>
+        <th>Address</th><th style="width:130px">Timing</th>
         <th style="width:12%" class="num">Fee</th><th style="width:11%">Status</th>
         <th style="width:12%">Broker</th><th style="width:6%">AML</th><th style="width:26px"></th>
       </tr></thead><tbody></tbody></table>
@@ -146,7 +149,7 @@ function renderBoard(){
         catch(err){ console.error('row failed:', d, err); }
       });
       sec.querySelector('.addrow').onclick=()=>{
-        const d={id:'tmp'+Date.now(),s:st,a:'',t:'',f:0,b:'',st:'',aml:'',isNew:true};
+        const d={id:'tmp'+Date.now(),s:st,a:'',t:'',td:'',f:0,b:'',st:'',aml:'',isNew:true};
         S().deals.push(d);renderBoard();renderTally();
         const c=wrap.querySelector(`[data-id="${d.id}"] [contenteditable]`);if(c)c.focus();
       };
@@ -228,9 +231,13 @@ let dragId=null;
 function dealRow(d){
   const tr=document.createElement('tr');
   tr.className='row';tr.dataset.id=d.id;tr.draggable=true;
+  const stageOpts=(S().stages||[]).slice().sort((a,b)=>a.position-b.position)
+    .map(x=>`<option value="${esc(x.name)}"${x.name===d.s?' selected':''}>${esc(x.name)}</option>`).join('');
   tr.innerHTML=`<td class="grip">⠿</td>
+    <td class="stagesel"><select class="stagepick">${stageOpts}</select></td>
     <td class="addr"><div contenteditable data-k="a" data-ph="Address">${esc(d.a)}</div></td>
-    <td><div contenteditable data-k="t" data-ph="—">${esc(d.t)}</div></td>
+    <td><input type="date" class="dateinput" value="${esc(d.td)}">${
+      (!d.td && d.t) ? `<span class="legacy">${esc(d.t)}</span>` : ''}</td>
     <td class="num"><div contenteditable data-k="f" data-ph="0">${d.f?(+d.f).toLocaleString():''}</div></td>
     <td><div contenteditable data-k="st" data-ph="—" class="stt">${esc(d.st)}</div></td>
     <td class="brk"><div contenteditable data-k="b" data-ph="—">${esc(d.b)}</div></td>
@@ -259,7 +266,7 @@ function dealRow(d){
           // A new row is only created server-side once it has an address.
           if(!d.a) return;
           persist(()=>DealBoardApi.addDeal(which, S().stageIdByName[d.s], {
-            address:d.a, timing:d.t, fee_nzd:d.f, status_note:d.st,
+            address:d.a, timing:d.t, timing_date:d.td||null, fee_nzd:d.f, status_note:d.st,
             brokers:d.b.split('/').map(x=>x.trim()).filter(Boolean)
           }), d.a).then(row=>{ d.id=row.id; delete d.isNew; done(); }).catch(()=>{});
         }else{
@@ -269,6 +276,30 @@ function dealRow(d){
     });
     el.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();el.blur()}});
   });
+  // stage picker — same effect as dragging, easier on a projector
+  const sp=tr.querySelector('.stagepick');
+  if(sp) sp.onchange=()=>{
+    const to=sp.value, from=d.s;
+    if(to===from) return;
+    if(d.isNew){ d.s=to; renderBoard(); renderTally(); return; }
+    d.s=to; renderBoard(); renderTally();
+    persist(()=>DealBoardApi.moveDeal(d.id, S().stageIdByName[to], null), d.a||'deal')
+      .then(()=>toast(`${d.a||'Deal'} → ${to}`))
+      .catch(()=>{ d.s=from; renderBoard(); renderTally(); });
+  };
+
+  // timing date
+  const di=tr.querySelector('.dateinput');
+  if(di) di.onchange=()=>{
+    const was=d.td;
+    d.td=di.value||'';
+    if(d.isNew) return;
+    saveDealField(d,'td')
+      .then(()=>{tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500);
+                 renderBoard();renderTally()})
+      .catch(()=>{ d.td=was; renderBoard(); });
+  };
+
   tr.querySelector('.x').onclick=()=>{
     if(!confirm(`Remove ${d.a||'this deal'}?`))return;
     const go=()=>{state[which].deals=S().deals.filter(x=>x.id!==d.id);renderBoard();renderTally()};
@@ -434,6 +465,41 @@ function addFine(){
 click('#addFine', addFine);
 on('#fineAmount','keydown',e=>{ if(e.key==='Enter'){e.preventDefault();addFine()} });
 
+let fromDate='', toDate='';
+/* A deal passes the filter when it has a date inside the range.
+   Undated deals are shown only when no range is set — otherwise a
+   range would silently hide everything that has not been dated yet,
+   and the totals would look wrong for no visible reason. */
+function inRange(d){
+  if(!fromDate && !toDate) return true;
+  if(!d.td) return false;
+  if(fromDate && d.td < fromDate) return false;
+  if(toDate   && d.td > toDate)   return false;
+  return true;
+}
+function visibleDeals(){ return S().deals.filter(inRange); }
+
+function applyDateFilter(){
+  fromDate=($('#fromDate')||{}).value||'';
+  toDate=($('#toDate')||{}).value||'';
+  const note=$('#filterNote');
+  if(note){
+    const total=S().deals.length, shown=visibleDeals().length;
+    const undated=S().deals.filter(d=>!d.td).length;
+    note.textContent=(fromDate||toDate)
+      ? `showing ${shown} of ${total}` + (undated?` · ${undated} undated hidden`:'')
+      : '';
+  }
+  renderBoard();renderTally();
+}
+on('#fromDate','change',applyDateFilter);
+on('#toDate','change',applyDateFilter);
+click('#clearDates', ()=>{
+  const f=$('#fromDate'), t=$('#toDate');
+  if(f)f.value=''; if(t)t.value='';
+  applyDateFilter();
+});
+
 let regQ='',regAgent='';
 function renderRegister(){
   const agents=[...new Set(S().register.map(r=>r.ag))].filter(Boolean).sort();
@@ -483,19 +549,97 @@ click('#addReg', ()=>{
   renderRegister();renderTally();
   const f=$('#regBody').querySelector('[contenteditable]');if(f)f.focus()});
 
-click('#rollBtn', ()=>{
-  const last=M().stages.find(s=>/uncondition/i.test(s))||M().stages[M().stages.length-1];
-  const n=S().deals.filter(d=>d.s===last).length;
-  if(!confirm(`Start next week's agenda?\n\n• ${n} unconditional deal(s) archive out\n• everything else carries over in place\n• fines reset, minutes clear`))return;
-  const next=new Date();next.setDate(next.getDate()+7);
-  const nextDate=next.toISOString().slice(0,10);
-  persist(()=>DealBoardApi.rollForward(which,nextDate),'roll forward')
-    .then(async r=>{
-      current=null;
-      await loadBoard();
-      toast(`Rolled forward — ${r?.archived_count ?? n} archived`);
-    }).catch(()=>{});
-});
+
+/* Save meeting — a dated, self-contained snapshot the EA can keep.
+   Opens a print view; the browser's "Save as PDF" destination writes
+   the file. Nothing on the board changes: the sheet stays live. */
+function saveMeetingSnapshot(){
+  const d=new Date();
+  const stamp=d.toLocaleDateString('en-NZ',
+    {weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  const fileStamp=d.toISOString().slice(0,10);
+
+  const stages=(S().stages||[]).slice().sort((a,b)=>a.position-b.position);
+  const noteSecs=(S().noteSections||[]).slice().sort((a,b)=>a.position-b.position);
+  const fines=S().fines.filter(f=>f.amt>0).sort((a,b)=>b.amt-a.amt);
+
+  const stageBlock=st=>{
+    const rows=visibleDeals().filter(x=>x.s===st.name);
+    if(!rows.length) return '';
+    return `<section><h2>${esc(st.name)}<span>${rows.length} · ${money(stageTotal(st.name))}</span></h2>
+      <table><thead><tr><th>Address</th><th>Timing</th><th class="n">Fee</th>
+        <th>Status</th><th>Broker</th><th>AML</th></tr></thead><tbody>${
+      rows.map(r=>`<tr><td>${esc(r.a)}</td><td>${r.td?new Date(r.td+'T00:00:00').toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'}):(esc(r.t)||'—')}</td>
+        <td class="n">${r.f?money(r.f):'—'}</td><td>${esc(r.st)||'—'}</td>
+        <td class="m">${esc(r.b)||'—'}</td><td class="m">${esc(r.aml)||'—'}</td></tr>`).join('')
+    }</tbody></table></section>`;
+  };
+  const noteBlock=ns=>{
+    const items=(S().notes||[]).filter(n=>n.section===ns.name&&n.body);
+    if(!items.length) return '';
+    return `<section><h2>${esc(ns.name)}<span>${items.length}</span></h2>
+      <ul>${items.map(n=>`<li>${esc(n.body)}</li>`).join('')}</ul></section>`;
+  };
+
+  const blocks=[];
+  let ni=0;
+  stages.forEach(st=>{
+    while(ni<noteSecs.length && noteSecs[ni].position<st.position){
+      blocks.push(noteBlock(noteSecs[ni++]));
+    }
+    blocks.push(stageBlock(st));
+  });
+  while(ni<noteSecs.length) blocks.push(noteBlock(noteSecs[ni++]));
+
+  const html=`<!DOCTYPE html><html lang="en-NZ"><head><meta charset="utf-8">
+<title>${esc(M().title)} — ${fileStamp}</title>
+<style>
+  @page{size:A4 portrait;margin:14mm}
+  body{font:10pt/1.4 'Segoe UI',Arial,sans-serif;color:#101820;margin:0}
+  header.doc{border-bottom:2px solid #16385c;padding-bottom:8px;margin-bottom:14px}
+  header.doc h1{margin:0;font-size:16pt;text-transform:uppercase;letter-spacing:.04em;color:#16385c}
+  header.doc .d{font-size:9pt;color:#555;margin-top:2px}
+  .tot{display:flex;gap:22px;margin:10px 0 16px;font-size:9pt}
+  .tot b{display:block;font-size:13pt}
+  section{break-inside:avoid;margin-bottom:12px}
+  h2{font-size:10pt;text-transform:uppercase;letter-spacing:.07em;color:#16385c;
+     border-bottom:1px solid #ccc;padding-bottom:3px;margin:0 0 5px;display:flex}
+  h2 span{margin-left:auto;font-weight:normal;color:#555;font-size:8.5pt}
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:7.5pt;text-transform:uppercase;letter-spacing:.06em;
+     color:#666;border-bottom:1px solid #ddd;padding:2px 4px}
+  td{padding:2px 4px;border-bottom:1px solid #f0f0f0;font-size:9pt;vertical-align:top}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+  td.m{font-family:Consolas,monospace;font-size:8.5pt}
+  ul{margin:0;padding-left:16px}li{font-size:9pt;padding:1px 0}
+  .box{border:1px solid #ddd;padding:7px;font-size:9pt;white-space:pre-wrap;min-height:26px}
+  .fines span{display:inline-block;border:1px solid #ccc;border-radius:9px;
+    padding:1px 7px;margin:0 4px 4px 0;font-size:8.5pt}
+  footer{margin-top:16px;border-top:1px solid #ddd;padding-top:5px;
+    font-size:7.5pt;color:#777}
+</style></head><body>
+<header class="doc"><h1>${esc(M().title)}</h1><div class="d">${stamp}</div></header>
+<div class="tot">
+  <div>Deals<b>${S().deals.length}</b></div>
+  <div>Unconditional<b>${money(stageTotal('Unconditional'))}</b></div>
+  <div>Pipeline<b>${money(S().deals.reduce((a,x)=>a+(+x.f||0),0))}</b></div>
+  <div>Fines this week<b>$${S().fines.reduce((a,f)=>a+(+f.amt||0),0)}</b></div>
+</div>
+${S().apologies?`<section><h2>Apologies</h2><div class="box">${esc(S().apologies)}</div></section>`:''}
+${blocks.filter(Boolean).join('')}
+${fines.length?`<section><h2>Fines</h2><div class="fines">${
+  fines.map(f=>`<span>${esc(f.b)} $${f.amt}</span>`).join('')}</div></section>`:''}
+<section><h2>Minutes / actions</h2><div class="box">${esc(S().minutes||'')}</div></section>
+<footer>Snapshot taken ${d.toLocaleString('en-NZ')} — the board remains live and editable.</footer>
+</body></html>`;
+
+  const w=window.open('','_blank');
+  if(!w){ alert('Please allow pop-ups to save the meeting.'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+  w.focus();
+  setTimeout(()=>w.print(), 350);
+}
+click('#saveMtgBtn', saveMeetingSnapshot);
 
 click('#projBtn', ()=>{
   proj=!proj;document.body.classList.toggle('proj',proj);
@@ -517,15 +661,26 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   ['board','register'].forEach(t=>$('#tab-'+t).hidden=t!==tab);
   if(tab==='register')renderRegister();
 });
+click('#clearApologies', ()=>{
+  if(!S().apologies || !confirm('Clear the apologies?')) return;
+  S().apologies=''; const el=$('#apologies'); if(el) el.textContent='';
+  saveMeetingField({apologies:''}).catch(()=>{});
+});
+click('#clearNotes', ()=>{
+  if(!S().minutes || !confirm('Clear the minutes and actions?')) return;
+  S().minutes=''; const el=$('#minutesBox'); if(el) el.value='';
+  saveMeetingField({minutes:''}).catch(()=>{});
+});
+
 on('#apologies','blur',e=>{
   const v=e.target.textContent.trim();
   if(v===S().apologies)return;
   S().apologies=v; saveMeetingField({apologies:v}).catch(()=>{});
 });
-on('#notes','blur',e=>{
+on('#minutesBox','blur',e=>{
   const v=e.target.value;
-  if(v===S().notes)return;
-  S().notes=v; saveMeetingField({minutes:v}).catch(()=>{});
+  if(v===S().minutes)return;
+  S().minutes=v; saveMeetingField({minutes:v}).catch(()=>{});
 });
 
 function renderAll(){
@@ -533,7 +688,7 @@ function renderAll(){
   $('#mtgDate').textContent=new Date(S().date+'T00:00:00')
     .toLocaleDateString('en-NZ',{weekday:'long',day:'numeric',month:'long',year:'numeric'}).toUpperCase();
   $('#apologies').textContent=S().apologies;
-  $('#notes').value=S().notes;
+  const nEl=$('#minutesBox')||$('#notes'); if(nEl) nEl.value=S().minutes;
   renderTally();renderBoard();renderFines();renderFinesYtd();renderRankings();
   if(tab==='register')renderRegister();
 }
@@ -545,7 +700,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-13d';
+const BOARD_VERSION='2026-08-13f';
 console.info('deal-board.js', BOARD_VERSION);
 
 (async()=>{
