@@ -23,7 +23,7 @@ const ROLES_WRITE = ["office_admin", "accounts", "manager"];
 const ROLES_ADMIN = ["manager"];
 
 const EDITABLE = [
-  "address", "timing", "fee_nzd", "status_note",
+  "address", "timing", "timing_date", "fee_nzd", "status_note",
   "method_of_sale", "vendor_contact", "aml",
 ];
 
@@ -138,6 +138,7 @@ async function addDeal(req, res) {
       sort_order: (last?.sort_order ?? 0) + 1000,
       address,
       timing: b.timing || null,
+      timing_date: b.timing_date || null,
       fee_nzd: Number(b.fee_nzd) || 0,
       status_note: b.status_note || null,
       created_by_oid: user.oid,
@@ -162,6 +163,7 @@ async function editDeal(req, res, id) {
   if ("address" in patch && !String(patch.address).trim())
     throw new HttpError(400, "An address is required");
   if ("fee_nzd" in patch) patch.fee_nzd = Number(patch.fee_nzd) || 0;
+  if ("timing_date" in patch) patch.timing_date = patch.timing_date || null;
 
   const { data, error } = await supabase.from("db_deals")
     .update(patch).eq("id", id).select().single();
