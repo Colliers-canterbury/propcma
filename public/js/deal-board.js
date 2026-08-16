@@ -63,7 +63,9 @@ function fromApi(dept, payload){
   return {
     stages: payload.stages,
     stageIdByName: Object.fromEntries(payload.stages.map(st=>[st.name, st.id])),
-    date: payload.meeting?.meeting_date || new Date().toISOString().slice(0,10),
+    // Minutes and fines are written against today. The most recent
+    // meeting's text is still shown so nothing appears to vanish.
+    date: new Date().toISOString().slice(0,10),
     apologies: payload.meeting?.apologies || '',
     minutes: payload.meeting?.minutes || '',
     deals: payload.deals.map(d=>({
@@ -727,7 +729,9 @@ on('#minutesBox','blur',e=>{
 
 function renderAll(){
   $('#mtgTitle').textContent=M().title;
-  $('#mtgDate').textContent=new Date(S().date+'T00:00:00')
+  // Always today — the board is live, not a dated snapshot. The Save
+  // meeting PDF is what carries a fixed date.
+  $('#mtgDate').textContent=new Date()
     .toLocaleDateString('en-NZ',{weekday:'long',day:'numeric',month:'long',year:'numeric'}).toUpperCase();
   $('#apologies').textContent=S().apologies;
   const nEl=$('#minutesBox')||$('#notes'); if(nEl) nEl.value=S().minutes;
@@ -742,7 +746,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-13h';
+const BOARD_VERSION='2026-08-13i';
 console.info('deal-board.js', BOARD_VERSION);
 
 (async()=>{
