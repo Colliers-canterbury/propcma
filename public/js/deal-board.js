@@ -9,6 +9,7 @@
    b, st, aml) and mapped to and from API field names in fromApi() /
    toApi() below. Only those two functions know both shapes.
    ===================================================================== */
+const STATUSES=['Pending','Submitted','Committed','Deadline','Auction','Priced','Off-Market'];
 const HEAT=['Motivated','Luke warm','Slow'], KEY='dealboard:v3';
 let mem=null,state=null,which='industrial',tab='board',collapsed={},current=null,proj=false;
 
@@ -104,7 +105,15 @@ function saveMeetingField(patch){
   return persist(()=>DealBoardApi.saveMeeting(which, S().date, patch), 'meeting notes');
 }
 const stageTotal=st=>visibleDeals().filter(d=>d.s===st).reduce((a,d)=>a+(+d.f||0),0);
-const tagClass=v=>{v=(v||'').toLowerCase();return v.includes('live')?'live':(v.includes('pend')||v.includes('upcom'))?'pending':''};
+/* Colour by what the status means for the deal, not by exact spelling —
+   legacy values from the sheets ('Live', 'PBN') still land sensibly. */
+const tagClass=v=>{
+  v=(v||'').toLowerCase();
+  if(!v) return '';
+  if(/committ|priced|live|uncondition/.test(v)) return 'live';
+  if(/pend|submit|upcom|deadline|auction/.test(v)) return 'pending';
+  return '';
+};
 
 function renderTally(){
   const st=M().stages,s=S(),vis=visibleDeals();
@@ -228,6 +237,19 @@ function noteRow(n, section){
   return li;
 }
 let dragId=null;
+/* Status picker. Any value already in the data that is not on the list
+   is kept as an extra option — 'Live', 'PBN', 'DBL' and so on are still
+   in the imported rows, and silently blanking them would lose meaning
+   the room put there. */
+function statusSelect(val){
+  const opts=STATUSES.slice();
+  if(val && !opts.some(o=>o.toLowerCase()===val.toLowerCase())) opts.unshift(val);
+  return `<select class="statuspick"><option value="">—</option>`+
+    opts.map(o=>`<option value="${esc(o)}"${
+      o.toLowerCase()===(val||'').toLowerCase()?' selected':''}>${esc(o)}</option>`).join('')+
+    `</select>`;
+}
+
 function dealRow(d){
   const tr=document.createElement('tr');
   tr.className='row';tr.dataset.id=d.id;tr.draggable=true;
@@ -239,15 +261,20 @@ function dealRow(d){
     <td><input type="date" class="dateinput" value="${esc(d.td)}">${
       (!d.td && d.t) ? `<span class="legacy">${esc(d.t)}</span>` : ''}</td>
     <td class="num"><div contenteditable data-k="f" data-ph="0">${d.f?(+d.f).toLocaleString():''}</div></td>
-    <td><div contenteditable data-k="st" data-ph="—" class="stt">${esc(d.st)}</div></td>
+    <td>${statusSelect(d.st)}</td>
     <td class="brk"><div contenteditable data-k="b" data-ph="—">${esc(d.b)}</div></td>
-    <td><div contenteditable data-k="aml" data-ph="—">${esc(d.aml)}</div></td>
+    <td class="amlcell"><input type="checkbox" class="amlbox"
+      ${d.aml==='Y'?'checked':''} title="AML complete"></td>
     <td><button class="x">×</button></td>`;
-  // classList.add('') throws — only add the colour class when there is one.
-  const stt=tr.querySelector('.stt');
-  if(d.st){
-    stt.classList.add('tag');
-    const tc=tagClass(d.st); if(tc) stt.classList.add(tc);
+  const sel=tr.querySelector('.statuspick');
+  if(sel){
+    sel.className='statuspick '+(tagClass(d.st)||'');
+    sel.onchange=()=>{
+      const was=d.st; d.st=sel.value;
+      persist(()=>DealBoardApi.editDeal(d.id,{status_note:d.st}), d.a||'deal')
+        .then(()=>{renderBoard();renderTally()})
+        .catch(()=>{ d.st=was; renderBoard(); });
+    };
   }
   tr.querySelectorAll('[contenteditable]').forEach(el=>{
     /* highlight while editing so the room can see what's being changed */
@@ -260,7 +287,7 @@ function dealRow(d){
       if(String(was)!==String(d[k])){
         const done=()=>{
           tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500);
-          if(k==='f'||k==='st'){renderBoard();renderTally()}
+          if(k==='f'){renderBoard();renderTally()}
         };
         if(d.isNew){
           // A new row is only created server-side once it has an address.
@@ -287,6 +314,21 @@ function dealRow(d){
       .then(()=>toast(`${d.a||'Deal'} → ${to}`))
       .catch(()=>{ d.s=from; renderBoard(); renderTally(); });
   };
+
+  // AML — a tick means complete. Rows imported as WIP show a dash until
+  // someone decides; ticking or unticking resolves it.
+  const ab=tr.querySelector('.amlbox');
+  if(ab){
+    if(d.aml==='WIP'){ ab.indeterminate=true; ab.title='AML in progress'; }
+    ab.onchange=()=>{
+      const was=d.aml;
+      d.aml=ab.checked?'Y':'';
+      ab.indeterminate=false;
+      saveDealField(d,'aml')
+        .then(()=>{tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500)})
+        .catch(()=>{ d.aml=was; renderBoard(); });
+    };
+  }
 
   // timing date
   const di=tr.querySelector('.dateinput');
@@ -700,7 +742,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-13f';
+const BOARD_VERSION='2026-08-13h';
 console.info('deal-board.js', BOARD_VERSION);
 
 (async()=>{
