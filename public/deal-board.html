@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Deal Board — South Island Commercial</title>
-  <!-- deal-board 2026-08-13d — deal-board.html, .css, .js and -api.js
+  <!-- deal-board 2026-08-13f — deal-board.html, .css, .js and -api.js
        must all be copied together; a partial copy will misbehave. -->
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Narrow:wght@600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/deal-board.css" />
@@ -22,7 +22,7 @@
       <span class="saver" id="saver">Ready</span>
       <button id="swapMeeting">Switch to Investment</button>
       <button id="projBtn">Projector</button>
-      <button id="rollBtn">Roll forward</button>
+      <button id="saveMtgBtn">Save meeting</button>
       <button onclick="window.print()">Print A3</button>
     </div>
 
@@ -34,7 +34,14 @@
         <button data-tab="register">Buyers &amp; Tenants</button>
       </div>
 
-      <section id="tab-board">
+      <div class="filterbar" id="filterbar">
+      <label>Timing from <input type="date" id="fromDate"></label>
+      <label>to <input type="date" id="toDate"></label>
+      <button id="clearDates">All dates</button>
+      <span class="filtered" id="filterNote"></span>
+    </div>
+
+    <section id="tab-board">
         <div class="grid2">
           <div id="stages"></div>
           <aside>
@@ -51,12 +58,12 @@
               <div class="ytd" id="finesYtd"></div>
             </div>
             <div class="card">
-              <h3>Apologies</h3>
+              <h3>Apologies <button class="clear" id="clearApologies">clear</button></h3>
               <div contenteditable data-ph="Who's out this week…" id="apologies"></div>
             </div>
             <div class="card">
-              <h3>Minutes / actions</h3>
-              <textarea class="note" id="notes" placeholder="Decisions and actions from the room…"></textarea>
+              <h3>Minutes / actions <button class="clear" id="clearNotes">clear</button></h3>
+              <textarea class="note" id="minutesBox" placeholder="Decisions and actions from the room…"></textarea>
             </div>
           </aside>
         </div>
