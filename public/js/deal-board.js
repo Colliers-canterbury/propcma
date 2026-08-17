@@ -159,6 +159,10 @@ function renderBoard(){
     };
     if(!collapsed[st]){
       const tb=sec.querySelector('tbody');
+      if(!rows.length){
+        tb.innerHTML='<tr><td colspan="9" class="empty">'+
+          (fromDate||toDate ? 'Nothing in this date range.' : 'Nothing here yet.')+'</td></tr>';
+      }
       rows.forEach(d=>{
         try{ tb.appendChild(dealRow(d)); }
         catch(err){ console.error('row failed:', d, err); }
@@ -810,7 +814,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-17c';
+const BOARD_VERSION='2026-08-17d';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
