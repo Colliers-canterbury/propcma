@@ -305,7 +305,7 @@ function renderLeasePrintable(deal, splits, attachments, brokers, preparedBy) {
   ];
   const n = (v) => { const x = parseFloat(String(v ?? "").replace(/[$,\s]/g, "")); return isNaN(x) ? 0 : x; };
 
-  let netRental = 0;
+  let netRental = 0; // calcNet — the sum of the line items, before any override
   const rentalRows = LINES.map((l) => {
     const line = rental[l.key] || {};
     const isOther = l.key === "other1" || l.key === "other2";
@@ -326,7 +326,15 @@ function renderLeasePrintable(deal, splits, attachments, brokers, preparedBy) {
   }).join("");
 
   const opex = n(rental.opex);
-  const grossRental = netRental + opex;
+  const calcNet = netRental;
+  // Manual overrides win over the calculated figures when present —
+  // mirrors api/_lib/leases.js exactly. Without this, a manually
+  // overridden total (used when there's no line-item breakdown, e.g.
+  // an outgoing tenant's rent-reviewed figure) silently reverted to
+  // $0 on the printed PDF, since it only ever summed the line items.
+  const ov = form.rentalOverride || {};
+  netRental = ov.net !== "" && ov.net != null ? n(ov.net) : calcNet;
+  const grossRental = ov.gross !== "" && ov.gross != null ? n(ov.gross) : netRental + opex;
 
   const adminFee = comm.adminFee ? 500 : 0;
   const totalInvoice = n(comm.fee) + n(comm.otherFee) + adminFee
@@ -402,6 +410,9 @@ ${f.billingDifferent ? party(f.billing, "Billing entity", false) : ""}
       <td class="r">${money(grossRental)}</td></tr>
   </tbody>
 </table>
+${(ov.net !== "" && ov.net != null) || (ov.gross !== "" && ov.gross != null)
+  ? `<p class="sub2">Manually entered total${(ov.net !== "" && ov.net != null) && (ov.gross !== "" && ov.gross != null) ? "s" : ""} in use — figures above may not sum from the line items shown, and the auto-calculated basis was net ${money(calcNet)}, gross ${money(calcNet + opex)}.</p>`
+  : ""}
 
 ${deal.deposit_to_trust ? `
 <h2>Trust deposit</h2>
@@ -443,9 +454,10 @@ ${deal.deposit_to_trust ? `
 <ul class="checks avoid">
   <li class="${chk.agencyAgreement ? "" : "no"}">Signed agency agreement</li>
   <li class="${chk.unconditionalConfirmation ? "" : "no"}">Confirmation of unconditional</li>
-  <li class="${chk.leaseValueConfirmation ? "" : "no"}">Confirmation of lease value</li>
-  <li class="${chk.marketingReport ? "" : "no"}">Marketing campaign report</li>
+  <li class="${chk.executedAgreement ? "" : "no"}">Executed lease agreement</li>
   <li class="${chk.amlComplete ? "" : "no"}">AML complete</li>
+  <li class="${chk.marketingReport ? "" : "no"}">Marketing campaign report</li>
+  <li class="${chk.leaseValueConfirmation ? "" : "no"}">Confirmation of lease value</li>
   <li class="${chk.leaseDeed ? "" : "no"}">Lease deed</li>
   ${deal.deposit_to_trust ? `<li class="${chk.appraisals ? "" : "no"}">Appraisals (trust deal)</li>` : ""}
 </ul>
