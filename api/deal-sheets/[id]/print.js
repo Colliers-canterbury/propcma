@@ -332,7 +332,7 @@ function renderLeasePrintable(deal, splits, attachments, brokers, preparedBy) {
   // overridden total (used when there's no line-item breakdown, e.g.
   // an outgoing tenant's rent-reviewed figure) silently reverted to
   // $0 on the printed PDF, since it only ever summed the line items.
-  const ov = form.rentalOverride || {};
+  const ov = f.rentalOverride || {};
   netRental = ov.net !== "" && ov.net != null ? n(ov.net) : calcNet;
   const grossRental = ov.gross !== "" && ov.gross != null ? n(ov.gross) : netRental + opex;
 
