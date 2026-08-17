@@ -89,7 +89,7 @@ async function getBoard(req, res) {
     supabase.from("db_note_sections")
       .select("name, position").eq("department_id", id).order("position"),
     supabase.from("db_notes")
-      .select("id, section, body, sort_order")
+      .select("id, section, body, sort_order, timing, timing_date, fee_nzd, status_note, broker_codes, aml")
       .eq("department_id", id).eq("is_done", false).order("sort_order"),
   ]);
 
@@ -378,6 +378,12 @@ async function notes(req, res, id) {
     const { data, error } = await supabase.from("db_notes").insert({
       department_id: dept, section: b.section,
       body: (b.body || "").trim(),
+      timing: b.timing || null,
+      timing_date: b.timing_date || null,
+      fee_nzd: Number(b.fee_nzd) || 0,
+      status_note: b.status_note || null,
+      broker_codes: b.broker_codes || null,
+      aml: b.aml || null,
       sort_order: (last?.sort_order ?? 0) + 1000,
       created_by_oid: user.oid,
     }).select().single();
@@ -390,6 +396,10 @@ async function notes(req, res, id) {
     const b = req.body || {};
     const patch = { updated_at: new Date().toISOString() };
     if ("body" in b) patch.body = String(b.body).trim();
+    for (const k of ["timing","status_note","broker_codes","aml"])
+      if (k in b) patch[k] = b[k] || null;
+    if ("timing_date" in b) patch.timing_date = b.timing_date || null;
+    if ("fee_nzd" in b) patch.fee_nzd = Number(b.fee_nzd) || 0;
     const { data, error } = await supabase.from("db_notes")
       .update(patch).eq("id", id).select().single();
     if (error) throw new HttpError(500, "Could not save the note");
