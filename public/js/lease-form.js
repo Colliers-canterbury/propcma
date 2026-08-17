@@ -205,9 +205,8 @@
     const c = f.checklist;
     if (!c.agencyAgreement) m.push("Checklist — signed agency agreement");
     if (!c.unconditionalConfirmation) m.push("Checklist — confirmation of unconditional");
-    if (!c.leaseValueConfirmation) m.push("Checklist — confirmation of lease value");
+    if (!c.executedAgreement) m.push("Checklist — executed lease agreement");
     if (!c.amlComplete) m.push("Checklist — AML complete");
-    if (!c.leaseDeed) m.push("Checklist — lease deed");
     return m;
   }
 
@@ -442,14 +441,14 @@
           ${section("12","Mandatory checklist","The invoice will not be raised until every relevant box is ticked.",`
             <div class="checkRow">${chk("checklist.agencyAgreement","Signed agency agreement attached")}${uploadSlot("agencyAgreement","")}</div>
             <div class="checkRow">${chk("checklist.unconditionalConfirmation","Confirmation of unconditional attached")}${uploadSlot("unconditionalConfirmation","")}</div>
-            <div class="checkRow">${chk("checklist.leaseValueConfirmation","Confirmation of lease value")}${uploadSlot("leaseValueConfirmation","e.g. schedule from the lease agreement")}</div>
-            <div class="checkRow">${chk("checklist.amlComplete","AML complete")}${uploadSlot("amlComplete","")}</div>
-            <div class="checkRow">${chk("checklist.leaseDeed","Lease deed attached")}${uploadSlot("leaseDeed","")}</div>
-            ${f.depositToTrust ? `<div class="checkRow">${chk("checklist.appraisals","Appraisals (trust deals) (optional)")}${uploadSlot("appraisals","")}</div>` : ""}`)}
+            <div class="checkRow">${chk("checklist.executedAgreement","Executed lease agreement attached")}${uploadSlot("executedAgreement","")}</div>
+            <div class="checkRow">${chk("checklist.amlComplete","AML complete")}${uploadSlot("amlComplete","")}</div>`)}
 
           ${section("13","Other Documents","Not mandatory — attach anything else useful for the file. Available while this deal sheet is still a draft.",`
             <div class="checkRow">${chk("checklist.marketingReport","Marketing campaign report attached (optional)")}${uploadSlot("marketingReport","")}</div>
-            <div class="checkRow">${chk("checklist.executedAgreement","Executed lease agreement attached (optional)")}${uploadSlot("executedAgreement","")}</div>
+            <div class="checkRow">${chk("checklist.leaseValueConfirmation","Confirmation of lease value (optional)")}${uploadSlot("leaseValueConfirmation","e.g. schedule from the lease agreement")}</div>
+            <div class="checkRow">${chk("checklist.leaseDeed","Lease deed attached (optional)")}${uploadSlot("leaseDeed","")}</div>
+            ${f.depositToTrust ? `<div class="checkRow">${chk("checklist.appraisals","Appraisals (trust deals) (optional)")}${uploadSlot("appraisals","")}</div>` : ""}
             <h3 class="subHead" style="margin-top:14px">Any other document</h3>
             ${extraAttachmentsList()}
             ${state.dealStatus === "draft" ? `<div class="extraUpload">

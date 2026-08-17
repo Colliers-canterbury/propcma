@@ -57,9 +57,10 @@
       ? [
           ["agencyAgreement", "Signed agency agreement"],
           ["unconditionalConfirmation", "Confirmation of unconditional"],
-          ["leaseValueConfirmation", "Confirmation of lease value"],
-          ["marketingReport", "Marketing campaign report"],
+          ["executedAgreement", "Executed lease agreement"],
           ["amlComplete", "AML complete"],
+          ["marketingReport", "Marketing campaign report"],
+          ["leaseValueConfirmation", "Confirmation of lease value"],
           ["leaseDeed", "Lease deed"],
         ]
       : [
