@@ -207,9 +207,8 @@ export function validateLeaseForSubmit(form, derived) {
   const c = form.checklist || {};
   if (!c.agencyAgreement) missing.push("Checklist — signed agency agreement");
   if (!c.unconditionalConfirmation) missing.push("Checklist — confirmation of unconditional");
-  if (!c.leaseValueConfirmation) missing.push("Checklist — confirmation of lease value");
+  if (!c.executedAgreement) missing.push("Checklist — executed lease agreement");
   if (!c.amlComplete) missing.push("Checklist — AML complete");
-  if (!c.leaseDeed) missing.push("Checklist — lease deed");
 
   return missing;
 }
