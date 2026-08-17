@@ -430,6 +430,40 @@ function noteRow(n, section){
   return tr;
 }
 
+/* Fines for this meeting. The chips show a running total per broker;
+   the Add row below adds to it, editing a chip sets it outright. */
+function renderFines(bumped){
+  const box=$('#fines'); if(!box) return;
+  box.innerHTML='';
+  const list=S().fines.filter(f=>f.amt>0)
+    .sort((a,b)=>b.amt-a.amt || a.b.localeCompare(b.b));
+  if(!list.length){
+    box.innerHTML='<span style="color:var(--ink-3);font-size:12px">No fines yet this week.</span>';
+  }
+  list.forEach(f=>{
+    const el=document.createElement('span');
+    el.className='fine hot'+(f.b===bumped?' bumped':'');
+    el.title='Click the amount to correct it';
+    el.innerHTML=`<b>${esc(f.b)}</b> $<span contenteditable>${f.amt}</span><button title="Clear">×</button>`;
+    el.querySelector('span[contenteditable]').addEventListener('blur',e=>{
+      const v=parseInt(e.target.textContent.replace(/\D/g,''))||0;
+      if(v===f.amt){renderFines();return}
+      f.amt=v;renderFines();renderTally();
+      persist(()=>DealBoardApi.setFine(which,S().date,f.b,f.amt),'fine for '+f.b)
+        .then(renderFinesYtd).catch(()=>{});
+    });
+    el.querySelector('button').onclick=()=>{
+      if(!confirm(`Clear ${f.b}'s fine of $${f.amt}?`))return;
+      f.amt=0;renderFines();renderTally();
+      persist(()=>DealBoardApi.setFine(which,S().date,f.b,0),'fine for '+f.b)
+        .then(renderFinesYtd).catch(()=>{});
+    };
+    box.appendChild(el);
+  });
+  const ft=$('#fineTot');
+  if(ft) ft.textContent='$'+S().fines.reduce((a,f)=>a+(+f.amt||0),0);
+}
+
 /* Broker rankings — read-only mirror of the commission workbook.
    Rendered as a panel under the Targets stage. */
 async function renderRankings(){
@@ -776,7 +810,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-17b';
+const BOARD_VERSION='2026-08-17c';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
