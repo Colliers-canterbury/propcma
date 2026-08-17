@@ -255,3 +255,6 @@ input.amlbox:indeterminate{opacity:.55}
   input.amlbox:checked:before{content:'Y'}
   input.amlbox:indeterminate:before{content:'WIP';font-size:7pt}
 }
+
+/* empty stage / section */
+td.empty{color:var(--ink-3);font-size:.9em;text-align:left;padding:7px 10px}
