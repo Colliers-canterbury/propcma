@@ -76,7 +76,11 @@ function fromApi(dept, payload){
     })),
     fines: (payload.fines||[]).map(f=>({b:f.broker_code, amt:Number(f.amount_nzd)||0})),
     noteSections: payload.noteSections||[],
-    notes: (payload.notes||[]).map(n=>({id:n.id, section:n.section, body:n.body||''})),
+    notes: (payload.notes||[]).map(n=>({
+      id:n.id, section:n.section, body:n.body||'', sort_order:n.sort_order,
+      t:n.timing||'', td:n.timing_date||'', f:Number(n.fee_nzd)||0,
+      st:n.status_note||'', b:n.broker_codes||'', aml:n.aml||''
+    })),
     register: payload.requirements.map(r=>({
       id:r.id, n:r.party_name, r:r.requirement, ag:r.broker_code||'',
       h:HEAT_OUT[r.temperature]||'Motivated'
@@ -193,18 +197,27 @@ function renderNoteSections(wrap){
     const sec=document.createElement('section');
     sec.className='notes';
     sec.innerHTML=`<header><h2>${esc(ns.name)}</h2>
-        <span class="pill">${items.length}</span></header>
-      <ul></ul>
+        <span class="pill">${items.length}</span>
+        <span class="tot">${money(items.reduce((a,n)=>a+(+n.f||0),0))}</span></header>
+      <table><thead><tr>
+        <th>Detail</th><th style="width:130px">Timing</th>
+        <th style="width:12%" class="num">Fee</th><th style="width:11%">Status</th>
+        <th style="width:12%">Broker</th><th style="width:6%">AML</th><th style="width:26px"></th>
+      </tr></thead><tbody></tbody></table>
       <button class="addrow">+ Add to ${esc(ns.name.toLowerCase())}</button>`;
-    const ul=sec.querySelector('ul');
-    if(!items.length) ul.innerHTML='<li class="empty">Nothing this week.</li>';
-    items.forEach(n=>ul.appendChild(noteRow(n,ns.name)));
+    const tb=sec.querySelector('tbody');
+    if(!items.length){
+      tb.innerHTML='<tr><td colspan="7" class="empty">Nothing this week.</td></tr>';
+    }
+    items.forEach(n=>{
+      try{ tb.appendChild(noteRow(n,ns.name)); }
+      catch(err){ console.error('note row failed:', n, err); }
+    });
     sec.querySelector('.addrow').onclick=()=>{
-      const n={id:'tmp'+Date.now(),section:ns.name,body:'',isNew:true};
+      const n={id:'tmp'+Date.now(),section:ns.name,body:'',t:'',td:'',f:0,st:'',b:'',aml:'',isNew:true};
       S().notes.push(n);renderBoard();
       const el=wrap.querySelector(`[data-nid="${n.id}"] [contenteditable]`);if(el)el.focus();
     };
-    // sit this section after the stage at the same position
     const before=[...wrap.children].find((c,i)=>i<stageCount &&
       (S().stages[i]||{}).position>ns.position);
     wrap.insertBefore(sec, before||null);
@@ -212,198 +225,72 @@ function renderNoteSections(wrap){
 }
 
 function noteRow(n, section){
-  const li=document.createElement('li');
-  li.dataset.nid=n.id;
-  li.innerHTML=`<div contenteditable data-ph="Type here…">${esc(n.body)}</div>
-    <button class="x" title="Actioned — clear it">×</button>`;
-  const ed=li.querySelector('[contenteditable]');
-  ed.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();ed.blur()}});
-  ed.addEventListener('blur',()=>{
-    const v=ed.textContent.trim();
-    if(v===n.body) return;
-    n.body=v;
-    const flash=()=>{li.classList.add('saved');setTimeout(()=>li.classList.remove('saved'),1500)};
+  const tr=document.createElement('tr');
+  tr.className='row'; tr.dataset.nid=n.id;
+  tr.innerHTML=`
+    <td class="addr"><div contenteditable data-k="body" data-ph="Type here…">${esc(n.body)}</div></td>
+    <td><input type="date" class="dateinput" value="${esc(n.td)}">${
+      (!n.td && n.t) ? `<span class="legacy">${esc(n.t)}</span>` : ''}</td>
+    <td class="num"><div contenteditable data-k="f" data-ph="0">${n.f?(+n.f).toLocaleString():''}</div></td>
+    <td>${statusSelect(n.st)}</td>
+    <td class="brk"><div contenteditable data-k="b" data-ph="—">${esc(n.b)}</div></td>
+    <td class="amlcell"><input type="checkbox" class="amlbox" ${n.aml==='Y'?'checked':''}></td>
+    <td><button class="x" title="Actioned — clear it">×</button></td>`;
+
+  const flash=()=>{tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500)};
+  const fieldMap={body:'body', f:'fee_nzd', b:'broker_codes'};
+
+  /* A new row is only created server-side once it has some text. */
+  function saveNote(patch){
     if(n.isNew){
-      if(!v) return;
-      persist(()=>DealBoardApi.addNote(which,section,v),'note')
-        .then(row=>{n.id=row.id;delete n.isNew;flash()}).catch(()=>{});
-    }else{
-      persist(()=>DealBoardApi.editNote(n.id,v),'note').then(flash).catch(()=>{});
+      if(!n.body) return Promise.resolve();
+      return persist(()=>DealBoardApi.addNote(which,section,n.body),'note')
+        .then(row=>{
+          n.id=row.id; delete n.isNew;
+          const rest={timing_date:n.td||null, fee_nzd:n.f,
+                      status_note:n.st||null, broker_codes:n.b||null, aml:n.aml||null};
+          return DealBoardApi.editNote(n.id, rest).catch(()=>{});
+        }).then(flash);
     }
+    return persist(()=>DealBoardApi.editNote(n.id, patch),'note').then(flash);
+  }
+
+  tr.querySelectorAll('[contenteditable]').forEach(el=>{
+    el.addEventListener('focus',()=>tr.classList.add('editing'));
+    el.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();el.blur()}});
+    el.addEventListener('blur',()=>{
+      tr.classList.remove('editing');
+      const k=el.dataset.k, v=el.textContent.trim();
+      const was=n[k];
+      n[k]= k==='f' ? (parseFloat(v.replace(/[^0-9.]/g,''))||0) : v;
+      if(String(was)===String(n[k])) return;
+      saveNote({[fieldMap[k]]: n[k]}).then(()=>{ if(k==='f') renderBoard(); }).catch(()=>{});
+    });
   });
-  li.querySelector('.x').onclick=()=>{
+
+  const di=tr.querySelector('.dateinput');
+  if(di) di.onchange=()=>{ n.td=di.value||''; saveNote({timing_date:n.td||null}).catch(()=>{}); };
+
+  const sel=tr.querySelector('.statuspick');
+  if(sel){
+    sel.className='statuspick '+(tagClass(n.st)||'');
+    sel.onchange=()=>{ n.st=sel.value; saveNote({status_note:n.st||null})
+      .then(()=>renderBoard()).catch(()=>{}); };
+  }
+
+  const ab=tr.querySelector('.amlbox');
+  if(ab){
+    if(n.aml==='WIP') ab.indeterminate=true;
+    ab.onchange=()=>{ n.aml=ab.checked?'Y':''; ab.indeterminate=false;
+      saveNote({aml:n.aml||null}).catch(()=>{}); };
+  }
+
+  tr.querySelector('.x').onclick=()=>{
     const go=()=>{state[which].notes=S().notes.filter(x=>x.id!==n.id);renderBoard()};
     if(n.isNew){go();return}
     persist(()=>DealBoardApi.clearNote(n.id),'note').then(go).catch(()=>{});
   };
-  return li;
-}
-let dragId=null;
-/* Status picker. Any value already in the data that is not on the list
-   is kept as an extra option — 'Live', 'PBN', 'DBL' and so on are still
-   in the imported rows, and silently blanking them would lose meaning
-   the room put there. */
-function statusSelect(val){
-  const opts=STATUSES.slice();
-  if(val && !opts.some(o=>o.toLowerCase()===val.toLowerCase())) opts.unshift(val);
-  return `<select class="statuspick"><option value="">—</option>`+
-    opts.map(o=>`<option value="${esc(o)}"${
-      o.toLowerCase()===(val||'').toLowerCase()?' selected':''}>${esc(o)}</option>`).join('')+
-    `</select>`;
-}
-
-function dealRow(d){
-  const tr=document.createElement('tr');
-  tr.className='row';tr.dataset.id=d.id;tr.draggable=true;
-  const stageOpts=(S().stages||[]).slice().sort((a,b)=>a.position-b.position)
-    .map(x=>`<option value="${esc(x.name)}"${x.name===d.s?' selected':''}>${esc(x.name)}</option>`).join('');
-  tr.innerHTML=`<td class="grip">⠿</td>
-    <td class="stagesel"><select class="stagepick">${stageOpts}</select></td>
-    <td class="addr"><div contenteditable data-k="a" data-ph="Address">${esc(d.a)}</div></td>
-    <td><input type="date" class="dateinput" value="${esc(d.td)}">${
-      (!d.td && d.t) ? `<span class="legacy">${esc(d.t)}</span>` : ''}</td>
-    <td class="num"><div contenteditable data-k="f" data-ph="0">${d.f?(+d.f).toLocaleString():''}</div></td>
-    <td>${statusSelect(d.st)}</td>
-    <td class="brk"><div contenteditable data-k="b" data-ph="—">${esc(d.b)}</div></td>
-    <td class="amlcell"><input type="checkbox" class="amlbox"
-      ${d.aml==='Y'?'checked':''} title="AML complete"></td>
-    <td><button class="x">×</button></td>`;
-  const sel=tr.querySelector('.statuspick');
-  if(sel){
-    sel.className='statuspick '+(tagClass(d.st)||'');
-    sel.onchange=()=>{
-      const was=d.st; d.st=sel.value;
-      persist(()=>DealBoardApi.editDeal(d.id,{status_note:d.st}), d.a||'deal')
-        .then(()=>{renderBoard();renderTally()})
-        .catch(()=>{ d.st=was; renderBoard(); });
-    };
-  }
-  tr.querySelectorAll('[contenteditable]').forEach(el=>{
-    /* highlight while editing so the room can see what's being changed */
-    el.addEventListener('focus',()=>tr.classList.add('editing'));
-    el.addEventListener('blur',()=>{
-      tr.classList.remove('editing');
-      const k=el.dataset.k,v=el.textContent.trim();
-      const was=d[k];
-      d[k]= k==='f' ? (parseFloat(v.replace(/[^0-9.]/g,''))||0) : v;
-      if(String(was)!==String(d[k])){
-        const done=()=>{
-          tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500);
-          if(k==='f'){renderBoard();renderTally()}
-        };
-        if(d.isNew){
-          // A new row is only created server-side once it has an address.
-          if(!d.a) return;
-          persist(()=>DealBoardApi.addDeal(which, S().stageIdByName[d.s], {
-            address:d.a, timing:d.t, timing_date:d.td||null, fee_nzd:d.f, status_note:d.st,
-            brokers:d.b.split('/').map(x=>x.trim()).filter(Boolean)
-          }), d.a).then(row=>{ d.id=row.id; delete d.isNew; done(); }).catch(()=>{});
-        }else{
-          saveDealField(d,k).then(done).catch(()=>{});
-        }
-      }
-    });
-    el.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();el.blur()}});
-  });
-  // stage picker — same effect as dragging, easier on a projector
-  const sp=tr.querySelector('.stagepick');
-  if(sp) sp.onchange=()=>{
-    const to=sp.value, from=d.s;
-    if(to===from) return;
-    if(d.isNew){ d.s=to; renderBoard(); renderTally(); return; }
-    d.s=to; renderBoard(); renderTally();
-    persist(()=>DealBoardApi.moveDeal(d.id, S().stageIdByName[to], null), d.a||'deal')
-      .then(()=>toast(`${d.a||'Deal'} → ${to}`))
-      .catch(()=>{ d.s=from; renderBoard(); renderTally(); });
-  };
-
-  // AML — a tick means complete. Rows imported as WIP show a dash until
-  // someone decides; ticking or unticking resolves it.
-  const ab=tr.querySelector('.amlbox');
-  if(ab){
-    if(d.aml==='WIP'){ ab.indeterminate=true; ab.title='AML in progress'; }
-    ab.onchange=()=>{
-      const was=d.aml;
-      d.aml=ab.checked?'Y':'';
-      ab.indeterminate=false;
-      saveDealField(d,'aml')
-        .then(()=>{tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500)})
-        .catch(()=>{ d.aml=was; renderBoard(); });
-    };
-  }
-
-  // timing date
-  const di=tr.querySelector('.dateinput');
-  if(di) di.onchange=()=>{
-    const was=d.td;
-    d.td=di.value||'';
-    if(d.isNew) return;
-    saveDealField(d,'td')
-      .then(()=>{tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500);
-                 renderBoard();renderTally()})
-      .catch(()=>{ d.td=was; renderBoard(); });
-  };
-
-  tr.querySelector('.x').onclick=()=>{
-    if(!confirm(`Remove ${d.a||'this deal'}?`))return;
-    const go=()=>{state[which].deals=S().deals.filter(x=>x.id!==d.id);renderBoard();renderTally()};
-    if(d.isNew){go();return}
-    persist(()=>DealBoardApi.removeDeal(d.id), d.a||'deal').then(go).catch(()=>{});
-  };
-  tr.addEventListener('dragstart',()=>{dragId=d.id;tr.classList.add('dragging')});
-  tr.addEventListener('dragend',()=>tr.classList.remove('dragging'));
-  tr.addEventListener('dragover',e=>{e.preventDefault();tr.classList.add('over')});
-  tr.addEventListener('dragleave',()=>tr.classList.remove('over'));
-  tr.addEventListener('drop',e=>{
-    e.preventDefault();e.stopPropagation();tr.classList.remove('over');
-    const arr=S().deals,from=arr.findIndex(x=>x.id===dragId);
-    if(from<0||dragId===d.id)return;
-    const moved=arr[from]; if(moved.isNew)return;
-    const prevStage=moved.s;
-    arr.splice(from,1);moved.s=d.s;
-    const at=arr.findIndex(x=>x.id===d.id);
-    arr.splice(at,0,moved);
-    renderBoard();renderTally();
-    // afterId = the row it now sits below, or null for top of the stage
-    const above=arr.slice(0,at).reverse().find(x=>x.s===moved.s);
-    persist(()=>DealBoardApi.moveDeal(moved.id, S().stageIdByName[moved.s],
-                                      above?above.id:null), moved.a||'deal')
-      .catch(()=>{ moved.s=prevStage; renderBoard(); renderTally(); });
-  });
   return tr;
-}
-
-function renderFines(bumped){
-  const box=$('#fines'); if(!box) return;
-  box.innerHTML='';
-  const list=S().fines.filter(f=>f.amt>0)
-    .sort((a,b)=>b.amt-a.amt || a.b.localeCompare(b.b));
-  if(!list.length){
-    box.innerHTML='<span style="color:var(--ink-3);font-size:12px">No fines yet this week.</span>';
-  }
-  list.forEach((f,i)=>{
-    const el=document.createElement('span');
-    el.className='fine hot'+(f.b===bumped?' bumped':'');
-    el.title='Click the amount to correct it';
-    el.innerHTML=`<b>${esc(f.b)}</b> $<span contenteditable>${f.amt}</span><button title="Clear">×</button>`;
-    // Editing the number in place SETS the total — for corrections.
-    // The Add row below ADDS to it — for the normal case.
-    el.querySelector('span[contenteditable]').addEventListener('blur',e=>{
-      const v=parseInt(e.target.textContent.replace(/\D/g,''))||0;
-      if(v===f.amt){renderFines();return}
-      f.amt=v;renderFines();renderTally();
-      persist(()=>DealBoardApi.setFine(which,S().date,f.b,f.amt),'fine for '+f.b)
-        .then(renderFinesYtd).catch(()=>{});
-    });
-    el.querySelector('button').onclick=()=>{
-      if(!confirm(`Clear ${f.b}'s fine of $${f.amt}?`))return;
-      f.amt=0;renderFines();renderTally();
-      persist(()=>DealBoardApi.setFine(which,S().date,f.b,0),'fine for '+f.b)
-        .then(renderFinesYtd).catch(()=>{});
-    };
-    box.appendChild(el);
-  });
-  const ft=$('#fineTot'); if(ft) ft.textContent='$'+S().fines.reduce((a,f)=>a+(+f.amt||0),0);
 }
 
 /* Broker rankings — read-only mirror of the commission workbook.
@@ -622,7 +509,13 @@ function saveMeetingSnapshot(){
     const items=(S().notes||[]).filter(n=>n.section===ns.name&&n.body);
     if(!items.length) return '';
     return `<section><h2>${esc(ns.name)}<span>${items.length}</span></h2>
-      <ul>${items.map(n=>`<li>${esc(n.body)}</li>`).join('')}</ul></section>`;
+      <table><thead><tr><th>Detail</th><th>Timing</th><th class="n">Fee</th>
+        <th>Status</th><th>Broker</th><th>AML</th></tr></thead><tbody>${
+      items.map(n=>`<tr><td>${esc(n.body)}</td>
+        <td>${n.td?new Date(n.td+'T00:00:00').toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'}):(esc(n.t)||'—')}</td>
+        <td class="n">${n.f?money(n.f):'—'}</td><td>${esc(n.st)||'—'}</td>
+        <td class="m">${esc(n.b)||'—'}</td><td class="m">${n.aml==='Y'?'Y':'—'}</td></tr>`).join('')
+    }</tbody></table></section>`;
   };
 
   const blocks=[];
@@ -746,7 +639,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-13i';
+const BOARD_VERSION='2026-08-17a';
 console.info('deal-board.js', BOARD_VERSION);
 
 (async()=>{
