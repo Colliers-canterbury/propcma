@@ -188,6 +188,143 @@ function renderBoard(){
 
 /* Free-text lists that sit between the stages. Each item is one line
    the EA types; the × ticks it off once actioned. */
+let dragId=null;
+
+/* Status picker. Any value already in the data that is not on the list
+   is kept as an extra option — 'Live', 'PBN', 'DBL' and so on are still
+   in the imported rows, and silently blanking them would lose meaning
+   the room put there. */
+function statusSelect(val){
+  const opts=STATUSES.slice();
+  if(val && !opts.some(o=>o.toLowerCase()===val.toLowerCase())) opts.unshift(val);
+  return `<select class="statuspick"><option value="">—</option>`+
+    opts.map(o=>`<option value="${esc(o)}"${
+      o.toLowerCase()===(val||'').toLowerCase()?' selected':''}>${esc(o)}</option>`).join('')+
+    `</select>`;
+}
+
+function dealRow(d){
+  const tr=document.createElement('tr');
+  tr.className='row'; tr.dataset.id=d.id; tr.draggable=true;
+  const stageOpts=(S().stages||[]).slice().sort((a,b)=>a.position-b.position)
+    .map(x=>`<option value="${esc(x.name)}"${x.name===d.s?' selected':''}>${esc(x.name)}</option>`).join('');
+  tr.innerHTML=`<td class="grip">⠿</td>
+    <td class="stagesel"><select class="stagepick">${stageOpts}</select></td>
+    <td class="addr"><div contenteditable data-k="a" data-ph="Address">${esc(d.a)}</div></td>
+    <td><input type="date" class="dateinput" value="${esc(d.td)}">${
+      (!d.td && d.t) ? `<span class="legacy">${esc(d.t)}</span>` : ''}</td>
+    <td class="num"><div contenteditable data-k="f" data-ph="0">${d.f?(+d.f).toLocaleString():''}</div></td>
+    <td>${statusSelect(d.st)}</td>
+    <td class="brk"><div contenteditable data-k="b" data-ph="—">${esc(d.b)}</div></td>
+    <td class="amlcell"><input type="checkbox" class="amlbox"
+      ${d.aml==='Y'?'checked':''} title="AML complete"></td>
+    <td><button class="x" title="Remove">×</button></td>`;
+
+  const sel=tr.querySelector('.statuspick');
+  if(sel){
+    sel.className='statuspick '+(tagClass(d.st)||'');
+    sel.onchange=()=>{
+      const was=d.st; d.st=sel.value;
+      persist(()=>DealBoardApi.editDeal(d.id,{status_note:d.st}), d.a||'deal')
+        .then(()=>{renderBoard();renderTally()})
+        .catch(()=>{ d.st=was; renderBoard(); });
+    };
+  }
+
+  tr.querySelectorAll('[contenteditable]').forEach(el=>{
+    el.addEventListener('focus',()=>tr.classList.add('editing'));
+    el.addEventListener('blur',()=>{
+      tr.classList.remove('editing');
+      const k=el.dataset.k, v=el.textContent.trim();
+      const was=d[k];
+      d[k]= k==='f' ? (parseFloat(v.replace(/[^0-9.]/g,''))||0) : v;
+      if(String(was)!==String(d[k])){
+        const done=()=>{
+          tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500);
+          if(k==='f'){renderBoard();renderTally()}
+        };
+        if(d.isNew){
+          if(!d.a) return;
+          persist(()=>DealBoardApi.addDeal(which, S().stageIdByName[d.s], {
+            address:d.a, timing:d.t, timing_date:d.td||null, fee_nzd:d.f, status_note:d.st,
+            brokers:d.b.split('/').map(x=>x.trim()).filter(Boolean)
+          }), d.a).then(row=>{ d.id=row.id; delete d.isNew; done(); }).catch(()=>{});
+        }else{
+          saveDealField(d,k).then(done).catch(()=>{});
+        }
+      }
+    });
+    el.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();el.blur()}});
+  });
+
+  // stage picker — same effect as dragging, easier on a projector
+  const sp=tr.querySelector('.stagepick');
+  if(sp) sp.onchange=()=>{
+    const to=sp.value, from=d.s;
+    if(to===from) return;
+    if(d.isNew){ d.s=to; renderBoard(); renderTally(); return; }
+    d.s=to; renderBoard(); renderTally();
+    persist(()=>DealBoardApi.moveDeal(d.id, S().stageIdByName[to], null), d.a||'deal')
+      .then(()=>toast(`${d.a||'Deal'} → ${to}`))
+      .catch(()=>{ d.s=from; renderBoard(); renderTally(); });
+  };
+
+  // AML — a tick means complete. Rows imported as WIP show a dash until
+  // someone decides; ticking or unticking resolves it.
+  const ab=tr.querySelector('.amlbox');
+  if(ab){
+    if(d.aml==='WIP'){ ab.indeterminate=true; ab.title='AML in progress'; }
+    ab.onchange=()=>{
+      const was=d.aml;
+      d.aml=ab.checked?'Y':'';
+      ab.indeterminate=false;
+      saveDealField(d,'aml')
+        .then(()=>{tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500)})
+        .catch(()=>{ d.aml=was; renderBoard(); });
+    };
+  }
+
+  // timing date
+  const di=tr.querySelector('.dateinput');
+  if(di) di.onchange=()=>{
+    const was=d.td;
+    d.td=di.value||'';
+    if(d.isNew) return;
+    saveDealField(d,'td')
+      .then(()=>{tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500);
+                 renderBoard();renderTally()})
+      .catch(()=>{ d.td=was; renderBoard(); });
+  };
+
+  tr.querySelector('.x').onclick=()=>{
+    if(!confirm(`Remove ${d.a||'this deal'}?`))return;
+    const go=()=>{state[which].deals=S().deals.filter(x=>x.id!==d.id);renderBoard();renderTally()};
+    if(d.isNew){go();return}
+    persist(()=>DealBoardApi.removeDeal(d.id), d.a||'deal').then(go).catch(()=>{});
+  };
+
+  tr.addEventListener('dragstart',()=>{dragId=d.id;tr.classList.add('dragging')});
+  tr.addEventListener('dragend',()=>tr.classList.remove('dragging'));
+  tr.addEventListener('dragover',e=>{e.preventDefault();tr.classList.add('over')});
+  tr.addEventListener('dragleave',()=>tr.classList.remove('over'));
+  tr.addEventListener('drop',e=>{
+    e.preventDefault();e.stopPropagation();tr.classList.remove('over');
+    const arr=S().deals,from=arr.findIndex(x=>x.id===dragId);
+    if(from<0||dragId===d.id)return;
+    const moved=arr[from]; if(moved.isNew)return;
+    const prevStage=moved.s;
+    arr.splice(from,1);moved.s=d.s;
+    const at=arr.findIndex(x=>x.id===d.id);
+    arr.splice(at,0,moved);
+    renderBoard();renderTally();
+    const above=arr.slice(0,at).reverse().find(x=>x.s===moved.s);
+    persist(()=>DealBoardApi.moveDeal(moved.id, S().stageIdByName[moved.s],
+                                      above?above.id:null), moved.a||'deal')
+      .catch(()=>{ moved.s=prevStage; renderBoard(); renderTally(); });
+  });
+  return tr;
+}
+
 function renderNoteSections(wrap){
   const secs=S().noteSections||[];
   const stageCount=(S().stages||[]).length;
@@ -639,8 +776,16 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-17a';
+const BOARD_VERSION='2026-08-17b';
 console.info('deal-board.js', BOARD_VERSION);
+
+/* Sanity check — a truncated or partial file should say so plainly
+   rather than rendering an empty board. */
+for(const fn of ['dealRow','noteRow','statusSelect','renderBoard','renderTally']){
+  if(typeof window[fn]!=='function' && typeof eval('typeof '+fn)!=='function'){
+    console.error('deal-board: missing function '+fn+' — deal-board.js may be incomplete');
+  }
+}
 
 (async()=>{
   try{
