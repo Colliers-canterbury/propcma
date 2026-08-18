@@ -4,13 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Deal Board — South Island Commercial</title>
-  <!-- deal-board 2026-08-18b
+  <!-- deal-board 2026-08-18c
        The ?v= query strings below bust the browser cache. Bump them
        (and BOARD_VERSION in deal-board.js) whenever these files change,
        or a stale copy will keep being served. — deal-board.html, .css, .js and -api.js
        must all be copied together; a partial copy will misbehave. -->
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Narrow:wght@600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/deal-board.css?v=2026-08-18b" />
+  <link rel="stylesheet" href="css/deal-board.css?v=2026-08-18c" />
 </head>
 <body>
   <div class="gate" id="gate"><div class="inner">Signing in…</div></div>
@@ -25,7 +25,7 @@
       </div>
       <div class="sp"></div>
       <span class="saver" id="saver">Ready</span>
-      <button id="swapMeeting">Switch to Investment</button>
+      <select id="unitPick" aria-label="Business unit"></select>
       <button id="projBtn">Projector</button>
       <button id="saveMtgBtn">Save meeting</button>
       <button onclick="window.print()">Print A3</button>
@@ -114,7 +114,7 @@
   <script src="js/msal-browser.min.js"></script>
   <script src="js/config.js"></script>
   <script src="js/auth.js"></script>
-  <script src="js/deal-board-api.js?v=2026-08-18b"></script>
-  <script src="js/deal-board.js?v=2026-08-18b"></script>
+  <script src="js/deal-board-api.js?v=2026-08-18c"></script>
+  <script src="js/deal-board.js?v=2026-08-18c"></script>
 </body>
 </html>
