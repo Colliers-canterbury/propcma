@@ -627,72 +627,6 @@ function renderWeightExample(){
     ? parts.join('<br>')+`<br><b>Weighted pipeline ${money(weightedPipeline())}</b>` : '';
 }
 
-function renderFines(bumped){
-  const box=$('#fines'); if(!box) return;
-  box.innerHTML='';
-  const list=S().fines.filter(f=>f.amt>0)
-    .sort((a,b)=>b.amt-a.amt || a.b.localeCompare(b.b));
-  if(!list.length){
-    box.innerHTML='<span style="color:var(--ink-3);font-size:12px">No fines yet this week.</span>';
-  }
-  list.forEach(f=>{
-    const el=document.createElement('span');
-    el.className='fine hot'+(f.b===bumped?' bumped':'');
-    el.title='Click the amount to correct it';
-    el.innerHTML=`<b>${esc(f.b)}</b> $<span contenteditable>${f.amt}</span><button title="Clear">×</button>`;
-    el.querySelector('span[contenteditable]').addEventListener('blur',e=>{
-      const v=parseInt(e.target.textContent.replace(/\D/g,''))||0;
-      if(v===f.amt){renderFines();return}
-      f.amt=v;renderFines();renderTally();
-      persist(()=>DealBoardApi.setFine(which,S().date,f.b,f.amt),'fine for '+f.b)
-        .then(renderFinesYtd).catch(()=>{});
-    });
-    el.querySelector('button').onclick=()=>{
-      if(!confirm(`Clear ${f.b}'s fine of $${f.amt}?`))return;
-      f.amt=0;renderFines();renderTally();
-      persist(()=>DealBoardApi.setFine(which,S().date,f.b,0),'fine for '+f.b)
-        .then(renderFinesYtd).catch(()=>{});
-    };
-    box.appendChild(el);
-  });
-  const ft=$('#fineTot');
-  if(ft) ft.textContent='$'+S().fines.reduce((a,f)=>a+(+f.amt||0),0);
-}
-
-/* Broker rankings — read-only mirror of the commission workbook.
-   Rendered as a panel under the Targets stage. */
-async function renderRankings(){
-  const wrap=$('#stages'); if(!wrap) return;
-  let d;
-  try{ d=await DealBoardApi.rankings(which); }catch(e){ return; }
-  if(!d.brokers.length) return;
-
-  const asAt=d.synced_at
-    ? new Date(d.synced_at).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'})
-    : '';
-  const sec=document.createElement('section');
-  sec.className='ranks';
-  sec.innerHTML=`<header><h2>${d.year} rankings</h2>
-      <span class="as-at">${asAt?'as at '+asAt:''}</span>
-      ${d.url?`<a class="src" href="${d.url}" target="_blank" rel="noopener">Open workbook</a>`:''}
-      </header>
-    <table><thead><tr>
-      <th style="width:34px"></th><th>Broker</th>
-      <th style="width:104px" class="num">Fees</th>
-      <th style="width:104px" class="num">Budget</th>
-      <th>Progress</th><th class="pc"></th>
-    </tr></thead><tbody>${d.brokers.map(b=>{
-      const pct=b.budget?Math.min(100,b.fees/b.budget*100):0;
-      const short=b.budget&&pct<50;
-      return `<tr><td class="brk">${esc(b.code)}</td><td>${esc(b.name)}</td>
-        <td class="num">${money(b.fees)}</td>
-        <td class="num">${b.budget?money(b.budget):'—'}</td>
-        <td><div class="bar"><i class="${short?'short':''}" style="width:${pct}%"></i></div></td>
-        <td class="pc">${b.budget?pct.toFixed(0)+'%':''}</td></tr>`;
-    }).join('')}</tbody></table>`;
-  wrap.appendChild(sec);
-}
-
 /* Season-to-date pot — fines accumulate across meetings until settled. */
 async function renderFinesYtd(){
   const box=$('#finesYtd'); if(!box) return;
@@ -1011,7 +945,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-18a';
+const BOARD_VERSION='2026-08-18b';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
