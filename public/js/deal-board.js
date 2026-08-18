@@ -9,6 +9,16 @@
    b, st, aml) and mapped to and from API field names in fromApi() /
    toApi() below. Only those two functions know both shapes.
    ===================================================================== */
+/* Which stages offer an outcome instead of a plain remove, what the
+   options are, and where each one sends the deal. */
+const OUTCOMES={
+  'Submissions':             [['won','Win','Campaigns / sole agency'],
+                              ['lost','Lost','Lost']],
+  'Campaigns / sole agency': [['withdrawn','Withdrawn','Withdrawn']],
+  'Unconditional':           [['sold','Sold','Sold']]
+};
+const TODAY=()=>new Date().toISOString().slice(0,10);
+
 const STATUSES=['Pending','Submitted','Committed','Deadline','Auction','Priced','Off-Market'];
 const HEAT=['Motivated','Luke warm','Slow'], KEY='dealboard:v3';
 let mem=null,state=null,which='industrial',tab='board',collapsed={},current=null,proj=false;
@@ -70,11 +80,13 @@ function fromApi(dept, payload){
     minutes: payload.meeting?.minutes || '',
     deals: payload.deals.map(d=>({
       id:d.id, s:stageName[d.stage_id]||'', a:d.address||'', t:d.timing||'',
-      f:Number(d.fee_nzd)||0, b:d.brokers||'', st:d.status_note||'',
+      f:Number(d.fee_nzd)||0, b:d.brokers||'', st:d.status_note||'', out:d.outcome||'',
       td:d.timing_date||'',
       aml:AML_OUT[d.aml]||''
     })),
     fines: (payload.fines||[]).map(f=>({b:f.broker_code, amt:Number(f.amount_nzd)||0})),
+    weights: Object.fromEntries((payload.weights||[]).map(w=>[w.stage_name, Number(w.pct)||0])),
+    outcomes: Object.assign({}, payload.outcomes||{}),
     noteSections: payload.noteSections||[],
     notes: (payload.notes||[]).map(n=>({
       id:n.id, section:n.section, body:n.body||'', sort_order:n.sort_order,
@@ -111,6 +123,19 @@ function saveMeetingField(patch){
   return persist(()=>DealBoardApi.saveMeeting(which, S().date, patch), 'meeting notes');
 }
 const stageTotal=st=>visibleDeals().filter(d=>d.s===st).reduce((a,d)=>a+(+d.f||0),0);
+
+/* Weighted pipeline: Unconditional counts in full, other stages at the
+   percentage set under Pipeline Settings. A stage with no weighting
+   contributes nothing — Sold, Withdrawn and Lost must not inflate a
+   forward-looking figure. */
+function weightFor(stage){
+  if(/^uncondition/i.test(stage)) return 1;
+  const w=(S().weights||{})[stage];
+  return w===undefined ? 0 : w/100;
+}
+function weightedPipeline(){
+  return visibleDeals().reduce((a,d)=>a+(+d.f||0)*weightFor(d.s),0);
+}
 /* Colour by what the status means for the deal, not by exact spelling —
    legacy values from the sheets ('Live', 'PBN') still land sensibly. */
 const tagClass=v=>{
@@ -126,12 +151,15 @@ function renderTally(){
   const banked=stageTotal(st.find(x=>/uncondition/i.test(x))||st[st.length-1]);
   const pipe=vis.reduce((a,d)=>a+(+d.f||0),0);
   const fines=s.fines.reduce((a,f)=>a+(+f.amt||0),0);
+  const out=S().outcomes||{};
   $('#tally').innerHTML=`
    <div><div class="k">Deals</div><div class="v">${vis.length}</div></div>
    <div><div class="k">Unconditional</div><div class="v">${money(banked)}</div></div>
-   <div><div class="k">Pipeline</div><div class="v">${money(pipe)}</div></div>
-   <div><div class="k">Fines pot</div><div class="v">$${fines}</div></div>
-   <div><div class="k">Buyers &amp; tenants</div><div class="v">${s.register.length}</div></div>`;
+   <div><div class="k">Pipeline (weighted)</div><div class="v">${money(weightedPipeline())}</div>
+     <div class="sub">${money(pipe)} unweighted</div></div>
+   <div><div class="k">Won</div><div class="v">${out.won||0}</div></div>
+   <div><div class="k">Lost</div><div class="v">${out.lost||0}</div></div>
+   <div><div class="k">Buyers &amp; tenants</div><div class="v">${S().register.length}</div></div>`;
 }
 
 /* ---- pipeline: same board whether on the desk or the projector ---- */
@@ -168,7 +196,7 @@ function renderBoard(){
         catch(err){ console.error('row failed:', d, err); }
       });
       sec.querySelector('.addrow').onclick=()=>{
-        const d={id:'tmp'+Date.now(),s:st,a:'',t:'',td:'',f:0,b:'',st:'',aml:'',isNew:true};
+        const d={id:'tmp'+Date.now(),s:st,a:'',t:'',td:/^uncondition/i.test(st)?TODAY():'',f:0,b:'',st:'',aml:'',isNew:true};
         S().deals.push(d);renderBoard();renderTally();
         const c=wrap.querySelector(`[data-id="${d.id}"] [contenteditable]`);if(c)c.focus();
       };
@@ -207,6 +235,16 @@ function statusSelect(val){
     `</select>`;
 }
 
+/* The action at the end of a row: an outcome picker on the stages that
+   have one, a plain remove everywhere else. */
+function outcomeControl(d){
+  const opts=OUTCOMES[d.s];
+  if(!opts) return '<button class="x" title="Remove">×</button>';
+  return `<select class="outcome"><option value="">—</option>`+
+    opts.map(o=>`<option value="${o[0]}">${o[1]}</option>`).join('')+
+    `</select>`;
+}
+
 function dealRow(d){
   const tr=document.createElement('tr');
   tr.className='row'; tr.dataset.id=d.id; tr.draggable=true;
@@ -222,7 +260,7 @@ function dealRow(d){
     <td class="brk"><div contenteditable data-k="b" data-ph="—">${esc(d.b)}</div></td>
     <td class="amlcell"><input type="checkbox" class="amlbox"
       ${d.aml==='Y'?'checked':''} title="AML complete"></td>
-    <td><button class="x" title="Remove">×</button></td>`;
+    <td class="actcell">${outcomeControl(d)}</td>`;
 
   const sel=tr.querySelector('.statuspick');
   if(sel){
@@ -267,7 +305,14 @@ function dealRow(d){
     const to=sp.value, from=d.s;
     if(to===from) return;
     if(d.isNew){ d.s=to; renderBoard(); renderTally(); return; }
-    d.s=to; renderBoard(); renderTally();
+    d.s=to;
+    // Landing in Unconditional dates the deal today unless it already
+    // carries a date the room agreed on.
+    if(/^uncondition/i.test(to) && !d.td){
+      d.td=TODAY();
+      DealBoardApi.editDeal(d.id,{timing_date:d.td}).catch(()=>{});
+    }
+    renderBoard(); renderTally();
     persist(()=>DealBoardApi.moveDeal(d.id, S().stageIdByName[to], null), d.a||'deal')
       .then(()=>toast(`${d.a||'Deal'} → ${to}`))
       .catch(()=>{ d.s=from; renderBoard(); renderTally(); });
@@ -300,11 +345,34 @@ function dealRow(d){
       .catch(()=>{ d.td=was; renderBoard(); });
   };
 
-  tr.querySelector('.x').onclick=()=>{
+  const xb=tr.querySelector('.x');
+  if(xb) xb.onclick=()=>{
     if(!confirm(`Remove ${d.a||'this deal'}?`))return;
     const go=()=>{state[which].deals=S().deals.filter(x=>x.id!==d.id);renderBoard();renderTally()};
     if(d.isNew){go();return}
     persist(()=>DealBoardApi.removeDeal(d.id), d.a||'deal').then(go).catch(()=>{});
+  };
+
+  const oc=tr.querySelector('.outcome');
+  if(oc) oc.onchange=()=>{
+    const val=oc.value; if(!val) return;
+    const row=(OUTCOMES[d.s]||[]).find(o=>o[0]===val);
+    if(!row){oc.value='';return}
+    const label=row[1], dest=row[2];
+    if(!confirm(`Mark ${d.a||'this deal'} as ${label}?\n\nIt moves to ${dest}.`)){
+      oc.value=''; return;
+    }
+    if(d.isNew){ d.s=dest; d.out=val; renderBoard(); renderTally(); return; }
+    const from=d.s, wasOut=d.out;
+    const stamp=/^uncondition/i.test(dest) ? TODAY() : undefined;
+    d.s=dest; d.out=val; if(stamp) d.td=stamp;
+    S().outcomes[val]=(S().outcomes[val]||0)+1;
+    renderBoard(); renderTally();
+    persist(()=>DealBoardApi.setOutcome(d.id, val, S().stageIdByName[dest], stamp), d.a||'deal')
+      .then(()=>toast(`${d.a||'Deal'} → ${dest}`))
+      .catch(()=>{ d.s=from; d.out=wasOut;
+        S().outcomes[val]=Math.max(0,(S().outcomes[val]||1)-1);
+        renderBoard(); renderTally(); });
   };
 
   tr.addEventListener('dragstart',()=>{dragId=d.id;tr.classList.add('dragging')});
@@ -436,6 +504,129 @@ function noteRow(n, section){
 
 /* Fines for this meeting. The chips show a running total per broker;
    the Add row below adds to it, editing a chip sets it outright. */
+function renderFines(bumped){
+  const box=$('#fines'); if(!box) return;
+  box.innerHTML='';
+  const list=S().fines.filter(f=>f.amt>0)
+    .sort((a,b)=>b.amt-a.amt || a.b.localeCompare(b.b));
+  if(!list.length){
+    box.innerHTML='<span style="color:var(--ink-3);font-size:12px">No fines yet this week.</span>';
+  }
+  list.forEach(f=>{
+    const el=document.createElement('span');
+    el.className='fine hot'+(f.b===bumped?' bumped':'');
+    el.title='Click the amount to correct it';
+    el.innerHTML=`<b>${esc(f.b)}</b> $<span contenteditable>${f.amt}</span><button title="Clear">×</button>`;
+    el.querySelector('span[contenteditable]').addEventListener('blur',e=>{
+      const v=parseInt(e.target.textContent.replace(/\D/g,''))||0;
+      if(v===f.amt){renderFines();return}
+      f.amt=v;renderFines();renderTally();
+      persist(()=>DealBoardApi.setFine(which,S().date,f.b,f.amt),'fine for '+f.b)
+        .then(renderFinesYtd).catch(()=>{});
+    });
+    el.querySelector('button').onclick=()=>{
+      if(!confirm(`Clear ${f.b}'s fine of $${f.amt}?`))return;
+      f.amt=0;renderFines();renderTally();
+      persist(()=>DealBoardApi.setFine(which,S().date,f.b,0),'fine for '+f.b)
+        .then(renderFinesYtd).catch(()=>{});
+    };
+    box.appendChild(el);
+  });
+  const ft=$('#fineTot');
+  if(ft) ft.textContent='$'+S().fines.reduce((a,f)=>a+(+f.amt||0),0);
+}
+
+/* Broker rankings — read-only mirror of the commission workbook.
+   Rendered as a panel under the Targets stage. */
+async function renderRankings(){
+  const pane=$('#rankingsPane'); if(!pane) return;
+  let d;
+  try{ d=await DealBoardApi.rankings(which); }
+  catch(e){ pane.innerHTML='<div class="card">Could not load the rankings.</div>'; return; }
+  if(!d.brokers.length){
+    pane.innerHTML='<div class="card">No rankings recorded yet.</div>'; return;
+  }
+  const asAt=d.synced_at
+    ? new Date(d.synced_at).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'})
+    : '';
+  const totFees=d.brokers.reduce((a,b)=>a+b.fees,0);
+  const totBudget=d.brokers.reduce((a,b)=>a+(b.budget||0),0);
+  const totPct=totBudget?Math.min(100,totFees/totBudget*100):0;
+
+  pane.innerHTML=`<section class="ranks">
+    <header><h2>${d.year} rankings</h2>
+      <span class="as-at">${asAt?'as at '+asAt:''}</span>
+      ${d.url?`<a class="src" href="${d.url}" target="_blank" rel="noopener">Open workbook</a>`:''}
+    </header>
+    <table><thead><tr>
+      <th style="width:34px"></th><th>Broker</th>
+      <th style="width:118px" class="num">Fees</th>
+      <th style="width:118px" class="num">Budget</th>
+      <th>Progress</th><th class="pc"></th>
+    </tr></thead><tbody>${d.brokers.map(b=>{
+      const pct=b.budget?Math.min(100,b.fees/b.budget*100):0;
+      const short=b.budget&&pct<50;
+      return `<tr><td class="brk">${esc(b.code)}</td><td>${esc(b.name)}</td>
+        <td class="num">${money(b.fees)}</td>
+        <td class="num">${b.budget?money(b.budget):'—'}</td>
+        <td><div class="bar"><i class="${short?'short':''}" style="width:${pct}%"></i></div></td>
+        <td class="pc">${b.budget?pct.toFixed(0)+'%':''}</td></tr>`;
+    }).join('')}</tbody>
+    <tfoot><tr>
+      <td></td><td class="lbl">Total</td>
+      <td class="num">${money(totFees)}</td>
+      <td class="num">${totBudget?money(totBudget):'—'}</td>
+      <td><div class="bar"><i style="width:${totPct}%"></i></div></td>
+      <td class="pc">${totBudget?totPct.toFixed(0)+'%':''}</td>
+    </tr></tfoot></table></section>`;
+}
+
+/* Pipeline Settings — the percentages behind the weighted total. */
+function renderWeights(){
+  const box=$('#weightRows'); if(!box) return;
+  const rows=[['Conditional','Conditional'],
+              ['Campaigns / sole agency','Campaign'],
+              ['Submissions','Submission']];
+  box.innerHTML=rows.map(r=>{
+    const v=(S().weights||{})[r[0]];
+    return `<div class="wrow">
+      <label>${esc(r[1])}</label>
+      <input type="number" min="0" max="100" step="1"
+             data-stage="${esc(r[0])}" value="${v===undefined?'':v}">
+      <span class="pcsign">%</span></div>`;
+  }).join('')+
+  `<div class="wrow"><label>Unconditional</label>
+     <input type="number" value="100" disabled><span class="pcsign">%</span></div>`;
+
+  box.querySelectorAll('input[data-stage]').forEach(inp=>{
+    inp.onchange=()=>{
+      const stage=inp.dataset.stage;
+      const pct=Math.max(0,Math.min(100,parseFloat(inp.value)||0));
+      inp.value=pct;
+      const was=(S().weights||{})[stage];
+      S().weights[stage]=pct;
+      renderTally(); renderWeightExample();
+      persist(()=>DealBoardApi.saveWeight(which,stage,pct),'weighting')
+        .catch(()=>{ S().weights[stage]=was; renderWeights(); renderTally(); });
+    };
+  });
+  renderWeightExample();
+}
+
+/* Show the arithmetic, so a number on the projector can be defended. */
+function renderWeightExample(){
+  const el=$('#weightExample'); if(!el) return;
+  const parts=[];
+  ['Unconditional','Conditional','Campaigns / sole agency','Submissions'].forEach(st=>{
+    const raw=visibleDeals().filter(d=>d.s===st).reduce((a,d)=>a+(+d.f||0),0);
+    if(!raw) return;
+    const w=weightFor(st);
+    parts.push(`${esc(st)} ${money(raw)} × ${(w*100).toFixed(0)}% = ${money(raw*w)}`);
+  });
+  el.innerHTML=parts.length
+    ? parts.join('<br>')+`<br><b>Weighted pipeline ${money(weightedPipeline())}</b>` : '';
+}
+
 function renderFines(bumped){
   const box=$('#fines'); if(!box) return;
   box.innerHTML='';
@@ -770,8 +961,12 @@ click('#swapMeeting', ()=>{
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   b.classList.add('on');tab=b.dataset.tab;
-  ['board','register'].forEach(t=>$('#tab-'+t).hidden=t!==tab);
+  ['board','register','rankings','settings'].forEach(t=>{
+    const el=$('#tab-'+t); if(el) el.hidden = t!==tab;
+  });
   if(tab==='register')renderRegister();
+  if(tab==='rankings')renderRankings();
+  if(tab==='settings')renderWeights();
 });
 click('#clearApologies', ()=>{
   if(!S().apologies || !confirm('Clear the apologies?')) return;
@@ -803,7 +998,9 @@ function renderAll(){
     .toLocaleDateString('en-NZ',{weekday:'long',day:'numeric',month:'long',year:'numeric'}).toUpperCase();
   $('#apologies').textContent=S().apologies;
   const nEl=$('#minutesBox')||$('#notes'); if(nEl) nEl.value=S().minutes;
-  renderTally();renderBoard();renderFines();renderFinesYtd();renderRankings();
+  renderTally();renderBoard();renderFines();renderFinesYtd();
+  if(tab==='rankings')renderRankings();
+  if(tab==='settings')renderWeights();
   if(tab==='register')renderRegister();
 }
 async function loadBoard(){
@@ -814,7 +1011,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-17d';
+const BOARD_VERSION='2026-08-18a';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
