@@ -21,7 +21,7 @@ const TODAY=()=>new Date().toISOString().slice(0,10);
 
 const STATUSES=['Pending','Submitted','Committed','Deadline','Auction','Priced','Off-Market'];
 const HEAT=['Motivated','Luke warm','Slow'], KEY='dealboard:v3';
-let mem=null,state=null,which='industrial',tab='board',collapsed={},current=null,proj=false;
+let mem=null,state=null,which='',tab='board',collapsed={},current=null,proj=false;
 
 const $=s=>document.querySelector(s);
 /* Bind only if the element is present. A page/script version mismatch
@@ -34,9 +34,13 @@ function on(sel, ev, fn){
 function click(sel, fn){ on(sel,'click',fn); }
 const money=n=>n?'$'+Math.round(n).toLocaleString():'—';
 const esc=s=>(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const TITLES={industrial:'Industrial Meeting',investment:'Investment Sales Meeting'};
+let UNITS=[];   // [{slug, name}] from the API
+const titleFor=slug=>{
+  const u=UNITS.find(x=>x.slug===slug);
+  return u ? u.name+' Meeting' : 'Meeting';
+};
 const S=()=>state[which];
-const M=()=>({title:TITLES[which], stages:(S().stages||[]).map(x=>x.name)});
+const M=()=>({title:titleFor(which), stages:(S().stages||[]).map(x=>x.name)});
 function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('on');setTimeout(()=>e.classList.remove('on'),1900)}
 
 /* --- save indicator: a failure must be loud, never a silent revert --- */
@@ -886,12 +890,23 @@ click('#projBtn', ()=>{
     document.documentElement.requestFullscreen().catch(()=>{});
   else if(!proj&&document.fullscreenElement)document.exitFullscreen().catch(()=>{});
 });
-click('#swapMeeting', ()=>{
-  which=which==='industrial'?'investment':'industrial';
-  $('#swapMeeting').textContent=which==='industrial'?'Switch to Investment':'Switch to Industrial';
-  collapsed={};current=null;
-  loadBoard().catch(()=>{});
-});
+/* Business unit switcher. Populated from the API so adding a unit in
+   the database is all that is needed — no code change. */
+async function loadUnits(){
+  const sel=$('#unitPick'); if(!sel) return;
+  try{ UNITS=await DealBoardApi.listDepartments(); }
+  catch(e){ UNITS=[{slug:which,name:which}]; }
+  sel.innerHTML=UNITS.map(u=>
+    `<option value="${esc(u.slug)}"${u.slug===which?' selected':''}>${esc(u.name)}</option>`
+  ).join('');
+  sel.onchange=async()=>{
+    which=sel.value;
+    try{ window.name='db:'+which; }catch(e){}
+    collapsed={}; current=null;
+    try{ await loadBoard(); }
+    catch(e){ setSaver('err','Could not load '+titleFor(which)); }
+  };
+}
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   b.classList.add('on');tab=b.dataset.tab;
@@ -945,7 +960,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-18b';
+const BOARD_VERSION='2026-08-18c';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
@@ -962,6 +977,13 @@ for(const fn of ['dealRow','noteRow','statusSelect','renderBoard','renderTally']
     if(!account) return;               // redirecting to sign in
     document.getElementById('gate').style.display='none';
     state={};
+    UNITS=await DealBoardApi.listDepartments().catch(()=>[]);
+    if(!UNITS.length) throw new Error('No business units configured');
+    // Remember the last unit viewed, so switching is not undone on reload.
+    const last=window.name && window.name.indexOf('db:')===0
+      ? window.name.slice(3) : '';
+    which = UNITS.some(u=>u.slug===last) ? last : UNITS[0].slug;
+    await loadUnits();
     await loadBoard();
     await loadBrokers();
   }catch(err){
