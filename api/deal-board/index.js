@@ -46,6 +46,7 @@ export default async function handler(req, res) {
     if (req.method === "POST" && seg[0] === "meeting") return await saveMeeting(req, res);
     if (req.method === "POST" && seg[0] === "fine") return await setFine(req, res);
     if (req.method === "GET"  && seg[0] === "brokers") return await listBrokers(req, res);
+    if (req.method === "GET"  && seg[0] === "departments") return await listDepartments(req, res);
     if (req.method === "GET"  && seg[0] === "fines-ytd") return await finesYtd(req, res);
     if (req.method === "POST" && seg[0] === "settle-fine") return await settleFine(req, res);
     if (req.method === "GET"  && seg[0] === "rankings") return await rankings(req, res);
@@ -318,6 +319,15 @@ async function requirements(req, res, id) {
   }
 
   throw new HttpError(405, "Not allowed");
+}
+
+// ── business units for the switcher ───────────────────────────────
+async function listDepartments(req, res) {
+  await requireUser(req, ROLES_READ);
+  const { data, error } = await supabase.from("db_departments")
+    .select("slug, name").order("name");
+  if (error) throw new HttpError(500, "Could not load the business units");
+  return res.status(200).json(data);
 }
 
 // ── broker list for the dropdown ──────────────────────────────────
