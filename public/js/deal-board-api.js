@@ -56,6 +56,7 @@
       call("/roll-forward", { method: "POST", body: { dept, nextDate } }),
 
     listBrokers: () => call("/brokers"),
+    listDepartments: () => call("/departments"),
     setOutcome: (id, outcome, stageId, timing_date) =>
       call(`/${id}/outcome`, { method: "POST", body: { outcome, stageId, timing_date } }),
     getWeights: (dept) => call(`/weights?dept=${encodeURIComponent(dept)}`),
@@ -104,6 +105,7 @@
       removeRequirement: () => wait({ ok: true }),
       rollForward: () => wait({ archived_count: 0 }),
       listBrokers: () => wait([]),
+      listDepartments: () => wait([{slug:"industrial",name:"Industrial"}]),
       finesYtd: () => wait({ year: new Date().getFullYear(), total: 0, brokers: [] }),
       settleFine: () => wait({ ok: true }),
       setOutcome: (id, outcome) => wait({ id, outcome }),
