@@ -559,8 +559,7 @@ async function renderRankings(){
 
   pane.innerHTML=`<section class="ranks">
     <header><h2>${d.year} rankings</h2>
-      <span class="as-at">${asAt?'as at '+asAt:''}</span>
-      ${d.url?`<a class="src" href="${d.url}" target="_blank" rel="noopener">Open workbook</a>`:''}
+      <span class="as-at">${asAt?'from the master report, as at '+asAt:''}</span>
     </header>
     <table><thead><tr>
       <th style="width:34px"></th><th>Broker</th>
@@ -960,7 +959,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-18c';
+const BOARD_VERSION='2026-08-19a';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
