@@ -56,6 +56,12 @@
       call("/roll-forward", { method: "POST", body: { dept, nextDate } }),
 
     listBrokers: () => call("/brokers"),
+    setOutcome: (id, outcome, stageId, timing_date) =>
+      call(`/${id}/outcome`, { method: "POST", body: { outcome, stageId, timing_date } }),
+    getWeights: (dept) => call(`/weights?dept=${encodeURIComponent(dept)}`),
+    saveWeight: (dept, stage_name, pct) =>
+      call("/weights", { method: "POST", body: { dept, stage_name, pct } }),
+
     addNote: (dept, section, body) =>
       call("/notes", { method: "POST", body: { dept, section, body } }),
     editNote: (id, body) =>
@@ -100,6 +106,9 @@
       listBrokers: () => wait([]),
       finesYtd: () => wait({ year: new Date().getFullYear(), total: 0, brokers: [] }),
       settleFine: () => wait({ ok: true }),
+      setOutcome: (id, outcome) => wait({ id, outcome }),
+      getWeights: () => wait([]),
+      saveWeight: () => wait({ ok: true }),
       addNote: (d, section, body) => wait({ id: "n" + Date.now(), section, body }),
       editNote: (id, body) => wait({ id, body }),
       clearNote: () => wait({ ok: true }),
