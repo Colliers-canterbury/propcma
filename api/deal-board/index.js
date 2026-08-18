@@ -50,6 +50,8 @@ export default async function handler(req, res) {
     if (req.method === "POST" && seg[0] === "settle-fine") return await settleFine(req, res);
     if (req.method === "GET"  && seg[0] === "rankings") return await rankings(req, res);
     if (seg[0] === "notes") return await notes(req, res, seg[1]);
+    if (seg[1] === "outcome") return await setOutcome(req, res, seg[0]);
+    if (seg[0] === "weights") return await weights(req, res);
     if (seg[0] === "requirements") return await requirements(req, res, seg[1]);
 
     res.setHeader("Allow", "GET, POST, PATCH, DELETE");
@@ -72,7 +74,8 @@ async function getBoard(req, res) {
   const id = await deptId(req.query.dept);
 
   const today = new Date().toISOString().slice(0, 10);
-  const [stages, deals, reqs, mtg, noteSections, noteRows] = await Promise.all([
+  const [stages, deals, reqs, mtg, noteSections, weightRows, outcomeRows, noteRows] =
+    await Promise.all([
     supabase.from("db_stages")
       .select("id, name, position, is_terminal")
       .eq("department_id", id).order("position"),
@@ -88,6 +91,10 @@ async function getBoard(req, res) {
       .order("meeting_date", { ascending: false }).limit(1).maybeSingle(),
     supabase.from("db_note_sections")
       .select("name, position").eq("department_id", id).order("position"),
+    supabase.from("db_pipeline_weights")
+      .select("stage_name, pct").eq("department_id", id),
+    supabase.from("db_deals")
+      .select("outcome").eq("department_id", id).not("outcome", "is", null),
     supabase.from("db_notes")
       .select("id, section, body, sort_order, timing, timing_date, fee_nzd, status_note, broker_codes, aml")
       .eq("department_id", id).eq("is_done", false).order("sort_order"),
@@ -111,6 +118,11 @@ async function getBoard(req, res) {
     fines,
     noteSections: noteSections.data || [],
     notes: noteRows.data || [],
+    weights: weightRows.data || [],
+    outcomes: (outcomeRows.data || []).reduce((a, r) => {
+      a[r.outcome] = (a[r.outcome] || 0) + 1;
+      return a;
+    }, {}),
   });
 }
 
@@ -412,6 +424,61 @@ async function notes(req, res, id) {
       .update({ is_done: true, updated_at: new Date().toISOString() })
       .eq("id", id);
     if (error) throw new HttpError(500, "Could not clear the note");
+    return res.status(200).json({ ok: true });
+  }
+
+  throw new HttpError(405, "Not allowed");
+}
+
+// ── record an outcome (won / lost / withdrawn / sold) ─────────────
+// Sets the outcome AND moves the deal, in one call — the two always go
+// together, and doing them separately risks a deal that moved but was
+// never counted.
+async function setOutcome(req, res, id) {
+  const user = await requireUser(req, ROLES_WRITE);
+  const { outcome, stageId, timing_date } = req.body || {};
+  const allowed = ["won", "lost", "withdrawn", "sold"];
+  if (!allowed.includes(outcome)) throw new HttpError(400, "Unknown outcome");
+  if (!stageId) throw new HttpError(400, "A destination stage is required");
+
+  const patch = {
+    outcome,
+    outcome_at: new Date().toISOString(),
+    stage_id: stageId,
+    updated_by_oid: user.oid,
+  };
+  if (timing_date) patch.timing_date = timing_date;
+
+  const { data, error } = await supabase.from("db_deals")
+    .update(patch).eq("id", id).select().single();
+  if (error) throw new HttpError(500, "Could not record the outcome");
+  return res.status(200).json(data);
+}
+
+// ── pipeline weightings ───────────────────────────────────────────
+async function weights(req, res) {
+  if (req.method === "GET") {
+    await requireUser(req, ROLES_READ);
+    const id = await deptId(req.query.dept);
+    const { data, error } = await supabase.from("db_pipeline_weights")
+      .select("stage_name, pct").eq("department_id", id);
+    if (error) throw new HttpError(500, "Could not load the weightings");
+    return res.status(200).json(data);
+  }
+
+  if (req.method === "POST") {
+    await requireUser(req, ROLES_WRITE);
+    const { dept, stage_name, pct } = req.body || {};
+    if (!stage_name) throw new HttpError(400, "A stage is required");
+    const n = Number(pct);
+    if (!Number.isFinite(n) || n < 0 || n > 100)
+      throw new HttpError(400, "Percentage must be between 0 and 100");
+    const id = await deptId(dept);
+    const { error } = await supabase.from("db_pipeline_weights")
+      .upsert({ department_id: id, stage_name, pct: n,
+                updated_at: new Date().toISOString() },
+              { onConflict: "department_id,stage_name" });
+    if (error) throw new HttpError(500, "Could not save the weighting");
     return res.status(200).json({ ok: true });
   }
 
