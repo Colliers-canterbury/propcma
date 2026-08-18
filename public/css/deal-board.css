@@ -280,3 +280,11 @@ td.actcell{width:96px;text-align:right}
   font-family:var(--mono);padding-top:5px}
 .ranks tfoot td.lbl{font-family:'Archivo',system-ui,sans-serif;
   text-transform:uppercase;font-size:10px;letter-spacing:.08em;color:var(--ink-3)}
+
+/* business unit switcher in the masthead */
+#unitPick{font:inherit;font-size:13px;padding:5px 9px;border-radius:var(--r);
+  border:1px solid #4a63ad;background:transparent;color:#cddcea;cursor:pointer}
+#unitPick:hover{border-color:#8f9fd6;color:#fff}
+#unitPick option{background:var(--paper);color:var(--ink)}
+body.proj #unitPick{font-size:16px}
+@media print{#unitPick{display:none}}
