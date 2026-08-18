@@ -258,3 +258,25 @@ input.amlbox:indeterminate{opacity:.55}
 
 /* empty stage / section */
 td.empty{color:var(--ink-3);font-size:.9em;text-align:left;padding:7px 10px}
+
+/* outcome picker replacing the × on certain stages */
+select.outcome{font:inherit;font-size:.8em;border:1px solid var(--line);
+  background:var(--paper);color:var(--ink-3);border-radius:var(--r);
+  padding:1px 3px;cursor:pointer;max-width:96px}
+select.outcome:hover{border-color:var(--navy);color:var(--navy)}
+td.actcell{width:96px;text-align:right}
+
+/* pipeline settings */
+.hint{font-size:11.5px;color:var(--ink-3);margin:0 0 10px;line-height:1.45}
+.wrow{display:flex;align-items:center;gap:9px;margin-bottom:8px}
+.wrow label{flex:1;font-size:12.5px}
+.wrow input{width:64px;font:inherit;font-family:var(--mono);font-size:12px;
+  padding:4px 6px;border:1px solid var(--line);border-radius:var(--r);
+  text-align:right;background:var(--paper);color:var(--ink)}
+.wrow .pcsign{color:var(--ink-3);font-family:var(--mono);font-size:12px}
+
+/* rankings totals row */
+.ranks tfoot td{border-top:2px solid var(--line);font-weight:700;
+  font-family:var(--mono);padding-top:5px}
+.ranks tfoot td.lbl{font-family:'Archivo',system-ui,sans-serif;
+  text-transform:uppercase;font-size:10px;letter-spacing:.08em;color:var(--ink-3)}
