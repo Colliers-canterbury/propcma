@@ -589,7 +589,7 @@ async function renderRankings(){
     </tr></thead><tbody>${withRanks(d.brokers).map(b=>{
       const pct=b.budget?Math.min(100,b.fees/b.budget*100):0;
       const short=b.budget&&pct<50;
-      return `<tr><td class="rank${b.rank<=3?' top':''}">${b.rankLabel}</td>
+      return `<tr><td class="rank${b.rank<=3?' top':''}">${b.rank<=3?`<span>${b.rankLabel}</span>`:b.rankLabel}</td>
         <td class="brk">${esc(b.code)}</td><td>${esc(b.name)}</td>
         <td class="num">${money(b.fees)}</td>
         <td class="num">${b.budget?money(b.budget):'—'}</td>
@@ -673,7 +673,7 @@ async function renderManagement(){
       <th>Progress</th><th class="pc"></th>
     </tr></thead><tbody>${withRanks(r).map(b=>{
       const pct=b.budget?Math.min(100,b.fees/b.budget*100):0;
-      return `<tr><td class="rank${b.rank<=3?' top':''}">${b.rankLabel}</td>
+      return `<tr><td class="rank${b.rank<=3?' top':''}">${b.rank<=3?`<span>${b.rankLabel}</span>`:b.rankLabel}</td>
         <td class="brk">${esc(b.code)}</td>
         <td>${esc(b.name)}${b.units>1?' <span class="as-at">'+b.units+' units</span>':''}</td>
         <td class="num">${money(b.fees)}</td>
@@ -1091,7 +1091,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-19d';
+const BOARD_VERSION='2026-08-19e';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
