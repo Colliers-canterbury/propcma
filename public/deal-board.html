@@ -1,348 +1,125 @@
-:root{
-  --ink:#101820; --ink-2:#3d4b58; --ink-3:#7b8794;
-  --paper:#fff; --shell:#eef1f4; --line:#d6dde4;
-  --navy:#25408F; --navy-soft:#e8ecf7;
-  --amber:#b4700d; --amber-soft:#fdf3e0;
-  --green:#1d6b4a; --red:#a32626;
-  --r:4px; --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;
-  --fs:13px; --pad:4px 8px; --rowh:1.35;
-}
-/* Projector mode: same board, scaled up. One screen, both jobs. */
-body.proj{--fs:19px;--pad:9px 10px;--rowh:1.5}
-*{box-sizing:border-box}
-#app{font-family:'Archivo',system-ui,sans-serif;color:var(--ink);background:var(--shell);
-  font-size:var(--fs);line-height:var(--rowh);margin:0 auto;max-width:1180px}
-body.proj #app{max-width:none}
-h1,h2{margin:0;font-family:'Archivo Narrow','Archivo',sans-serif;letter-spacing:-.01em}
-button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--paper);
-  border-radius:var(--r);padding:5px 10px;color:var(--ink-2)}
-button:hover{border-color:var(--navy);color:var(--navy)}
-button:focus-visible,[contenteditable]:focus-visible{outline:2px solid var(--navy);outline-offset:1px}
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Deal Board — South Island Commercial</title>
+  <!-- deal-board 2026-08-19f
+       The ?v= query strings below bust the browser cache. Bump them
+       (and BOARD_VERSION in deal-board.js) whenever these files change,
+       or a stale copy will keep being served. — deal-board.html, .css, .js and -api.js
+       must all be copied together; a partial copy will misbehave. -->
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Narrow:wght@600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/deal-board.css?v=2026-08-19f" />
+</head>
+<body>
+  <div class="gate" id="gate"><div class="inner">Signing in…</div></div>
 
-.top{background:var(--navy);color:#fff;padding:12px 18px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
-.top h1{font-size:19px;text-transform:uppercase;letter-spacing:.06em}
-body.proj .top h1{font-size:28px}
-.top .meta{font-family:var(--mono);font-size:11px;color:#b3bfe4;letter-spacing:.04em}
-.top .sp{flex:1}
-.top button{background:transparent;color:#cddcea;border-color:#4a63ad}
-.top button:hover{background:#1b3070;color:#fff;border-color:#8f9fd6}
-.top button.on{background:#fff;color:var(--navy);border-color:#fff}
+  <div id="app">
+    <div class="top">
+      <img src="img/colliers-logo.png" alt="Colliers" class="logo"
+           onerror="this.style.display='none'">
+      <div>
+        <h1 id="mtgTitle">Industrial Meeting</h1>
+        <div class="meta" id="mtgDate"></div>
+      </div>
+      <div class="sp"></div>
+      <span class="saver" id="saver">Ready</span>
+      <select id="unitPick" aria-label="Business unit"></select>
+      <button id="projBtn">Projector</button>
+      <button id="saveMtgBtn">Save meeting</button>
+      <button onclick="window.print()">Print A3</button>
+    </div>
 
-/* save indicator — a failed save must be loud, never a silent revert */
-.saver{font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:11px;
-  background:#1b3070;color:#7fa5c9}
-.saver.ok{color:#8fe0b4}.saver.err{background:var(--red);color:#fff;font-weight:700}
+    <div class="tally" id="tally"></div>
 
-.tally{display:flex;gap:1px;background:var(--line);border-bottom:1px solid var(--line);overflow-x:auto}
-.tally div{background:var(--paper);padding:7px 14px;min-width:112px;flex:1}
-.tally .k{font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3)}
-.tally .v{font-family:var(--mono);font-size:17px;font-weight:700}
-body.proj .tally .v{font-size:24px}
-main{padding:14px 18px 60px}
-.tabs{display:flex;gap:2px;margin-bottom:12px;border-bottom:1px solid var(--line)}
-.tabs button{border:none;border-bottom:2px solid transparent;background:none;border-radius:0;
-  padding:7px 12px;font-weight:600;color:var(--ink-3)}
-.tabs button.on{color:var(--navy);border-bottom-color:var(--navy)}
+    <main>
+      <div class="tabs">
+        <button data-tab="board" class="on">Pipeline</button>
+        <button data-tab="register">Buyers &amp; Tenants</button>
+      <button data-tab="rankings">Rankings</button>
+      <button data-tab="settings">Pipeline Settings</button>
+      <button data-tab="management" hidden>Dashboard</button>
+      </div>
 
-.stage{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);margin-bottom:11px}
-/* the stage being worked through — visible from the back of the room */
-.stage.current{border-color:var(--navy);box-shadow:0 0 0 3px var(--navy-soft)}
-.stage>header{display:flex;align-items:center;gap:10px;padding:6px 10px;border-bottom:1px solid var(--line);
-  background:linear-gradient(var(--paper),var(--shell));cursor:pointer}
-.stage h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.09em}
-body.proj .stage h2{font-size:20px}
-.pill{font-family:var(--mono);font-size:10px;background:var(--navy-soft);color:var(--navy);padding:2px 6px;border-radius:10px}
-.stage .tot{margin-left:auto;font-family:var(--mono);font-weight:700}
-table{width:100%;border-collapse:collapse}
-th{font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3);
-  text-align:left;font-weight:600;padding:5px 8px;border-bottom:1px solid var(--line)}
-body.proj th{font-size:12px}
-td{padding:var(--pad);border-bottom:1px solid #eef1f4;vertical-align:top}
-tr.row:hover{background:#f7f9fb}
-tr.dragging{opacity:.35}
-tr.over td{box-shadow:inset 0 2px 0 var(--navy)}
-/* an edit must be obvious at projector distance */
-@keyframes flash{0%{background:#fff6d9}100%{background:transparent}}
-tr.saved td{animation:flash 1.5s ease-out}
-tr.editing td{background:#fff6d9}
-.stage.drop-target{border-color:var(--navy);box-shadow:0 0 0 3px var(--navy-soft)}
-.grip{cursor:grab;color:#c3cdd7;user-select:none;width:16px;text-align:center}
-[contenteditable]{min-height:1em;border-radius:2px}
-[contenteditable]:hover{background:#eef3f8;box-shadow:0 0 0 2px #eef3f8}
-[contenteditable]:empty:before{content:attr(data-ph);color:#bcc6d0}
-td.num,th.num{text-align:right;font-family:var(--mono)}
-td.addr{font-weight:600}
-td.brk{font-family:var(--mono);color:var(--navy)}
-.x{border:none;background:none;color:#c3cdd7;padding:2px 5px}
-.x:hover{color:var(--red);background:#fdeeee}
-.tag{font-size:.82em;font-family:var(--mono);padding:1px 5px;border-radius:3px;border:1px solid var(--line);color:var(--ink-3)}
-.tag.live{background:#e9f4ee;color:var(--green);border-color:#bfe0cd}
-.tag.pending{background:var(--amber-soft);color:var(--amber);border-color:#f0dcb4}
-.addrow{width:100%;border:none;border-radius:0 0 var(--r) var(--r);color:var(--ink-3);padding:6px;text-align:left}
-.addrow:hover{background:var(--navy-soft)}
-.grid2{display:grid;grid-template-columns:1fr 310px;gap:12px;align-items:start}
-body.proj .grid2{grid-template-columns:1fr}
-body.proj aside{display:none}
-.card{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;margin-bottom:11px}
-.card h3{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);margin:0 0 8px}
-.fines{display:flex;flex-wrap:wrap;gap:5px}
-.fine{display:flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:12px;
-  padding:2px 4px 2px 8px;font-family:var(--mono);font-size:11px}
-.fine b{color:var(--navy)}.fine.hot{background:var(--amber-soft);border-color:#f0dcb4}
-.fine button{border:none;background:none;padding:0 3px;color:var(--ink-3)}
-.note{width:100%;border:1px solid var(--line);border-radius:var(--r);padding:7px;font:inherit;min-height:70px;resize:vertical}
-input.search{border:1px solid var(--line);border-radius:var(--r);padding:6px 9px;font:inherit;min-width:210px}
-.chip{font-size:11px;padding:3px 9px;border-radius:12px;font-family:var(--mono)}
-.chip.on{background:var(--navy);color:#fff;border-color:var(--navy)}
-select.mini{font:inherit;font-size:.86em;border:1px solid transparent;background:none;color:var(--ink-2);border-radius:3px}
-select.mini:hover{border-color:var(--line);background:#fff}
-.toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;
-  padding:8px 16px;border-radius:20px;font-size:12px;z-index:200;opacity:0;transition:.25s;pointer-events:none}
-.toast.on{opacity:1}
+      <div class="filterbar" id="filterbar">
+      <label>Timing from <input type="date" id="fromDate"></label>
+      <label>to <input type="date" id="toDate"></label>
+      <button id="clearDates">All dates</button>
+      <span class="filtered" id="filterNote"></span>
+    </div>
 
-/* ---- A3 landscape print: the sheet that goes round the room ---- */
-@media print{
-  @page{size:A3 landscape;margin:9mm}
-  body.proj{--fs:13px;--pad:4px 8px}
-  .top button,.tabs,.addrow,.x,.grip,.saver,.toast,aside,.stage .caret{display:none!important}
-  #app{background:#fff;max-width:none;font-size:9.5pt}
-  .top{background:#fff!important;color:#000!important;border-bottom:2px solid #000;padding:0 0 6px}
-  .top h1{font-size:15pt}.top .meta{color:#444}
-  .tally{border:none;gap:0}
-  .tally div{border:none;padding:4px 12px 4px 0}
-  .tally .v{font-size:11pt}
-  main{padding:8px 0}
-  .grid2{display:block}
-  /* two columns of stages — an A3 sheet, not a long scroll */
-  #stages{column-count:2;column-gap:11mm}
-  .stage{break-inside:avoid;border-color:#999;margin-bottom:6px}
-  .stage>header{background:#eee!important}
-  td,th{padding:2px 5px}
-  tr.row:hover{background:none}
-  .fine{border-color:#999}
-}
-@media (max-width:820px){.grid2{grid-template-columns:1fr}}
+    <section id="tab-board">
+        <div class="grid2">
+          <div id="stages"></div>
+          <aside>
+            <div class="card">
+              <h3>Fines <span style="float:right;font-family:var(--mono)" id="fineTot"></span></h3>
+              <div class="fines" id="fines"></div>
+              <div class="fine-add">
+                <select id="fineBroker" aria-label="Broker"></select>
+                <span class="dollar">$</span>
+                <input id="fineAmount" type="number" min="0" step="5" value="10"
+                       inputmode="numeric" aria-label="Amount to add">
+                <button id="addFine" class="btn-primary">Add</button>
+              </div>
+              <div class="ytd" id="finesYtd"></div>
+            </div>
+            <div class="card">
+              <h3>Apologies <button class="clear" id="clearApologies">clear</button></h3>
+              <div contenteditable data-ph="Who's out this week…" id="apologies"></div>
+            </div>
+            <div class="card">
+              <h3>Minutes / actions <button class="clear" id="clearNotes">clear</button></h3>
+              <textarea class="note" id="minutesBox" placeholder="Decisions and actions from the room…"></textarea>
+            </div>
+          </aside>
+        </div>
+      </section>
 
-/* sign-in gate, matching dealsheet.html */
-.gate{position:fixed;inset:0;background:var(--shell);display:flex;
-  align-items:center;justify-content:center;z-index:500}
-.gate .inner{font-family:'Archivo',system-ui,sans-serif;color:var(--ink-2);font-size:14px}
+      <section id="tab-management" hidden>
+      <div id="mgmtPane"></div>
+    </section>
 
-/* add-a-fine row */
-.fine-add{display:flex;gap:4px;align-items:center;margin-top:9px}
-.fine-add select{flex:1;min-width:0;font:inherit;font-size:12px;padding:4px 5px;
-  border:1px solid var(--line);border-radius:var(--r);background:var(--paper);color:var(--ink)}
-.fine-add .dollar{color:var(--ink-3);font-family:var(--mono);font-size:12px}
-.fine-add input{width:52px;font:inherit;font-family:var(--mono);font-size:12px;
-  padding:4px 5px;border:1px solid var(--line);border-radius:var(--r);
-  background:var(--paper);color:var(--ink)}
-.fine-add button{padding:4px 11px}
-.btn-primary{background:var(--navy);color:#fff;border-color:var(--navy)}
-.btn-primary:hover{background:#1b3070;color:#fff;border-color:#1b3070}
-/* running total flashes when it goes up */
-@keyframes bump{0%{background:#fff6d9}100%{background:transparent}}
-.fine.bumped{animation:bump 1.2s ease-out}
+    <section id="tab-rankings" hidden>
+      <div id="rankingsPane"></div>
+    </section>
 
-/* season-to-date fines, under the week's */
-.ytd{margin-top:10px;padding-top:9px;border-top:1px solid var(--line)}
-.ytd .hd{display:flex;align-items:baseline;gap:6px;font-size:10px;
-  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px}
-.ytd .hd b{margin-left:auto;font-family:var(--mono);font-size:13px;
-  color:var(--ink);letter-spacing:0}
-.ytd table{width:100%;font-size:11.5px}
-.ytd td{padding:2px 0;border:none}
-.ytd td.n{text-align:right;font-family:var(--mono)}
-.ytd td.c{font-family:var(--mono);color:var(--navy);width:34px}
-.ytd .none{font-size:11.5px;color:var(--ink-3)}
+    <section id="tab-settings" hidden>
+      <div class="card" style="max-width:520px">
+        <h3>Pipeline weighting</h3>
+        <p class="hint">Unconditional fees count in full. These stages are
+          weighted by how likely the fee is to be earned — the headline
+          Pipeline figure applies these percentages.</p>
+        <div id="weightRows"></div>
+        <p class="hint" id="weightExample"></p>
+      </div>
+    </section>
 
-/* settle button on a YTD row */
-.ytd tr:hover td{background:#f7f9fb}
-.ytd td.act{width:52px;text-align:right}
-.ytd button.settle{border:none;background:none;color:var(--navy);
-  font-size:10.5px;padding:1px 3px;text-decoration:underline;cursor:pointer}
-.ytd button.settle:hover{color:var(--green)}
+    <section id="tab-register" hidden>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
+          <input class="search" id="regSearch" placeholder="Search requirement, size, suburb…">
+          <span id="agentChips"></span>
+          <button id="addReg" style="margin-left:auto">+ Add requirement</button>
+        </div>
+        <div class="card" style="padding:0">
+          <table>
+            <thead><tr><th style="width:200px">Buyer / tenant</th><th>Requirement</th>
+              <th style="width:64px">Broker</th><th style="width:96px">Heat</th><th style="width:26px"></th></tr></thead>
+            <tbody id="regBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div class="toast" id="toast"></div>
 
-/* rankings panel, rendered under the Targets stage */
-.ranks{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);
-  margin-bottom:11px}
-.ranks>header{display:flex;align-items:center;gap:10px;padding:6px 10px;
-  border-bottom:1px solid var(--line);background:linear-gradient(var(--paper),var(--shell))}
-.ranks h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.09em;margin:0;
-  font-family:'Archivo Narrow','Archivo',sans-serif}
-body.proj .ranks h2{font-size:20px}
-.ranks .as-at{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ink-3)}
-.ranks table{width:100%}
-.ranks .bar{height:7px;background:var(--line);border-radius:2px;overflow:hidden;min-width:60px}
-.ranks .bar i{display:block;height:100%;background:var(--navy)}
-.ranks .bar i.short{background:var(--amber)}
-.ranks td.pc{font-family:var(--mono);text-align:right;width:46px;color:var(--ink-2)}
-
-/* note-list sections — free text the EA types in and ticks off */
-.notes{background:var(--paper);border:1px solid var(--line);
-  border-radius:var(--r);margin-bottom:11px}
-.notes>header{display:flex;align-items:center;gap:10px;padding:6px 10px;
-  border-bottom:1px solid var(--line);background:linear-gradient(var(--paper),var(--shell))}
-.notes h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.09em;margin:0;
-  font-family:'Archivo Narrow','Archivo',sans-serif}
-body.proj .notes h2{font-size:20px}
-.notes .pill{margin-left:auto}
-.notes .tot{margin-left:auto;font-family:var(--mono);font-weight:700}
-.notes table{width:100%;border-collapse:collapse}
-.notes td.empty{color:var(--ink-3);font-size:.9em;text-align:left}
-.notes .addrow{width:100%;border:none;border-radius:0 0 var(--r) var(--r);
-  color:var(--ink-3);padding:6px;text-align:left;background:none}
-.notes .addrow:hover{background:var(--navy-soft)}
-/* open the source workbook */
-.ranks .src{font-family:var(--mono);font-size:10px;color:var(--navy);
-  text-decoration:none;border:1px solid var(--line);border-radius:var(--r);padding:2px 7px}
-.ranks .src:hover{border-color:var(--navy);background:var(--navy-soft)}
-@media print{.notes .addrow{display:none}.ranks .src{display:none}}
-
-/* clear link on the Apologies / Minutes cards */
-.card h3 .clear{float:right;border:none;background:none;padding:0;
-  font-family:'Archivo',system-ui,sans-serif;font-size:10px;letter-spacing:.06em;
-  text-transform:uppercase;color:var(--ink-3);text-decoration:underline;cursor:pointer}
-.card h3 .clear:hover{color:var(--red)}
-@media print{.card h3 .clear{display:none}}
-
-/* masthead logo — public/img/colliers-logo.png
-   Hidden automatically if the file is absent. */
-.top .logo{height:45px;width:auto;display:block}
-body.proj .top .logo{height:66px}
-
-/* date-range filter */
-.filterbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
-  margin-bottom:12px;font-size:12px;color:var(--ink-2)}
-.filterbar label{display:flex;gap:5px;align-items:center}
-.filterbar input[type=date]{font:inherit;font-size:12px;padding:4px 6px;
-  border:1px solid var(--line);border-radius:var(--r);background:var(--paper);color:var(--ink)}
-.filterbar .filtered{font-family:var(--mono);font-size:11px;color:var(--amber)}
-.filterbar button{padding:4px 10px;font-size:12px}
-
-/* stage picker on each row */
-td.stagesel{width:120px}
-select.stagepick{font:inherit;font-size:.86em;width:100%;
-  border:1px solid transparent;background:none;color:var(--ink-2);
-  border-radius:3px;padding:1px 2px;cursor:pointer}
-select.stagepick:hover{border-color:var(--line);background:var(--paper)}
-body.proj select.stagepick{font-size:.9em}
-
-/* timing as a date */
-input.dateinput{font:inherit;font-size:.92em;width:100%;border:1px solid transparent;
-  background:none;color:var(--ink);border-radius:3px;padding:1px 2px}
-input.dateinput:hover{border-color:var(--line);background:var(--paper)}
-.legacy{display:block;font-size:.78em;color:var(--ink-3);margin-top:1px}
-@media print{.filterbar{display:none}
-  select.stagepick,input.dateinput{border:none;background:none;-webkit-appearance:none;appearance:none}}
-
-/* status picker */
-select.statuspick{font:inherit;font-size:.86em;width:100%;border:1px solid transparent;
-  background:none;color:var(--ink-2);border-radius:3px;padding:1px 2px;cursor:pointer}
-select.statuspick:hover{border-color:var(--line);background:var(--paper)}
-select.statuspick.live{color:var(--green);font-weight:600}
-select.statuspick.pending{color:var(--amber);font-weight:600}
-body.proj select.statuspick{font-size:.9em}
-
-/* AML tick */
-td.amlcell{text-align:center}
-input.amlbox{width:15px;height:15px;cursor:pointer;accent-color:var(--navy);margin:2px 0 0}
-body.proj input.amlbox{width:19px;height:19px}
-input.amlbox:indeterminate{opacity:.55}
-
-@media print{
-  select.statuspick{-webkit-appearance:none;appearance:none;border:none;background:none}
-  input.amlbox{-webkit-appearance:none;appearance:none;width:auto;height:auto}
-  input.amlbox:checked:before{content:'Y'}
-  input.amlbox:indeterminate:before{content:'WIP';font-size:7pt}
-}
-
-/* empty stage / section */
-td.empty{color:var(--ink-3);font-size:.9em;text-align:left;padding:7px 10px}
-
-/* outcome picker replacing the × on certain stages */
-select.outcome{font:inherit;font-size:.8em;border:1px solid var(--line);
-  background:var(--paper);color:var(--ink-3);border-radius:var(--r);
-  padding:1px 3px;cursor:pointer;max-width:96px}
-select.outcome:hover{border-color:var(--navy);color:var(--navy)}
-td.actcell{width:96px;text-align:right}
-
-/* pipeline settings */
-.hint{font-size:11.5px;color:var(--ink-3);margin:0 0 10px;line-height:1.45}
-.wrow{display:flex;align-items:center;gap:9px;margin-bottom:8px}
-.wrow label{flex:1;font-size:12.5px}
-.wrow input{width:64px;font:inherit;font-family:var(--mono);font-size:12px;
-  padding:4px 6px;border:1px solid var(--line);border-radius:var(--r);
-  text-align:right;background:var(--paper);color:var(--ink)}
-.wrow .pcsign{color:var(--ink-3);font-family:var(--mono);font-size:12px}
-
-/* rankings totals row */
-.ranks tfoot td{border-top:2px solid var(--line);font-weight:700;
-  font-family:var(--mono);padding-top:5px}
-.ranks tfoot td.lbl{font-family:'Archivo',system-ui,sans-serif;
-  text-transform:uppercase;font-size:10px;letter-spacing:.08em;color:var(--ink-3)}
-
-/* business unit switcher in the masthead */
-#unitPick{font:inherit;font-size:13px;padding:5px 9px;border-radius:var(--r);
-  border:1px solid #4a63ad;background:transparent;color:#cddcea;cursor:pointer}
-#unitPick:hover{border-color:#8f9fd6;color:#fff}
-#unitPick option{background:var(--paper);color:var(--ink)}
-body.proj #unitPick{font-size:16px}
-@media print{#unitPick{display:none}}
-
-/* Management rollup */
-.mgmt-units{background:var(--paper);border:1px solid var(--line);
-  border-radius:var(--r);margin-bottom:12px}
-.mgmt-units>header{padding:6px 10px;border-bottom:1px solid var(--line);
-  background:linear-gradient(var(--paper),var(--shell))}
-.mgmt-units h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.09em;
-  margin:0;font-family:'Archivo Narrow','Archivo',sans-serif}
-body.proj .mgmt-units h2{font-size:20px}
-.mgmt-units table{width:100%;border-collapse:collapse}
-.mgmt-units tfoot td{border-top:2px solid var(--line);font-weight:700;padding-top:6px}
-.mgmt-units tfoot td.lbl{text-transform:uppercase;font-size:10px;
-  letter-spacing:.08em;color:var(--ink-3);font-weight:600}
-.mgmt-units td.unit{font-weight:600}
-.mgmt-units td.wl{font-family:var(--mono);text-align:right;width:52px}
-.mgmt-units .share{height:5px;background:var(--line);border-radius:2px;overflow:hidden;min-width:50px}
-.mgmt-units .share i{display:block;height:100%;background:var(--navy)}
-
-/* ranking position */
-.ranks th.rank{text-align:center;padding-right:6px}
-.ranks td.rank{font-family:var(--mono);color:var(--ink-3);
-  text-align:center;padding:4px 6px;font-size:.9em}
-
-/* Top three sit in a filled navy badge with white numerals, so the
-   podium reads instantly from across a room. Ties share a position, so
-   this is keyed on rank rather than row order — a tie at 3rd badges
-   both brokers. */
-.ranks td.rank.top{color:var(--ink-3)}
-.ranks td.rank.top span{display:inline-block;min-width:22px;padding:2px 5px;
-  background:var(--navy);color:#fff;font-weight:700;border-radius:3px;
-  line-height:1.15;text-align:center}
-body.proj .ranks td.rank.top span{min-width:28px;padding:3px 7px}
-@media print{
-  .ranks td.rank.top span{background:none;color:#000;border:1px solid #000;
-    padding:1px 4px}
-}
-
-/* ---- column sizing: give the address room to sit on one line ---- */
-.stage table,.notes table{table-layout:fixed}
-
-/* Address is the only flexible column, so it absorbs the space freed
-   from Timing, Broker and the action cell. */
-td.addr{overflow-wrap:anywhere}
-td.addr [contenteditable]{white-space:normal}
-
-/* Trim the fixed columns to what their controls actually need. */
-input.dateinput{font-size:.86em;padding:1px 0}
-td.brk{font-size:.9em}
-td.brk [contenteditable]{overflow-wrap:anywhere}
-select.stagepick{font-size:.82em}
-select.statuspick{font-size:.82em}
-select.outcome{max-width:84px;font-size:.78em}
-td.actcell{width:88px}
-
-/* On a narrow window let the table scroll rather than crush the address */
-.stage>table,.notes>table{min-width:840px}
-.stage,.notes{overflow-x:auto}
-body.proj .stage>table,body.proj .notes>table{min-width:0}
+  <!-- Same auth stack as dealsheet.html — same tenant, same app
+       registration, same token. Nothing new to register. -->
+  <script src="js/msal-browser.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/deal-board-api.js?v=2026-08-19f"></script>
+  <script src="js/deal-board.js?v=2026-08-19f"></script>
+</body>
+</html>
