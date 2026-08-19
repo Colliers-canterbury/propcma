@@ -305,3 +305,9 @@ body.proj .mgmt-units h2{font-size:20px}
 .mgmt-units td.wl{font-family:var(--mono);text-align:right;width:52px}
 .mgmt-units .share{height:5px;background:var(--line);border-radius:2px;overflow:hidden;min-width:50px}
 .mgmt-units .share i{display:block;height:100%;background:var(--navy)}
+
+/* ranking position */
+.ranks td.rank,.ranks th.rank{font-family:var(--mono);color:var(--ink-3);
+  text-align:right;padding-right:8px;font-size:.9em}
+/* top three by position, not by row — a tie at 3rd highlights both */
+.ranks td.rank.top{color:var(--navy);font-weight:700}
