@@ -53,29 +53,39 @@
   function checklistOf(deal) {
     const c = (deal.form && deal.form.checklist) || {};
     const isLease = deal.deal_type === "lease";
-    const items = isLease
+    // Must match the backend's actual required set exactly (api/_lib/deals.js
+    // and api/_lib/leases.js) — this list gates the Invoice button, so it
+    // can never include an item the backend doesn't also require, or
+    // accounts gets blocked over something that was never mandatory.
+    const required = isLease
       ? [
           ["agencyAgreement", "Signed agency agreement"],
           ["unconditionalConfirmation", "Confirmation of unconditional"],
           ["executedAgreement", "Executed lease agreement"],
           ["amlComplete", "AML complete"],
-          ["marketingReport", "Marketing campaign report"],
-          ["leaseValueConfirmation", "Confirmation of lease value"],
-          ["leaseDeed", "Lease deed"],
         ]
       : [
           ["agencyAgreement", "Signed agency agreement"],
           ["unconditionalConfirmation", "Confirmation of unconditional"],
           ["executedAgreement", "Executed sale & purchase agreement"],
-          ["marketingReport", "Marketing campaign report"],
           ["amlComplete", "AML complete"],
         ];
-    if (deal.deposit_to_trust) {
-      items.push(isLease
-        ? ["appraisals", "Appraisals (trust deal)"]
-        : ["spAgreement", "S&P agreement (trust deal)"]);
-    }
-    return items.map(([k, label]) => ({ ok: !!c[k], label }));
+    if (deal.deposit_to_trust && !isLease) required.push(["spAgreement", "S&P agreement (trust deal)"]);
+
+    // Everything else — shown for visibility, never blocks anything.
+    const optional = isLease
+      ? [
+          ["marketingReport", "Marketing campaign report"],
+          ["leaseValueConfirmation", "Confirmation of lease value"],
+          ["leaseDeed", "Lease deed"],
+          ...(deal.deposit_to_trust ? [["appraisals", "Appraisals (trust deal)"]] : []),
+        ]
+      : [["marketingReport", "Marketing campaign report"]];
+
+    return {
+      required: required.map(([k, label]) => ({ ok: !!c[k], label })),
+      optional: optional.map(([k, label]) => ({ ok: !!c[k], label })),
+    };
   }
 
   function render() {
@@ -283,7 +293,7 @@
     if (!d) { el.innerHTML = ""; return; }
     const splits = d.splits || [];
     const events = d.events || [];
-    const checks = checklistOf(d);
+    const { required: checks, optional: optionalChecks } = checklistOf(d);
     const checklistOk = checks.every((c) => c.ok);
     const allAttachments = d.attachments || [];
     const checklistAttachments = allAttachments.filter((a) => a.kind !== "extra");
@@ -335,6 +345,8 @@
             `<tr><td>${esc(s.party_name)}</td><td class="r">${s.split_pct}%</td><td class="r mono">$${fmt(s.split_amount)}</td></tr>`).join("")||`<tr><td class="dim">No splits recorded</td></tr>`}</tbody></table>
           <h3>Mandatory checklist</h3>
           <ul class="checks">${checks.map((c) => `<li class="${c.ok?"":"bad"}">${c.label}</li>`).join("")}</ul>
+          ${optionalChecks.length ? `<h3>Other documents <span class="dim">(not mandatory)</span></h3>
+          <ul class="checks optional">${optionalChecks.map((c) => `<li class="${c.ok?"":"muted"}">${c.label}</li>`).join("")}</ul>` : ""}
           ${(checklistAttachments.length) ? `<h3>Attachments</h3>
           <ul class="attachList">${checklistAttachments.map((a) =>
             `<li><span>📎 ${esc(a.file_name)} <span class="dim">(${fmtSize(a.size_bytes)})</span></span>
