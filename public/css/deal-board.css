@@ -307,7 +307,20 @@ body.proj .mgmt-units h2{font-size:20px}
 .mgmt-units .share i{display:block;height:100%;background:var(--navy)}
 
 /* ranking position */
-.ranks td.rank,.ranks th.rank{font-family:var(--mono);color:var(--ink-3);
-  text-align:right;padding-right:8px;font-size:.9em}
-/* top three by position, not by row — a tie at 3rd highlights both */
-.ranks td.rank.top{color:var(--navy);font-weight:700}
+.ranks th.rank{text-align:center;padding-right:6px}
+.ranks td.rank{font-family:var(--mono);color:var(--ink-3);
+  text-align:center;padding:4px 6px;font-size:.9em}
+
+/* Top three sit in a filled navy badge with white numerals, so the
+   podium reads instantly from across a room. Ties share a position, so
+   this is keyed on rank rather than row order — a tie at 3rd badges
+   both brokers. */
+.ranks td.rank.top{color:var(--ink-3)}
+.ranks td.rank.top span{display:inline-block;min-width:22px;padding:2px 5px;
+  background:var(--navy);color:#fff;font-weight:700;border-radius:3px;
+  line-height:1.15;text-align:center}
+body.proj .ranks td.rank.top span{min-width:28px;padding:3px 7px}
+@media print{
+  .ranks td.rank.top span{background:none;color:#000;border:1px solid #000;
+    padding:1px 4px}
+}
