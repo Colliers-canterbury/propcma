@@ -4,13 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Deal Board — South Island Commercial</title>
-  <!-- deal-board 2026-08-19f
+  <!-- deal-board 2026-08-19h
        The ?v= query strings below bust the browser cache. Bump them
        (and BOARD_VERSION in deal-board.js) whenever these files change,
        or a stale copy will keep being served. — deal-board.html, .css, .js and -api.js
        must all be copied together; a partial copy will misbehave. -->
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Narrow:wght@600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/deal-board.css?v=2026-08-19f" />
+  <link rel="stylesheet" href="css/deal-board.css?v=2026-08-19h" />
 </head>
 <body>
   <div class="gate" id="gate"><div class="inner">Signing in…</div></div>
@@ -50,32 +50,31 @@
     </div>
 
     <section id="tab-board">
-        <div class="grid2">
-          <div id="stages"></div>
-          <aside>
-            <div class="card">
-              <h3>Fines <span style="float:right;font-family:var(--mono)" id="fineTot"></span></h3>
-              <div class="fines" id="fines"></div>
-              <div class="fine-add">
-                <select id="fineBroker" aria-label="Broker"></select>
-                <span class="dollar">$</span>
-                <input id="fineAmount" type="number" min="0" step="5" value="10"
-                       inputmode="numeric" aria-label="Amount to add">
-                <button id="addFine" class="btn-primary">Add</button>
-              </div>
-              <div class="ytd" id="finesYtd"></div>
-            </div>
-            <div class="card">
-              <h3>Apologies <button class="clear" id="clearApologies">clear</button></h3>
-              <div contenteditable data-ph="Who's out this week…" id="apologies"></div>
-            </div>
-            <div class="card">
-              <h3>Minutes / actions <button class="clear" id="clearNotes">clear</button></h3>
-              <textarea class="note" id="minutesBox" placeholder="Decisions and actions from the room…"></textarea>
-            </div>
-          </aside>
+      <div class="meetingbar">
+        <div class="card finescard">
+          <h3>Fines <span style="float:right;font-family:var(--mono)" id="fineTot"></span></h3>
+          <div class="fines" id="fines"></div>
+          <div class="fine-add">
+            <select id="fineBroker" aria-label="Broker"></select>
+            <span class="dollar">$</span>
+            <input id="fineAmount" type="number" min="0" step="5" value="10"
+                   inputmode="numeric" aria-label="Amount to add">
+            <button id="addFine" class="btn-primary">Add</button>
+          </div>
+          <div class="ytd" id="finesYtd"></div>
         </div>
-      </section>
+        <div class="card">
+          <h3>Apologies <button class="clear" id="clearApologies">clear</button></h3>
+          <div contenteditable data-ph="Who's out this week…" id="apologies"></div>
+        </div>
+        <div class="card">
+          <h3>Minutes / actions <button class="clear" id="clearNotes">clear</button></h3>
+          <textarea class="note" id="minutesBox" placeholder="Decisions and actions from the room…"></textarea>
+        </div>
+      </div>
+
+      <div id="stages"></div>
+    </section>
 
       <section id="tab-management" hidden>
       <div id="mgmtPane"></div>
@@ -119,7 +118,7 @@
   <script src="js/msal-browser.min.js"></script>
   <script src="js/config.js"></script>
   <script src="js/auth.js"></script>
-  <script src="js/deal-board-api.js?v=2026-08-19f"></script>
-  <script src="js/deal-board.js?v=2026-08-19f"></script>
+  <script src="js/deal-board-api.js?v=2026-08-19h"></script>
+  <script src="js/deal-board.js?v=2026-08-19h"></script>
 </body>
 </html>
