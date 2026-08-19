@@ -547,6 +547,20 @@ function renderFines(bumped){
 
 /* Broker rankings — read-only mirror of the commission workbook.
    Rendered as a panel under the Targets stage. */
+/* Competition ranking: equal fees share a position and the next
+   broker skips accordingly — 1, 2, 3, 4=, 4=, 6. Expects the list
+   already sorted by fees, highest first. */
+function withRanks(list){
+  let pos=0, prev=null;
+  return list.map((b,i)=>{
+    if(prev===null || b.fees!==prev){ pos=i+1; prev=b.fees; }
+    return Object.assign({}, b, {rank:pos});
+  }).map((b,i,arr)=>{
+    const tied=arr.filter(x=>x.rank===b.rank).length>1;
+    return Object.assign({}, b, {rankLabel: b.rank + (tied?'=':'')});
+  });
+}
+
 async function renderRankings(){
   const pane=$('#rankingsPane'); if(!pane) return;
   let d;
@@ -567,21 +581,23 @@ async function renderRankings(){
       <span class="as-at">${asAt?'from the master report, as at '+asAt:''}</span>
     </header>
     <table><thead><tr>
+      <th style="width:30px" class="rank">#</th>
       <th style="width:34px"></th><th>Broker</th>
       <th style="width:118px" class="num">Fees</th>
       <th style="width:118px" class="num">Budget</th>
       <th>Progress</th><th class="pc"></th>
-    </tr></thead><tbody>${d.brokers.map(b=>{
+    </tr></thead><tbody>${withRanks(d.brokers).map(b=>{
       const pct=b.budget?Math.min(100,b.fees/b.budget*100):0;
       const short=b.budget&&pct<50;
-      return `<tr><td class="brk">${esc(b.code)}</td><td>${esc(b.name)}</td>
+      return `<tr><td class="rank${b.rank<=3?' top':''}">${b.rankLabel}</td>
+        <td class="brk">${esc(b.code)}</td><td>${esc(b.name)}</td>
         <td class="num">${money(b.fees)}</td>
         <td class="num">${b.budget?money(b.budget):'—'}</td>
         <td><div class="bar"><i class="${short?'short':''}" style="width:${pct}%"></i></div></td>
         <td class="pc">${b.budget?pct.toFixed(0)+'%':''}</td></tr>`;
     }).join('')}</tbody>
     <tfoot><tr>
-      <td></td><td class="lbl">Total</td>
+      <td></td><td></td><td class="lbl">Total</td>
       <td class="num">${money(totFees)}</td>
       <td class="num">${totBudget?money(totBudget):'—'}</td>
       <td><div class="bar"><i style="width:${totPct}%"></i></div></td>
@@ -650,20 +666,22 @@ async function renderManagement(){
     <header><h2>${d.year} company ranking</h2>
       <span class="as-at">${asAt?'from the master report, as at '+asAt:''}</span></header>
     <table><thead><tr>
+      <th style="width:30px" class="rank">#</th>
       <th style="width:34px"></th><th>Broker</th>
       <th style="width:118px" class="num">Fees</th>
       <th style="width:118px" class="num">Budget</th>
       <th>Progress</th><th class="pc"></th>
-    </tr></thead><tbody>${r.map(b=>{
+    </tr></thead><tbody>${withRanks(r).map(b=>{
       const pct=b.budget?Math.min(100,b.fees/b.budget*100):0;
-      return `<tr><td class="brk">${esc(b.code)}</td>
+      return `<tr><td class="rank${b.rank<=3?' top':''}">${b.rankLabel}</td>
+        <td class="brk">${esc(b.code)}</td>
         <td>${esc(b.name)}${b.units>1?' <span class="as-at">'+b.units+' units</span>':''}</td>
         <td class="num">${money(b.fees)}</td>
         <td class="num">${b.budget?money(b.budget):'—'}</td>
         <td><div class="bar"><i class="${b.budget&&pct<50?'short':''}" style="width:${pct}%"></i></div></td>
         <td class="pc">${b.budget?pct.toFixed(0)+'%':''}</td></tr>`;
     }).join('')}</tbody>
-    <tfoot><tr><td></td><td class="lbl">Total</td>
+    <tfoot><tr><td></td><td></td><td class="lbl">Total</td>
       <td class="num">${money(totFees)}</td>
       <td class="num">${totBudget?money(totBudget):'—'}</td>
       <td><div class="bar"><i style="width:${totPct}%"></i></div></td>
@@ -1073,7 +1091,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-19b';
+const BOARD_VERSION='2026-08-19d';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
