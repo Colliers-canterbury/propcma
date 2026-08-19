@@ -194,6 +194,8 @@ tfoot td{border-top:2px solid var(--navy);border-bottom:none;font-weight:700;pad
 .checks li::before{content:"\2713 ";font-weight:700;color:var(--ok);}
 .checks li.bad{color:var(--bad);}
 .checks li.bad::before{content:"\2715 ";color:var(--bad);}
+.checks.optional li.muted{color:var(--dim);}
+.checks.optional li.muted::before{content:"\2015 ";color:var(--dim);font-weight:400;}
 .actions .fld{margin-bottom:10px;}
 .warn{color:var(--bad);font-size:12.5px;margin:8px 0 0;}
 .returnBox{margin-top:14px;display:flex;flex-direction:column;gap:8px;}
