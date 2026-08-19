@@ -324,3 +324,25 @@ body.proj .ranks td.rank.top span{min-width:28px;padding:3px 7px}
   .ranks td.rank.top span{background:none;color:#000;border:1px solid #000;
     padding:1px 4px}
 }
+
+/* ---- column sizing: give the address room to sit on one line ---- */
+.stage table,.notes table{table-layout:fixed}
+
+/* Address is the only flexible column, so it absorbs the space freed
+   from Timing, Broker and the action cell. */
+td.addr{overflow-wrap:anywhere}
+td.addr [contenteditable]{white-space:normal}
+
+/* Trim the fixed columns to what their controls actually need. */
+input.dateinput{font-size:.86em;padding:1px 0}
+td.brk{font-size:.9em}
+td.brk [contenteditable]{overflow-wrap:anywhere}
+select.stagepick{font-size:.82em}
+select.statuspick{font-size:.82em}
+select.outcome{max-width:84px;font-size:.78em}
+td.actcell{width:88px}
+
+/* On a narrow window let the table scroll rather than crush the address */
+.stage>table,.notes>table{min-width:840px}
+.stage,.notes{overflow-x:auto}
+body.proj .stage>table,body.proj .notes>table{min-width:0}
