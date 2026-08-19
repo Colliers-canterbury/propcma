@@ -47,6 +47,7 @@ export default async function handler(req, res) {
     if (req.method === "POST" && seg[0] === "fine") return await setFine(req, res);
     if (req.method === "GET"  && seg[0] === "brokers") return await listBrokers(req, res);
     if (req.method === "GET"  && seg[0] === "departments") return await listDepartments(req, res);
+    if (req.method === "GET"  && seg[0] === "summary") return await summary(req, res);
     if (req.method === "GET"  && seg[0] === "fines-ytd") return await finesYtd(req, res);
     if (req.method === "POST" && seg[0] === "settle-fine") return await settleFine(req, res);
     if (req.method === "GET"  && seg[0] === "rankings") return await rankings(req, res);
@@ -325,9 +326,100 @@ async function requirements(req, res, id) {
 async function listDepartments(req, res) {
   await requireUser(req, ROLES_READ);
   const { data, error } = await supabase.from("db_departments")
-    .select("slug, name").order("name");
+    .select("slug, name, is_rollup")
+    .order("sort_order", { nullsFirst: false }).order("name");
   if (error) throw new HttpError(500, "Could not load the business units");
   return res.status(200).json(data);
+}
+
+// ── Management rollup ─────────────────────────────────────────────
+// Combines the operating units. Weighted pipeline is computed per unit
+// using that unit's own percentages, then summed — a leasing submission
+// and a sales submission do not convert at the same rate, so a single
+// blended percentage would be wrong.
+async function summary(req, res) {
+  await requireUser(req, ROLES_READ);
+  const year = Number(req.query.year) || new Date().getFullYear();
+
+  const [depts, stages, deals, weights, ranks, brokers] = await Promise.all([
+    supabase.from("db_departments").select("id, slug, name, is_rollup")
+      .order("sort_order", { nullsFirst: false }),
+    supabase.from("db_stages").select("id, department_id, name"),
+    supabase.from("db_deals")
+      .select("department_id, stage_id, fee_nzd, outcome")
+      .eq("is_archived", false),
+    supabase.from("db_pipeline_weights").select("department_id, stage_name, pct"),
+    supabase.from("db_broker_rankings")
+      .select("department_id, broker_code, fees_nzd, budget_nzd, synced_at")
+      .eq("financial_year", year),
+    supabase.from("brokers").select("code, first_name"),
+  ]);
+
+  if (depts.error || stages.error || deals.error)
+    throw new HttpError(500, "Could not build the summary");
+
+  const units = (depts.data || []).filter((d) => !d.is_rollup);
+  const stageName = Object.fromEntries((stages.data || []).map((s) => [s.id, s.name]));
+  const weightOf = {};
+  for (const w of weights.data || []) {
+    weightOf[`${w.department_id}|${w.stage_name}`] = Number(w.pct) || 0;
+  }
+
+  const pctFor = (deptId, stage) => {
+    if (/^uncondition/i.test(stage)) return 1;
+    const w = weightOf[`${deptId}|${stage}`];
+    return w === undefined ? 0 : w / 100;
+  };
+
+  const rows = units.map((u) => {
+    const mine = (deals.data || []).filter((d) => d.department_id === u.id);
+    const unconditional = mine
+      .filter((d) => /^uncondition/i.test(stageName[d.stage_id] || ""))
+      .reduce((a, d) => a + Number(d.fee_nzd || 0), 0);
+    return {
+      slug: u.slug,
+      name: u.name,
+      deals: mine.length,
+      unconditional,
+      unweighted: mine.reduce((a, d) => a + Number(d.fee_nzd || 0), 0),
+      weighted: mine.reduce((a, d) =>
+        a + Number(d.fee_nzd || 0) * pctFor(u.id, stageName[d.stage_id] || ""), 0),
+      won: mine.filter((d) => d.outcome === "won").length,
+      lost: mine.filter((d) => d.outcome === "lost").length,
+    };
+  });
+
+  const sum = (k) => rows.reduce((a, r) => a + r[k], 0);
+
+  // Company-wide ranking: a broker working across two units is counted
+  // once, with their fees and budget combined.
+  const nameBy = Object.fromEntries((brokers.data || []).map((b) => [b.code, b.first_name]));
+  const byBroker = {};
+  for (const r of ranks.data || []) {
+    const b = byBroker[r.broker_code] || { code: r.broker_code, fees: 0, budget: 0, units: 0 };
+    b.fees += Number(r.fees_nzd) || 0;
+    b.budget += Number(r.budget_nzd) || 0;
+    b.units += 1;
+    byBroker[r.broker_code] = b;
+  }
+  const ranking = Object.values(byBroker)
+    .map((b) => ({ ...b, name: nameBy[b.code] || b.code }))
+    .sort((a, b) => b.fees - a.fees);
+
+  return res.status(200).json({
+    year,
+    units: rows,
+    totals: {
+      deals: sum("deals"),
+      unconditional: sum("unconditional"),
+      unweighted: sum("unweighted"),
+      weighted: sum("weighted"),
+      won: sum("won"),
+      lost: sum("lost"),
+    },
+    ranking,
+    synced_at: (ranks.data || [])[0]?.synced_at || null,
+  });
 }
 
 // ── broker list for the dropdown ──────────────────────────────────
