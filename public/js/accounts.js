@@ -5,7 +5,15 @@
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const fmt = (n) => Number(n || 0).toLocaleString("en-NZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmt = (n) => {
+    if (n == null || n === "") return "0.00";
+    // Deposit/commission fields are live-formatted with commas as the
+    // user types (public/js/form.js, lease-form.js), so stored values
+    // may already contain them — strip before parsing, or Number()
+    // returns NaN for e.g. "51,390.31".
+    const v = typeof n === "number" ? n : parseFloat(String(n).replace(/[$,\s]/g, ""));
+    return isNaN(v) ? "0.00" : v.toLocaleString("en-NZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
   const fmtSize = (b) => { b = Number(b||0); return b < 1024 ? b+" B" : b < 1048576 ? (b/1024).toFixed(0)+" KB" : (b/1048576).toFixed(1)+" MB"; };
 
   const META = {
