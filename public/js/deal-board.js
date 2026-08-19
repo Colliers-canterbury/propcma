@@ -34,10 +34,15 @@ function on(sel, ev, fn){
 function click(sel, fn){ on(sel,'click',fn); }
 const money=n=>n?'$'+Math.round(n).toLocaleString():'—';
 const esc=s=>(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-let UNITS=[];   // [{slug, name}] from the API
+let UNITS=[];   // [{slug, name, is_rollup}] from the API
+const isRollup=slug=>{
+  const u=UNITS.find(x=>x.slug===slug);
+  return !!(u && u.is_rollup);
+};
 const titleFor=slug=>{
   const u=UNITS.find(x=>x.slug===slug);
-  return u ? u.name+' Meeting' : 'Meeting';
+  if(!u) return 'Meeting';
+  return u.is_rollup ? u.name+' Dashboard' : u.name+' Meeting';
 };
 const S=()=>state[which];
 const M=()=>({title:titleFor(which), stages:(S().stages||[]).map(x=>x.name)});
@@ -584,6 +589,90 @@ async function renderRankings(){
     </tr></tfoot></table></section>`;
 }
 
+/* Management — a rollup across the operating units. Each unit's
+   weighted pipeline uses that unit's own percentages; a blended rate
+   would misstate both. */
+async function renderManagement(){
+  const pane=$('#mgmtPane'); if(!pane) return;
+  pane.innerHTML='<div class="card">Loading…</div>';
+  let d;
+  try{ d=await DealBoardApi.getSummary(); }
+  catch(e){ pane.innerHTML='<div class="card">Could not load the dashboard.</div>'; return; }
+
+  const t=d.totals||{};
+  const asAt=d.synced_at
+    ? new Date(d.synced_at).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'})
+    : '';
+  const maxW=Math.max(1,...(d.units||[]).map(u=>u.weighted));
+
+  const tally=`<div class="tally" style="margin-bottom:12px;border:1px solid var(--line)">
+    <div><div class="k">Deals</div><div class="v">${t.deals||0}</div></div>
+    <div><div class="k">Unconditional</div><div class="v">${money(t.unconditional)}</div></div>
+    <div><div class="k">Pipeline (weighted)</div><div class="v">${money(t.weighted)}</div>
+      <div class="sub">${money(t.unweighted)} unweighted</div></div>
+    <div><div class="k">Won</div><div class="v">${t.won||0}</div></div>
+    <div><div class="k">Lost</div><div class="v">${t.lost||0}</div></div>
+  </div>`;
+
+  const units=`<section class="mgmt-units">
+    <header><h2>By business unit</h2></header>
+    <table><thead><tr>
+      <th>Unit</th><th style="width:60px" class="num">Deals</th>
+      <th style="width:118px" class="num">Unconditional</th>
+      <th style="width:118px" class="num">Weighted</th>
+      <th style="width:118px" class="num">Unweighted</th>
+      <th style="width:110px">Share</th>
+      <th style="width:52px" class="num">Won</th><th style="width:52px" class="num">Lost</th>
+    </tr></thead><tbody>${(d.units||[]).map(u=>`
+      <tr><td class="unit">${esc(u.name)}</td>
+        <td class="num">${u.deals}</td>
+        <td class="num">${money(u.unconditional)}</td>
+        <td class="num">${money(u.weighted)}</td>
+        <td class="num">${money(u.unweighted)}</td>
+        <td><div class="share"><i style="width:${(u.weighted/maxW*100).toFixed(0)}%"></i></div></td>
+        <td class="wl">${u.won}</td><td class="wl">${u.lost}</td></tr>`).join('')}
+    </tbody>
+    <tfoot><tr>
+      <td class="lbl">Company</td>
+      <td class="num">${t.deals||0}</td>
+      <td class="num">${money(t.unconditional)}</td>
+      <td class="num">${money(t.weighted)}</td>
+      <td class="num">${money(t.unweighted)}</td>
+      <td></td>
+      <td class="wl">${t.won||0}</td><td class="wl">${t.lost||0}</td>
+    </tr></tfoot></table></section>`;
+
+  const r=d.ranking||[];
+  const totFees=r.reduce((a,b)=>a+b.fees,0);
+  const totBudget=r.reduce((a,b)=>a+(b.budget||0),0);
+  const totPct=totBudget?Math.min(100,totFees/totBudget*100):0;
+  const ranking=!r.length ? '' : `<section class="ranks">
+    <header><h2>${d.year} company ranking</h2>
+      <span class="as-at">${asAt?'from the master report, as at '+asAt:''}</span></header>
+    <table><thead><tr>
+      <th style="width:34px"></th><th>Broker</th>
+      <th style="width:118px" class="num">Fees</th>
+      <th style="width:118px" class="num">Budget</th>
+      <th>Progress</th><th class="pc"></th>
+    </tr></thead><tbody>${r.map(b=>{
+      const pct=b.budget?Math.min(100,b.fees/b.budget*100):0;
+      return `<tr><td class="brk">${esc(b.code)}</td>
+        <td>${esc(b.name)}${b.units>1?' <span class="as-at">'+b.units+' units</span>':''}</td>
+        <td class="num">${money(b.fees)}</td>
+        <td class="num">${b.budget?money(b.budget):'—'}</td>
+        <td><div class="bar"><i class="${b.budget&&pct<50?'short':''}" style="width:${pct}%"></i></div></td>
+        <td class="pc">${b.budget?pct.toFixed(0)+'%':''}</td></tr>`;
+    }).join('')}</tbody>
+    <tfoot><tr><td></td><td class="lbl">Total</td>
+      <td class="num">${money(totFees)}</td>
+      <td class="num">${totBudget?money(totBudget):'—'}</td>
+      <td><div class="bar"><i style="width:${totPct}%"></i></div></td>
+      <td class="pc">${totBudget?totPct.toFixed(0)+'%':''}</td>
+    </tr></tfoot></table></section>`;
+
+  pane.innerHTML=tally+units+ranking;
+}
+
 /* Pipeline Settings — the percentages behind the weighted total. */
 function renderWeights(){
   const box=$('#weightRows'); if(!box) return;
@@ -909,12 +998,13 @@ async function loadUnits(){
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   b.classList.add('on');tab=b.dataset.tab;
-  ['board','register','rankings','settings'].forEach(t=>{
+  ['board','register','rankings','settings','management'].forEach(t=>{
     const el=$('#tab-'+t); if(el) el.hidden = t!==tab;
   });
   if(tab==='register')renderRegister();
   if(tab==='rankings')renderRankings();
   if(tab==='settings')renderWeights();
+  if(tab==='management')renderManagement();
 });
 click('#clearApologies', ()=>{
   if(!S().apologies || !confirm('Clear the apologies?')) return;
@@ -953,13 +1043,37 @@ function renderAll(){
 }
 async function loadBoard(){
   setSaver('','Loading…');
+  if(isRollup(which)){
+    // Management has no board of its own — show only the dashboard.
+    tab='management';
+    document.querySelectorAll('.tabs button').forEach(b=>{
+      b.classList.toggle('on', b.dataset.tab==='management');
+      b.hidden = b.dataset.tab!=='management';
+    });
+    ['board','register','rankings','settings','management'].forEach(t=>{
+      const el=$('#tab-'+t); if(el) el.hidden = t!=='management';
+    });
+    const fb=$('#filterbar'); if(fb) fb.hidden=true;
+    const tl=$('#tally'); if(tl) tl.innerHTML='';
+    $('#mtgTitle').textContent=titleFor(which);
+    $('#mtgDate').textContent=new Date()
+      .toLocaleDateString('en-NZ',{weekday:'long',day:'numeric',month:'long',year:'numeric'}).toUpperCase();
+    setSaver('ok','Ready');
+    await renderManagement();
+    return;
+  }
+  document.querySelectorAll('.tabs button').forEach(b=>{
+    b.hidden = b.dataset.tab==='management';
+  });
+  const fb=$('#filterbar'); if(fb) fb.hidden=false;
+  if(tab==='management') tab='board';
   const payload=await DealBoardApi.getBoard(which);
   state[which]=fromApi(which,payload);
   setSaver('ok','Ready');
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-19a';
+const BOARD_VERSION='2026-08-19b';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
