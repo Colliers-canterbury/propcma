@@ -94,6 +94,8 @@ const PRINT_CSS = `
   ul.checks li { padding: 2px 0; }
   ul.checks li::before { content: "\\2713  "; font-weight: 700; }
   ul.checks li.no::before { content: "\\2717  "; }
+  ul.checks.optional li.muted { color: #8A93A6; }
+  ul.checks.optional li.muted::before { content: "\\2015  "; font-weight: 400; }
   .two { display: flex; gap: 24px; }
   .two > div { flex: 1; }
   footer { margin-top: 18px; padding-top: 8px; border-top: 1px solid #DCE2EC;
@@ -246,9 +248,12 @@ ${deal.deposit_to_trust ? `
   <li class="${chk.agencyAgreement ? "" : "no"}">Signed agency agreement</li>
   <li class="${chk.unconditionalConfirmation ? "" : "no"}">Confirmation of unconditional</li>
   <li class="${chk.executedAgreement ? "" : "no"}">Executed sale &amp; purchase agreement</li>
-  <li class="${chk.marketingReport ? "" : "no"}">Marketing campaign report</li>
   <li class="${chk.amlComplete ? "" : "no"}">AML complete</li>
   ${deal.deposit_to_trust ? `<li class="${chk.spAgreement ? "" : "no"}">S&amp;P agreement (trust deal)</li>` : ""}
+</ul>
+<h2 class="avoid">Other documents <span class="sub2" style="font-weight:400">(not mandatory)</span></h2>
+<ul class="checks avoid optional">
+  <li class="${chk.marketingReport ? "" : "muted"}">Marketing campaign report</li>
 </ul>
 ${attachments.length ? `<h3>Attached documents</h3><ul class="checks">${
   attachments.map((a) => `<li>${esc(a.file_name)}</li>`).join("")}</ul>` : ""}
@@ -456,10 +461,13 @@ ${deal.deposit_to_trust ? `
   <li class="${chk.unconditionalConfirmation ? "" : "no"}">Confirmation of unconditional</li>
   <li class="${chk.executedAgreement ? "" : "no"}">Executed lease agreement</li>
   <li class="${chk.amlComplete ? "" : "no"}">AML complete</li>
-  <li class="${chk.marketingReport ? "" : "no"}">Marketing campaign report</li>
-  <li class="${chk.leaseValueConfirmation ? "" : "no"}">Confirmation of lease value</li>
-  <li class="${chk.leaseDeed ? "" : "no"}">Lease deed</li>
-  ${deal.deposit_to_trust ? `<li class="${chk.appraisals ? "" : "no"}">Appraisals (trust deal)</li>` : ""}
+</ul>
+<h2 class="avoid">Other documents <span class="sub2" style="font-weight:400">(not mandatory)</span></h2>
+<ul class="checks avoid optional">
+  <li class="${chk.marketingReport ? "" : "muted"}">Marketing campaign report</li>
+  <li class="${chk.leaseValueConfirmation ? "" : "muted"}">Confirmation of lease value</li>
+  <li class="${chk.leaseDeed ? "" : "muted"}">Lease deed</li>
+  ${deal.deposit_to_trust ? `<li class="${chk.appraisals ? "" : "muted"}">Appraisals (trust deal)</li>` : ""}
 </ul>
 ${attachments.length ? `<h3>Attached documents</h3><ul class="checks">${
   attachments.map((a) => `<li>${esc(a.file_name)}</li>`).join("")}</ul>` : ""}
