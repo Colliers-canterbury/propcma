@@ -183,10 +183,11 @@ function renderBoard(){
         <h2>${esc(st)}</h2><span class="pill">${rows.length}</span>
         <span class="tot">${money(stageTotal(st))}</span></header>
       ${collapsed[st]?'':`<table><thead><tr>
-        <th style="width:16px"></th><th style="width:120px">Stage</th>
-        <th>Address</th><th style="width:130px">Timing</th>
-        <th style="width:12%" class="num">Fee</th><th style="width:11%">Status</th>
-        <th style="width:12%">Broker</th><th style="width:6%">AML</th><th style="width:26px"></th>
+        <th style="width:16px"></th><th style="width:104px">Stage</th>
+        <th>Address</th><th style="width:120px">Timing</th>
+        <th style="width:88px" class="num">Fee</th><th style="width:92px">Status</th>
+        <th style="width:70px">Broker</th><th style="width:38px">AML</th>
+        <th style="width:88px"></th>
       </tr></thead><tbody></tbody></table>
       <button class="addrow">+ Add to ${esc(st.toLowerCase())}</button>`}`;
     /* clicking a stage header marks where the meeting is up to */
@@ -418,9 +419,10 @@ function renderNoteSections(wrap){
         <span class="pill">${items.length}</span>
         <span class="tot">${money(items.reduce((a,n)=>a+(+n.f||0),0))}</span></header>
       <table><thead><tr>
-        <th>Detail</th><th style="width:130px">Timing</th>
-        <th style="width:12%" class="num">Fee</th><th style="width:11%">Status</th>
-        <th style="width:12%">Broker</th><th style="width:6%">AML</th><th style="width:26px"></th>
+        <th>Detail</th><th style="width:120px">Timing</th>
+        <th style="width:88px" class="num">Fee</th><th style="width:92px">Status</th>
+        <th style="width:70px">Broker</th><th style="width:38px">AML</th>
+        <th style="width:26px"></th>
       </tr></thead><tbody></tbody></table>
       <button class="addrow">+ Add to ${esc(ns.name.toLowerCase())}</button>`;
     const tb=sec.querySelector('tbody');
@@ -1091,7 +1093,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-19e';
+const BOARD_VERSION='2026-08-19f';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
