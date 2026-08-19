@@ -80,9 +80,25 @@ td.brk{font-family:var(--mono);color:var(--navy)}
 .tag.pending{background:var(--amber-soft);color:var(--amber);border-color:#f0dcb4}
 .addrow{width:100%;border:none;border-radius:0 0 var(--r) var(--r);color:var(--ink-3);padding:6px;text-align:left}
 .addrow:hover{background:var(--navy-soft)}
-.grid2{display:grid;grid-template-columns:1fr 310px;gap:12px;align-items:start}
-body.proj .grid2{grid-template-columns:1fr}
-body.proj aside{display:none}
+/* Fines / apologies / minutes now sit in a row above the board, so the
+   stages get the full page width. */
+.meetingbar{display:grid;grid-template-columns:minmax(280px,1.1fr) 1fr 1.3fr;
+  gap:12px;align-items:start;margin-bottom:12px}
+.meetingbar .card{margin-bottom:0}
+.meetingbar .note{min-height:56px}
+/* On the projector the room wants the fines visible, but not the EA's
+   working notes — apologies and minutes are hers to type, not theirs
+   to read at distance. */
+body.proj .meetingbar{display:block;margin-bottom:14px}
+body.proj .meetingbar .card{display:none}
+body.proj .meetingbar .card.finescard{display:block}
+body.proj .meetingbar .fine{font-size:15px;padding:3px 6px 3px 11px}
+body.proj .meetingbar .fine-add{display:none}
+body.proj .meetingbar .ytd table{font-size:14px}
+body.proj .meetingbar .ytd .hd b{font-size:17px}
+body.proj .meetingbar .ytd button.settle{display:none}
+body.proj .meetingbar h3{font-size:14px}
+@media (max-width:1000px){.meetingbar{grid-template-columns:1fr}}
 .card{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;margin-bottom:11px}
 .card h3{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);margin:0 0 8px}
 .fines{display:flex;flex-wrap:wrap;gap:5px}
@@ -346,3 +362,9 @@ td.actcell{width:88px}
 .stage>table,.notes>table{min-width:840px}
 .stage,.notes{overflow-x:auto}
 body.proj .stage>table,body.proj .notes>table{min-width:0}
+
+/* Selects need room for their own arrow — without the padding the text
+   runs underneath it. */
+select.stagepick,select.statuspick,select.outcome{
+  padding-right:17px;text-overflow:ellipsis}
+select.stagepick{font-size:.86em}
