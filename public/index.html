@@ -17,7 +17,7 @@
   --ink:#1a2535;--ink2:#4a5568;--ink3:#8a96a8;
   --paper:#f8fafc;--paper2:#eef4fb;--paper3:#d6e8f5;
   --sans:'Inter',sans-serif;--mono:'DM Mono',monospace;
-  --radius:4px;--border:1px solid var(--paper3);
+  --radius:4px;--border:1px solid #25408F;
 }
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:var(--sans);background:var(--paper);color:var(--ink);font-size:13px;line-height:1.5;}
@@ -104,7 +104,7 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
 .col-map-grid{display:grid;grid-template-columns:1fr 20px 1fr;gap:6px;align-items:center;margin-bottom:6px;}
 .col-map-label{font-size:12px;color:var(--ink2);font-weight:500;}
 .db-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;background:#dcfce7;color:#166534;padding:3px 10px;border-radius:20px;font-weight:500;margin-bottom:12px;}
-.import-zone{border:2px dashed var(--paper3);border-radius:8px;padding:40px;text-align:center;cursor:pointer;transition:all .2s;background:var(--paper2);margin:20px;}
+.import-zone{border:2px dashed #25408F;border-radius:8px;padding:40px;text-align:center;cursor:pointer;transition:all .2s;background:var(--paper2);margin:20px;}
 .import-zone:hover,.import-zone.drag{border-color:var(--cb);background:var(--cb-light);}
 .import-zone i{font-size:36px;color:var(--ink3);margin-bottom:8px;display:block;}
 .mapper-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
@@ -123,7 +123,7 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
 .report-metric-label{font-size:10px;color:var(--cb-dark);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;font-weight:600;}
 .report-metric-val{font-size:16px;font-weight:600;color:var(--cb-deeper);font-family:var(--mono);}
 .adj-table{width:100%;border-collapse:collapse;font-size:12px;}
-.adj-table th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink3);padding:6px 8px;border-bottom:2px solid var(--paper3);font-weight:600;}
+.adj-table th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink3);padding:6px 8px;border-bottom:2px solid #25408F;font-weight:600;}
 .adj-table td{padding:7px 8px;border-bottom:1px solid var(--paper2);}
 .adj-input{width:80px;padding:3px 6px;border:var(--border);border-radius:var(--radius);background:var(--paper2);font-family:var(--mono);font-size:12px;text-align:right;}
 .val-result{background:var(--cb-deeper);color:#fff;padding:16px 18px;border-radius:var(--radius);display:flex;justify-content:space-between;align-items:center;margin-top:12px;}
@@ -219,7 +219,6 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
     <div class="top-tabs">
       <button class="top-tab active" onclick="switchView('properties')">Properties</button>
       <button class="top-tab" onclick="switchView('report')">CMA Report</button>
-      <button class="top-tab" onclick="openMarketingProposal()">Marketing Proposal <i class="ti ti-external-link" aria-hidden="true" style="font-size:12px;"></i></button>
       <button class="top-tab" onclick="switchView('settings')"><i class="ti ti-settings" aria-hidden="true"></i> Settings</button>
     </div>
     <div class="sync-info">
@@ -533,10 +532,6 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
               <button class="btn btn-sm" onclick="recoverPhotos()"><i class="ti ti-photo-search" aria-hidden="true"></i> Recover uploaded photos</button>
               <span style="font-size:11px;color:var(--ink3);">Re-attaches photos from the PropCMA Photos folder on OneDrive and writes them back to the sheet.</span>
             </div>
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-              <button class="btn btn-sm" onclick="migratePhotosToSupabase()"><i class="ti ti-transfer" aria-hidden="true"></i> Migrate photos to Supabase</button>
-              <span style="font-size:11px;color:var(--ink3);">One-off: copies legacy OneDrive photos to shared Supabase storage so all users can see them. Run while signed in as the original uploader.</span>
-            </div>
             <div class="status-pill ok" style="display:inline-flex;"><i class="ti ti-check" aria-hidden="true"></i> Signed in — Excel sync and write-back enabled</div>
           </div>
         </div>
@@ -690,7 +685,7 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
 
     <!-- Photos -->
     <div class="edit-section-title">Photos</div>
-    <p style="font-size:12px;color:var(--ink3);margin-bottom:10px;">Upload photos (stored in shared Supabase storage, visible to all users) or paste public image URLs. Each is saved as a comma-separated list and written back to your sheet.</p>
+    <p style="font-size:12px;color:var(--ink3);margin-bottom:10px;">Paste public image URLs (Google Drive, Dropbox, etc.). Each is saved as a comma-separated list and written back to your sheet.</p>
     <div class="photo-list" id="so-photo-list"></div>
     <div style="display:flex;gap:8px;margin-bottom:10px;">
       <button class="btn btn-sm" onclick="document.getElementById('so-photo-file').click()"><i class="ti ti-upload" aria-hidden="true"></i> Upload photo</button>
@@ -718,27 +713,6 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
 <script>
 // ── Supabase client ──────────────────────────────────────────
 const sb = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON);
-
-// ── Supabase Storage (property photos) ────────────────────────
-// Photos are stored in the public 'property-photos' bucket so every
-// user sees them without any per-user OneDrive/Graph permissions.
-// The photos field stores the full public URL, which the existing
-// https:// rendering paths (table thumbs, summary modal, previews,
-// PDF payload) already handle natively.
-const PHOTO_BUCKET='property-photos';
-function sbPhotoPublicUrl(path){
-  return sb.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl;
-}
-async function sbUploadPhoto(propId,blob){
-  const path=`${(propId||'photo').replace(/[^a-z0-9_\-]/gi,'')}/${Date.now()}.jpg`;
-  const{error}=await sb.storage.from(PHOTO_BUCKET).upload(path,blob,{
-    contentType:'image/jpeg',
-    cacheControl:'31536000', // paths are unique, cache hard
-    upsert:false,
-  });
-  if(error)throw new Error(error.message||'Storage upload failed');
-  return sbPhotoPublicUrl(path);
-}
 
 // ── Microsoft / MSAL configuration ──────────────────────────
 const MS_CLIENT_ID = 'e41d7680-86d8-49a0-8a68-17a5f166e10b';
@@ -1203,24 +1177,24 @@ function dataUrlToBlob(dataUrl){
   for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);
   return new Blob([arr],{type:mime});
 }
-// Upload a photo to Supabase Storage and add its public URL to the photo list.
-// No Microsoft sign-in needed — the bucket is public, so every user can see
-// the photo immediately (unlike the old OneDrive uploads, which were only
-// visible to the uploader).
+// Upload a photo to OneDrive and add a graph:// reference to the photo list
 async function handlePhotoUpload(input){
   const file=input.files&&input.files[0];
   input.value='';
   if(!file)return;
   const status=document.getElementById('so-photo-status');
+  if(!msToken){showToast('Sign in to Microsoft first (Settings)');return;}
   status.textContent='Uploading…';
   try{
     const dataUrl=await downscaleImage(file,1600,0.85);
     const blob=dataUrlToBlob(dataUrl);
-    const publicUrl=await sbUploadPhoto(editingPropId,blob);
+    const folderId=await ensurePhotoFolder();
+    const safeName=(editingPropId||'photo').replace(/[^a-z0-9_\-]/gi,'')+'_'+Date.now()+'.jpg';
+    const item=await graphPutBinary(`/drives/${cfg._driveId}/items/${folderId}:/${safeName}:/content`,blob,'image/jpeg');
     // Remove a single empty placeholder row before adding
     const rows=Array.from(document.querySelectorAll('#so-photo-list input'));
     if(rows.length===1&&!rows[0].value.trim())rows[0].parentElement.remove();
-    addPhotoRow(publicUrl);
+    addPhotoRow(`graph://${cfg._driveId}/${item.id}`);
     renderPhotoPreviews();
     status.textContent='✓ Uploaded — save changes to keep';
   }catch(e){
@@ -1270,56 +1244,6 @@ async function recoverPhotos(){
     if(attached)showToast(`Re-attached photos to ${attached} propert${attached===1?'y':'ies'} (${written} written to Excel)`);
     else showToast('No orphaned photos found');
   }catch(e){showToast('Recovery failed: '+e.message);console.error(e);}
-}
-// One-off migration: copy legacy OneDrive (graph://) photos to Supabase
-// Storage and replace the references with public URLs. Requires the person
-// who originally uploaded the photos to be signed in to Microsoft, since
-// only their token can read the OneDrive files. Safe to re-run — already-
-// migrated (https) refs are skipped, and failures leave the old ref intact.
-async function migratePhotosToSupabase(){
-  if(!msToken){showToast('Sign in to Microsoft first (Settings)');return;}
-  if(!confirm('Copy all OneDrive photos to Supabase Storage and update every property? This may take a few minutes.'))return;
-  let migrated=0,failed=0,propsUpdated=0,written=0;
-  try{
-    for(const p of allProperties){
-      const refs=(p.photos||'').split(',').map(s=>s.trim()).filter(Boolean);
-      if(!refs.some(r=>r.startsWith('graph://')))continue;
-      showToast(`Migrating photos for ${p.address||p.id}…`);
-      let changed=false;
-      const newRefs=[];
-      for(const ref of refs){
-        if(!ref.startsWith('graph://')){newRefs.push(ref);continue;}
-        try{
-          const m=ref.match(/^graph:\/\/([^\/]+)\/(.+)$/);
-          if(!m)throw new Error('Bad graph ref');
-          const blob=await graphRetry(()=>graphGetBlob(`/drives/${m[1]}/items/${m[2]}/content`));
-          // Re-encode via the same downscale path as uploads (max 1600px JPEG)
-          const dataUrl=await downscaleImage(blob,1600,0.85);
-          const publicUrl=await sbUploadPhoto(p.id,dataUrl?dataUrlToBlob(dataUrl):blob);
-          newRefs.push(publicUrl);
-          migrated++;changed=true;
-        }catch(e){
-          console.warn('Migrate failed for',p.id,ref,e.message);
-          newRefs.push(ref); // keep the old ref so nothing is lost
-          failed++;
-        }
-      }
-      if(!changed)continue;
-      // Snapshot BEFORE mutating so the Excel write-back only touches the Photos cell
-      editingSnapshot=snapshotProp(p);
-      p.photos=newRefs.join(', ');
-      const{error}=await sb.from('properties').upsert(appToDb(p),{onConflict:'id'});
-      if(error){console.warn('Migrate: supabase error for',p.id,error.message);continue;}
-      propsUpdated++;
-      if(await writePropertyToExcel(p).catch(()=>false))written++;
-    }
-    editingSnapshot=null;
-    applyFilters();
-    showToast(`Migration done: ${migrated} photo${migrated===1?'':'s'} moved across ${propsUpdated} propert${propsUpdated===1?'y':'ies'} (${written} written to Excel${failed?`, ${failed} failed — re-run to retry`:''})`);
-  }catch(e){
-    editingSnapshot=null;
-    showToast('Migration failed: '+e.message);console.error(e);
-  }
 }
 // Resolve a graph:// photo reference to a displayable thumbnail URL
 async function resolveGraphPhotoUrl(ref){
@@ -1915,29 +1839,6 @@ function renderTable(){
 function toggleRow(id,e){e.stopPropagation();selected.has(id)?selected.delete(id):selected.add(id);renderTable();updateCMABar();updateSelCount();}
 function toggleAll(cb){cb.checked?filtered.forEach(p=>selected.add(p.id)):filtered.forEach(p=>selected.delete(p.id));renderTable();updateCMABar();updateSelCount();}
 function selectAll(){filtered.forEach(p=>selected.add(p.id));renderTable();updateCMABar();updateSelCount();}
-// Marketing Proposal: remind the user to pick case-study properties, then
-// open the builder — passing any selected property IDs so they pre-fill the
-// case studies. Selecting is optional; Proceed works either way.
-function openMarketingProposal(){
-  const n=selected.size;
-  const ids=[...selected].join(',');
-  const url='cma-report.html'+(ids?('?comps='+encodeURIComponent(ids)):'');
-  const ov=document.createElement('div');
-  ov.style.cssText='position:fixed;inset:0;background:rgba(10,18,46,.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
-  ov.innerHTML=`<div style="background:#fff;border-radius:12px;max-width:440px;width:90%;box-shadow:0 20px 60px rgba(10,20,60,.35);overflow:hidden;font-family:inherit;">
-    <div style="background:var(--cb,#12265e);color:#fff;padding:14px 20px;font-weight:600;">Marketing Proposal</div>
-    <div style="padding:20px;">
-      <p style="margin:0 0 10px;">Remember to select your properties for the Case Study.</p>
-      <p style="margin:0;font-size:13px;color:#5a6478;">${n?`${n} propert${n===1?'y is':'ies are'} currently selected and will pre-fill the case studies.`:'No properties are selected yet — you can tick them in the table first, or add them inside the builder.'}</p>
-      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">
-        <button id="mpClose" style="padding:8px 16px;border:1px solid #dde3ef;background:#fff;border-radius:6px;cursor:pointer;font:inherit;">Close</button>
-        <button id="mpProceed" style="padding:8px 16px;border:none;background:var(--cb,#2557a5);color:#fff;border-radius:6px;cursor:pointer;font:inherit;">Proceed</button>
-      </div></div></div>`;
-  document.body.appendChild(ov);
-  ov.querySelector('#mpClose').onclick=()=>ov.remove();
-  ov.onclick=(e)=>{if(e.target===ov)ov.remove();};
-  ov.querySelector('#mpProceed').onclick=()=>{ov.remove();window.open(url,'_blank');};
-}
 function clearSel(){selected.clear();renderTable();updateCMABar();updateSelCount();}
 function updateSelCount(){const n=selected.size;document.getElementById('sel-count').textContent=n+' selected';document.getElementById('sel-count').style.display=n?'':'none';document.getElementById('s-selected').textContent=n;}
 
