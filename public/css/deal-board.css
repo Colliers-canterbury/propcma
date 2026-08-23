@@ -368,3 +368,19 @@ body.proj .stage>table,body.proj .notes>table{min-width:0}
 select.stagepick,select.statuspick,select.outcome{
   padding-right:17px;text-overflow:ellipsis}
 select.stagepick{font-size:.86em}
+
+/* leasing: probability column */
+td.prob [contenteditable]{font-family:var(--mono)}
+td.prob [contenteditable]:not(:empty):after{content:'%';color:var(--ink-3);font-size:.85em}
+
+/* sole agency expiry */
+.expbadge{display:inline-block;margin-left:5px;font-family:var(--mono);
+  font-size:.72em;padding:1px 5px;border-radius:3px;white-space:nowrap;vertical-align:middle}
+.expbadge.soon{background:var(--amber-soft);color:var(--amber);border:1px solid #f0dcb4}
+.expbadge.expired{background:#fdeeee;color:var(--red);border:1px solid #eec5c5}
+button.expbtn{font-size:10.5px;padding:2px 8px;border-radius:11px;
+  background:var(--amber-soft);color:var(--amber);border-color:#f0dcb4}
+button.expbtn:hover{border-color:var(--amber);color:var(--amber)}
+button.expbtn.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+body.proj .expbadge{font-size:.78em}
+@media print{button.expbtn{display:none}}
