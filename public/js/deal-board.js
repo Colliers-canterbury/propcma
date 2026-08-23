@@ -448,10 +448,14 @@ function expiryDays(dateStr){
 const EXPIRY_SECTIONS=['Sole Agencies'];
 /* Extra column per section: Sole Agencies tracks the landlord, the two
    agency-pipeline sections track the agency type. */
+/* Extra columns per section. All three agency registers track the
+   landlord; the two agency-pipeline sections also track the type. */
+const LANDLORD_COL={key:'ll', label:'Landlord',    width:160};
+const TYPE_COL    ={key:'at', label:'Agency type', width:110};
 const NOTE_EXTRA={
-  'Sole Agencies':    {key:'ll', field:'landlord',    label:'Landlord', width:150},
-  'Pending Agencies': {key:'at', field:'agency_type', label:'Agency type', width:110},
-  'New Agencies':     {key:'at', field:'agency_type', label:'Agency type', width:110}
+  'Sole Agencies':    [LANDLORD_COL],
+  'Pending Agencies': [TYPE_COL, LANDLORD_COL],
+  'New Agencies':     [TYPE_COL, LANDLORD_COL]
 };
 let expiryFilter=false;
 
@@ -460,7 +464,7 @@ function renderNoteSections(wrap){
   const stageCount=(S().stages||[]).length;
   secs.slice().sort((a,b)=>a.position-b.position).forEach(ns=>{
     const isExpirySec=EXPIRY_SECTIONS.indexOf(ns.name)>=0;
-    const extra=NOTE_EXTRA[ns.name]||null;
+    const extras=NOTE_EXTRA[ns.name]||[];
     let items=(S().notes||[]).filter(n=>n.section===ns.name)
       .sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
     if(isExpirySec){
@@ -489,7 +493,7 @@ function renderNoteSections(wrap){
         <span class="tot">${isExpirySec?'':money(items.reduce((a,n)=>a+(+n.f||0),0))}</span></header>
       <table><thead><tr>
         <th>Detail</th>
-        ${extra?`<th style="width:${extra.width}px">${extra.label}</th>`:''}
+        ${extras.map(x=>`<th style="width:${x.width}px">${x.label}</th>`).join('')}
         <th style="width:${isExpirySec?150:120}px">${isExpirySec?'Expiry':'Timing'}</th>
         <th style="width:88px" class="num">Fee</th><th style="width:92px">Status</th>
         <th style="width:70px">Broker</th><th style="width:38px">AML</th>
@@ -498,12 +502,12 @@ function renderNoteSections(wrap){
       <button class="addrow">+ Add to ${esc(ns.name.toLowerCase())}</button>`;
     const tb=sec.querySelector('tbody');
     if(!items.length){
-      tb.innerHTML='<tr><td colspan="'+(extra?8:7)+'" class="empty">'+
+      tb.innerHTML='<tr><td colspan="'+(7+extras.length)+'" class="empty">'+
         (expiryFilter&&isExpirySec ? 'Nothing expiring in the next 60 days.'
                                    : 'Nothing this week.')+'</td></tr>';
     }
     items.forEach(n=>{
-      try{ tb.appendChild(noteRow(n,ns.name,isExpirySec,extra)); }
+      try{ tb.appendChild(noteRow(n,ns.name,isExpirySec,extras)); }
       catch(err){ console.error('note row failed:', n, err); }
     });
     const eb=sec.querySelector('.expbtn');
@@ -527,12 +531,13 @@ function expiryBadge(td){
     : `<span class="expbadge soon">${days}d left</span>`;
 }
 
-function noteRow(n, section, isExpiry, extra){
+function noteRow(n, section, isExpiry, extras){
   const tr=document.createElement('tr');
   tr.className='row'; tr.dataset.nid=n.id;
   tr.innerHTML=`
     <td class="addr"><div contenteditable data-k="body" data-ph="Type here…">${esc(n.body)}</div></td>
-    ${extra?`<td><div contenteditable data-k="${extra.key}" data-ph="—">${esc(n[extra.key]||'')}</div></td>`:''}
+    ${(extras||[]).map(x=>
+      `<td><div contenteditable data-k="${x.key}" data-ph="—">${esc(n[x.key]||'')}</div></td>`).join('')}
     <td><input type="date" class="dateinput" value="${esc(n.td)}">${
       isExpiry && n.td ? expiryBadge(n.td)
         : (!n.td && n.t) ? `<span class="legacy">${esc(n.t)}</span>` : ''}</td>
@@ -1180,7 +1185,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-20c';
+const BOARD_VERSION='2026-08-20d';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
