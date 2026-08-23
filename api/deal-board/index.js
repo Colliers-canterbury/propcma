@@ -23,8 +23,8 @@ const ROLES_WRITE = ["office_admin", "accounts", "manager"];
 const ROLES_ADMIN = ["manager"];
 
 const EDITABLE = [
-  "address", "timing", "timing_date", "fee_nzd", "status_note",
-  "method_of_sale", "vendor_contact", "aml",
+  "address", "tenant", "timing", "timing_date", "fee_nzd", "probability",
+  "status_note", "method_of_sale", "vendor_contact", "aml",
 ];
 
 export default async function handler(req, res) {
@@ -76,7 +76,7 @@ async function getBoard(req, res) {
   const id = await deptId(req.query.dept);
 
   const today = new Date().toISOString().slice(0, 10);
-  const [stages, deals, reqs, mtg, noteSections, weightRows, outcomeRows, noteRows] =
+  const [stages, deals, reqs, mtg, noteSections, weightRows, deptOpts, outcomeRows, noteRows] =
     await Promise.all([
     supabase.from("db_stages")
       .select("id, name, position, is_terminal")
@@ -95,10 +95,12 @@ async function getBoard(req, res) {
       .select("name, position").eq("department_id", id).order("position"),
     supabase.from("db_pipeline_weights")
       .select("stage_name, pct").eq("department_id", id),
+    supabase.from("db_departments")
+      .select("show_tenant, show_probability").eq("id", id).single(),
     supabase.from("db_deals")
       .select("outcome").eq("department_id", id).not("outcome", "is", null),
     supabase.from("db_notes")
-      .select("id, section, body, sort_order, timing, timing_date, fee_nzd, status_note, broker_codes, aml")
+      .select("id, section, body, sort_order, timing, timing_date, fee_nzd, status_note, broker_codes, aml, landlord, agency_type")
       .eq("department_id", id).eq("is_done", false).order("sort_order"),
   ]);
 
@@ -121,6 +123,7 @@ async function getBoard(req, res) {
     noteSections: noteSections.data || [],
     notes: noteRows.data || [],
     weights: weightRows.data || [],
+    options: deptOpts.data || { show_tenant: false, show_probability: false },
     outcomes: (outcomeRows.data || []).reduce((a, r) => {
       a[r.outcome] = (a[r.outcome] || 0) + 1;
       return a;
@@ -151,8 +154,10 @@ async function addDeal(req, res) {
       stage_id: b.stageId,
       sort_order: (last?.sort_order ?? 0) + 1000,
       address,
+      tenant: b.tenant || null,
       timing: b.timing || null,
       timing_date: b.timing_date || null,
+      probability: b.probability ?? null,
       fee_nzd: Number(b.fee_nzd) || 0,
       status_note: b.status_note || null,
       created_by_oid: user.oid,
@@ -178,6 +183,11 @@ async function editDeal(req, res, id) {
     throw new HttpError(400, "An address is required");
   if ("fee_nzd" in patch) patch.fee_nzd = Number(patch.fee_nzd) || 0;
   if ("timing_date" in patch) patch.timing_date = patch.timing_date || null;
+  if ("probability" in patch) {
+    const p = patch.probability;
+    patch.probability = (p === "" || p === null || p === undefined)
+      ? null : Math.max(0, Math.min(100, Number(p) || 0));
+  }
 
   const { data, error } = await supabase.from("db_deals")
     .update(patch).eq("id", id).select().single();
@@ -346,7 +356,7 @@ async function summary(req, res) {
       .order("sort_order", { nullsFirst: false }),
     supabase.from("db_stages").select("id, department_id, name"),
     supabase.from("db_deals")
-      .select("department_id, stage_id, fee_nzd, outcome")
+      .select("department_id, stage_id, fee_nzd, outcome, probability")
       .eq("is_archived", false),
     supabase.from("db_pipeline_weights").select("department_id, stage_name, pct"),
     supabase.from("db_broker_rankings")
@@ -365,7 +375,11 @@ async function summary(req, res) {
     weightOf[`${w.department_id}|${w.stage_name}`] = Number(w.pct) || 0;
   }
 
-  const pctFor = (deptId, stage) => {
+  // A deal's own probability wins where it has one — leasing records
+  // it per deal. Otherwise the stage weighting applies.
+  const pctFor = (deal, deptId, stage) => {
+    if (deal.probability !== null && deal.probability !== undefined)
+      return Number(deal.probability) / 100;
     if (/^uncondition/i.test(stage)) return 1;
     const w = weightOf[`${deptId}|${stage}`];
     return w === undefined ? 0 : w / 100;
@@ -383,7 +397,7 @@ async function summary(req, res) {
       unconditional,
       unweighted: mine.reduce((a, d) => a + Number(d.fee_nzd || 0), 0),
       weighted: mine.reduce((a, d) =>
-        a + Number(d.fee_nzd || 0) * pctFor(u.id, stageName[d.stage_id] || ""), 0),
+        a + Number(d.fee_nzd || 0) * pctFor(d, u.id, stageName[d.stage_id] || ""), 0),
       won: mine.filter((d) => d.outcome === "won").length,
       lost: mine.filter((d) => d.outcome === "lost").length,
     };
@@ -492,12 +506,16 @@ async function notes(req, res, id) {
     const { data, error } = await supabase.from("db_notes").insert({
       department_id: dept, section: b.section,
       body: (b.body || "").trim(),
+      tenant: b.tenant || null,
       timing: b.timing || null,
       timing_date: b.timing_date || null,
+      probability: b.probability ?? null,
       fee_nzd: Number(b.fee_nzd) || 0,
       status_note: b.status_note || null,
       broker_codes: b.broker_codes || null,
       aml: b.aml || null,
+      landlord: b.landlord || null,
+      agency_type: b.agency_type || null,
       sort_order: (last?.sort_order ?? 0) + 1000,
       created_by_oid: user.oid,
     }).select().single();
@@ -510,7 +528,7 @@ async function notes(req, res, id) {
     const b = req.body || {};
     const patch = { updated_at: new Date().toISOString() };
     if ("body" in b) patch.body = String(b.body).trim();
-    for (const k of ["timing","status_note","broker_codes","aml"])
+    for (const k of ["timing","status_note","broker_codes","aml","landlord","agency_type"])
       if (k in b) patch[k] = b[k] || null;
     if ("timing_date" in b) patch.timing_date = b.timing_date || null;
     if ("fee_nzd" in b) patch.fee_nzd = Number(b.fee_nzd) || 0;
