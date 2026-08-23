@@ -90,10 +90,12 @@ function fromApi(dept, payload){
     deals: payload.deals.map(d=>({
       id:d.id, s:stageName[d.stage_id]||'', a:d.address||'', t:d.timing||'',
       f:Number(d.fee_nzd)||0, b:d.brokers||'', st:d.status_note||'', out:d.outcome||'',
-      td:d.timing_date||'',
+      td:d.timing_date||'', tn:d.tenant||'',
+      pr:(d.probability===null||d.probability===undefined)?'':Number(d.probability),
       aml:AML_OUT[d.aml]||''
     })),
     fines: (payload.fines||[]).map(f=>({b:f.broker_code, amt:Number(f.amount_nzd)||0})),
+    options: payload.options||{},
     weights: Object.fromEntries((payload.weights||[]).map(w=>[w.stage_name, Number(w.pct)||0])),
     outcomes: Object.assign({}, payload.outcomes||{}),
     noteSections: payload.noteSections||[],
@@ -120,6 +122,8 @@ function saveDealField(d, k){
     t:  () => ({timing: d.t}),
     f:  () => ({fee_nzd: d.f}),
     td: () => ({timing_date: d.td || null}),
+    tn: () => ({tenant: d.tn}),
+    pr: () => ({probability: d.pr===''?null:Number(d.pr)}),
     st: () => ({status_note: d.st}),
     aml:() => ({aml: AML_IN[(d.aml||'').toUpperCase()] || 'not_started'}),
     b:  () => ({brokers: d.b.split('/').map(x=>x.trim()).filter(Boolean)}),
@@ -142,8 +146,14 @@ function weightFor(stage){
   const w=(S().weights||{})[stage];
   return w===undefined ? 0 : w/100;
 }
+/* A deal's own probability wins where it has one — leasing records it
+   per deal rather than inheriting a stage-wide figure. */
+function dealWeight(d){
+  return (d.pr==='' || d.pr===null || d.pr===undefined)
+    ? weightFor(d.s) : Number(d.pr)/100;
+}
 function weightedPipeline(){
-  return visibleDeals().reduce((a,d)=>a+(+d.f||0)*weightFor(d.s),0);
+  return visibleDeals().reduce((a,d)=>a+(+d.f||0)*dealWeight(d),0);
 }
 /* Colour by what the status means for the deal, not by exact spelling —
    legacy values from the sheets ('Live', 'PBN') still land sensibly. */
@@ -184,8 +194,11 @@ function renderBoard(){
         <span class="tot">${money(stageTotal(st))}</span></header>
       ${collapsed[st]?'':`<table><thead><tr>
         <th style="width:16px"></th><th style="width:172px">Stage</th>
+        ${(S().options||{}).show_tenant?'<th style="width:26%">Tenant</th>':''}
         <th>Address</th><th style="width:120px">Timing</th>
-        <th style="width:92px" class="num">Fee</th><th style="width:96px">Status</th>
+        <th style="width:92px" class="num">Fee</th>
+        ${(S().options||{}).show_probability?'<th style="width:56px" class="num">Prob</th>':''}
+        <th style="width:96px">Status</th>
         <th style="width:76px">Broker</th><th style="width:40px">AML</th>
         <th style="width:92px"></th>
       </tr></thead><tbody></tbody></table>
@@ -206,7 +219,7 @@ function renderBoard(){
         catch(err){ console.error('row failed:', d, err); }
       });
       sec.querySelector('.addrow').onclick=()=>{
-        const d={id:'tmp'+Date.now(),s:st,a:'',t:'',td:/^uncondition/i.test(st)?TODAY():'',f:0,b:'',st:'',aml:'',isNew:true};
+        const d={id:'tmp'+Date.now(),s:st,a:'',tn:'',t:'',td:/^uncondition/i.test(st)?TODAY():'',f:0,pr:'',b:'',st:'',aml:'',isNew:true};
         S().deals.push(d);renderBoard();renderTally();
         const c=wrap.querySelector(`[data-id="${d.id}"] [contenteditable]`);if(c)c.focus();
       };
@@ -262,10 +275,14 @@ function dealRow(d){
     .map(x=>`<option value="${esc(x.name)}"${x.name===d.s?' selected':''}>${esc(x.name)}</option>`).join('');
   tr.innerHTML=`<td class="grip">⠿</td>
     <td class="stagesel"><select class="stagepick">${stageOpts}</select></td>
-    <td class="addr"><div contenteditable data-k="a" data-ph="Address">${esc(d.a)}</div></td>
+    ${(S().options||{}).show_tenant
+      ? `<td class="addr"><div contenteditable data-k="tn" data-ph="Tenant">${esc(d.tn)}</div></td>` : ''}
+    <td class="${(S().options||{}).show_tenant?'':'addr'}"><div contenteditable data-k="a" data-ph="Address">${esc(d.a)}</div></td>
     <td><input type="date" class="dateinput" value="${esc(d.td)}">${
       (!d.td && d.t) ? `<span class="legacy">${esc(d.t)}</span>` : ''}</td>
     <td class="num"><div contenteditable data-k="f" data-ph="0">${d.f?(+d.f).toLocaleString():''}</div></td>
+    ${(S().options||{}).show_probability
+      ? `<td class="num prob"><div contenteditable data-k="pr" data-ph="—">${d.pr===''?'':d.pr}</div></td>` : ''}
     <td>${statusSelect(d.st)}</td>
     <td class="brk"><div contenteditable data-k="b" data-ph="—">${esc(d.b)}</div></td>
     <td class="amlcell"><input type="checkbox" class="amlbox"
@@ -289,16 +306,19 @@ function dealRow(d){
       tr.classList.remove('editing');
       const k=el.dataset.k, v=el.textContent.trim();
       const was=d[k];
-      d[k]= k==='f' ? (parseFloat(v.replace(/[^0-9.]/g,''))||0) : v;
+      d[k]= k==='f' ? (parseFloat(v.replace(/[^0-9.]/g,''))||0)
+          : k==='pr' ? (v===''?'':Math.max(0,Math.min(100,parseFloat(v.replace(/[^0-9.]/g,''))||0)))
+          : v;
       if(String(was)!==String(d[k])){
         const done=()=>{
           tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500);
-          if(k==='f'){renderBoard();renderTally()}
+          if(k==='f'||k==='pr'){renderBoard();renderTally()}
         };
         if(d.isNew){
           if(!d.a) return;
           persist(()=>DealBoardApi.addDeal(which, S().stageIdByName[d.s], {
-            address:d.a, timing:d.t, timing_date:d.td||null, fee_nzd:d.f, status_note:d.st,
+            address:d.a, tenant:d.tn||null, timing:d.t, timing_date:d.td||null,
+            fee_nzd:d.f, probability:d.pr===''?null:Number(d.pr), status_note:d.st,
             brokers:d.b.split('/').map(x=>x.trim()).filter(Boolean)
           }), d.a).then(row=>{ d.id=row.id; delete d.isNew; done(); }).catch(()=>{});
         }else{
@@ -407,19 +427,58 @@ function dealRow(d){
   return tr;
 }
 
+/* Sole agency expiries lapse quietly. Classify each so the board can
+   surface them: expired, expiring within 60 days, or fine. */
+function expiryState(dateStr){
+  if(!dateStr) return '';
+  const d=new Date(dateStr+'T00:00:00');
+  if(isNaN(d)) return '';
+  const days=Math.floor((d - new Date(TODAY()+'T00:00:00'))/86400000);
+  if(days<0) return 'expired';
+  if(days<=60) return 'soon';
+  return 'ok';
+}
+function expiryDays(dateStr){
+  const d=new Date(dateStr+'T00:00:00');
+  return Math.floor((d - new Date(TODAY()+'T00:00:00'))/86400000);
+}
+/* Only sections whose Timing column is genuinely an expiry date. */
+const EXPIRY_SECTIONS=['Sole Agencies'];
+let expiryFilter=false;
+
 function renderNoteSections(wrap){
   const secs=S().noteSections||[];
   const stageCount=(S().stages||[]).length;
   secs.slice().sort((a,b)=>a.position-b.position).forEach(ns=>{
-    const items=(S().notes||[]).filter(n=>n.section===ns.name)
+    const isExpirySec=EXPIRY_SECTIONS.indexOf(ns.name)>=0;
+    let items=(S().notes||[]).filter(n=>n.section===ns.name)
       .sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+    if(isExpirySec){
+      // Soonest first — an expiry list is only useful in date order.
+      items=items.slice().sort((a,b)=>{
+        if(!a.td) return 1; if(!b.td) return -1;
+        return a.td<b.td?-1:a.td>b.td?1:0;
+      });
+      if(expiryFilter){
+        items=items.filter(n=>{
+          const st=expiryState(n.td);
+          return st==='expired'||st==='soon';
+        });
+      }
+    }
+    const flagged=isExpirySec
+      ? (S().notes||[]).filter(n=>n.section===ns.name &&
+          ['expired','soon'].indexOf(expiryState(n.td))>=0).length
+      : 0;
     const sec=document.createElement('section');
     sec.className='notes';
     sec.innerHTML=`<header><h2>${esc(ns.name)}</h2>
         <span class="pill">${items.length}</span>
-        <span class="tot">${money(items.reduce((a,n)=>a+(+n.f||0),0))}</span></header>
+        ${flagged?`<button class="expbtn${expiryFilter?' on':''}">${
+          expiryFilter?'Show all':`${flagged} expiring or expired`}</button>`:''}
+        <span class="tot">${isExpirySec?'':money(items.reduce((a,n)=>a+(+n.f||0),0))}</span></header>
       <table><thead><tr>
-        <th>Detail</th><th style="width:120px">Timing</th>
+        <th>Detail</th><th style="width:${isExpirySec?150:120}px">${isExpirySec?'Expiry':'Timing'}</th>
         <th style="width:88px" class="num">Fee</th><th style="width:92px">Status</th>
         <th style="width:70px">Broker</th><th style="width:38px">AML</th>
         <th style="width:26px"></th>
@@ -427,12 +486,16 @@ function renderNoteSections(wrap){
       <button class="addrow">+ Add to ${esc(ns.name.toLowerCase())}</button>`;
     const tb=sec.querySelector('tbody');
     if(!items.length){
-      tb.innerHTML='<tr><td colspan="7" class="empty">Nothing this week.</td></tr>';
+      tb.innerHTML='<tr><td colspan="7" class="empty">'+
+        (expiryFilter&&isExpirySec ? 'Nothing expiring in the next 60 days.'
+                                   : 'Nothing this week.')+'</td></tr>';
     }
     items.forEach(n=>{
-      try{ tb.appendChild(noteRow(n,ns.name)); }
+      try{ tb.appendChild(noteRow(n,ns.name,isExpirySec)); }
       catch(err){ console.error('note row failed:', n, err); }
     });
+    const eb=sec.querySelector('.expbtn');
+    if(eb) eb.onclick=()=>{ expiryFilter=!expiryFilter; renderBoard(); };
     sec.querySelector('.addrow').onclick=()=>{
       const n={id:'tmp'+Date.now(),section:ns.name,body:'',t:'',td:'',f:0,st:'',b:'',aml:'',isNew:true};
       S().notes.push(n);renderBoard();
@@ -444,13 +507,22 @@ function renderNoteSections(wrap){
   });
 }
 
-function noteRow(n, section){
+function expiryBadge(td){
+  const st=expiryState(td); if(st==='ok'||!st) return '';
+  const days=expiryDays(td);
+  return st==='expired'
+    ? `<span class="expbadge expired">expired ${Math.abs(days)}d ago</span>`
+    : `<span class="expbadge soon">${days}d left</span>`;
+}
+
+function noteRow(n, section, isExpiry){
   const tr=document.createElement('tr');
   tr.className='row'; tr.dataset.nid=n.id;
   tr.innerHTML=`
     <td class="addr"><div contenteditable data-k="body" data-ph="Type here…">${esc(n.body)}</div></td>
     <td><input type="date" class="dateinput" value="${esc(n.td)}">${
-      (!n.td && n.t) ? `<span class="legacy">${esc(n.t)}</span>` : ''}</td>
+      isExpiry && n.td ? expiryBadge(n.td)
+        : (!n.td && n.t) ? `<span class="legacy">${esc(n.t)}</span>` : ''}</td>
     <td class="num"><div contenteditable data-k="f" data-ph="0">${n.f?(+n.f).toLocaleString():''}</div></td>
     <td>${statusSelect(n.st)}</td>
     <td class="brk"><div contenteditable data-k="b" data-ph="—">${esc(n.b)}</div></td>
@@ -912,7 +984,7 @@ function saveMeetingSnapshot(){
     return `<section><h2>${esc(st.name)}<span>${rows.length} · ${money(stageTotal(st.name))}</span></h2>
       <table><thead><tr><th>Address</th><th>Timing</th><th class="n">Fee</th>
         <th>Status</th><th>Broker</th><th>AML</th></tr></thead><tbody>${
-      rows.map(r=>`<tr><td>${esc(r.a)}</td><td>${r.td?new Date(r.td+'T00:00:00').toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'}):(esc(r.t)||'—')}</td>
+      rows.map(r=>`<tr><td>${r.tn?esc(r.tn)+' — ':''}${esc(r.a)}</td><td>${r.td?new Date(r.td+'T00:00:00').toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'}):(esc(r.t)||'—')}</td>
         <td class="n">${r.f?money(r.f):'—'}</td><td>${esc(r.st)||'—'}</td>
         <td class="m">${esc(r.b)||'—'}</td><td class="m">${esc(r.aml)||'—'}</td></tr>`).join('')
     }</tbody></table></section>`;
@@ -1093,7 +1165,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-19h';
+const BOARD_VERSION='2026-08-20b';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
