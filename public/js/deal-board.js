@@ -15,7 +15,8 @@ const OUTCOMES={
   'Submissions':             [['won','Win','Campaigns / sole agency'],
                               ['lost','Lost','Lost']],
   'Campaigns / sole agency': [['withdrawn','Withdrawn','Withdrawn']],
-  'Unconditional':           [['sold','Sold','Sold']]
+  'Unconditional':           [['sold','Sold','Sold'],
+                              ['leased','Leased','Leased']]
 };
 const TODAY=()=>new Date().toISOString().slice(0,10);
 
@@ -102,7 +103,8 @@ function fromApi(dept, payload){
     notes: (payload.notes||[]).map(n=>({
       id:n.id, section:n.section, body:n.body||'', sort_order:n.sort_order,
       t:n.timing||'', td:n.timing_date||'', f:Number(n.fee_nzd)||0,
-      st:n.status_note||'', b:n.broker_codes||'', aml:n.aml||''
+      st:n.status_note||'', b:n.broker_codes||'', aml:n.aml||'',
+      ll:n.landlord||'', at:n.agency_type||''
     })),
     register: payload.requirements.map(r=>({
       id:r.id, n:r.party_name, r:r.requirement, ag:r.broker_code||'',
@@ -444,6 +446,13 @@ function expiryDays(dateStr){
 }
 /* Only sections whose Timing column is genuinely an expiry date. */
 const EXPIRY_SECTIONS=['Sole Agencies'];
+/* Extra column per section: Sole Agencies tracks the landlord, the two
+   agency-pipeline sections track the agency type. */
+const NOTE_EXTRA={
+  'Sole Agencies':    {key:'ll', field:'landlord',    label:'Landlord', width:150},
+  'Pending Agencies': {key:'at', field:'agency_type', label:'Agency type', width:110},
+  'New Agencies':     {key:'at', field:'agency_type', label:'Agency type', width:110}
+};
 let expiryFilter=false;
 
 function renderNoteSections(wrap){
@@ -451,6 +460,7 @@ function renderNoteSections(wrap){
   const stageCount=(S().stages||[]).length;
   secs.slice().sort((a,b)=>a.position-b.position).forEach(ns=>{
     const isExpirySec=EXPIRY_SECTIONS.indexOf(ns.name)>=0;
+    const extra=NOTE_EXTRA[ns.name]||null;
     let items=(S().notes||[]).filter(n=>n.section===ns.name)
       .sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
     if(isExpirySec){
@@ -478,7 +488,9 @@ function renderNoteSections(wrap){
           expiryFilter?'Show all':`${flagged} expiring or expired`}</button>`:''}
         <span class="tot">${isExpirySec?'':money(items.reduce((a,n)=>a+(+n.f||0),0))}</span></header>
       <table><thead><tr>
-        <th>Detail</th><th style="width:${isExpirySec?150:120}px">${isExpirySec?'Expiry':'Timing'}</th>
+        <th>Detail</th>
+        ${extra?`<th style="width:${extra.width}px">${extra.label}</th>`:''}
+        <th style="width:${isExpirySec?150:120}px">${isExpirySec?'Expiry':'Timing'}</th>
         <th style="width:88px" class="num">Fee</th><th style="width:92px">Status</th>
         <th style="width:70px">Broker</th><th style="width:38px">AML</th>
         <th style="width:26px"></th>
@@ -486,18 +498,18 @@ function renderNoteSections(wrap){
       <button class="addrow">+ Add to ${esc(ns.name.toLowerCase())}</button>`;
     const tb=sec.querySelector('tbody');
     if(!items.length){
-      tb.innerHTML='<tr><td colspan="7" class="empty">'+
+      tb.innerHTML='<tr><td colspan="'+(extra?8:7)+'" class="empty">'+
         (expiryFilter&&isExpirySec ? 'Nothing expiring in the next 60 days.'
                                    : 'Nothing this week.')+'</td></tr>';
     }
     items.forEach(n=>{
-      try{ tb.appendChild(noteRow(n,ns.name,isExpirySec)); }
+      try{ tb.appendChild(noteRow(n,ns.name,isExpirySec,extra)); }
       catch(err){ console.error('note row failed:', n, err); }
     });
     const eb=sec.querySelector('.expbtn');
     if(eb) eb.onclick=()=>{ expiryFilter=!expiryFilter; renderBoard(); };
     sec.querySelector('.addrow').onclick=()=>{
-      const n={id:'tmp'+Date.now(),section:ns.name,body:'',t:'',td:'',f:0,st:'',b:'',aml:'',isNew:true};
+      const n={id:'tmp'+Date.now(),section:ns.name,body:'',t:'',td:'',f:0,st:'',b:'',aml:'',ll:'',at:'',isNew:true};
       S().notes.push(n);renderBoard();
       const el=wrap.querySelector(`[data-nid="${n.id}"] [contenteditable]`);if(el)el.focus();
     };
@@ -515,11 +527,12 @@ function expiryBadge(td){
     : `<span class="expbadge soon">${days}d left</span>`;
 }
 
-function noteRow(n, section, isExpiry){
+function noteRow(n, section, isExpiry, extra){
   const tr=document.createElement('tr');
   tr.className='row'; tr.dataset.nid=n.id;
   tr.innerHTML=`
     <td class="addr"><div contenteditable data-k="body" data-ph="Type here…">${esc(n.body)}</div></td>
+    ${extra?`<td><div contenteditable data-k="${extra.key}" data-ph="—">${esc(n[extra.key]||'')}</div></td>`:''}
     <td><input type="date" class="dateinput" value="${esc(n.td)}">${
       isExpiry && n.td ? expiryBadge(n.td)
         : (!n.td && n.t) ? `<span class="legacy">${esc(n.t)}</span>` : ''}</td>
@@ -530,7 +543,8 @@ function noteRow(n, section, isExpiry){
     <td><button class="x" title="Actioned — clear it">×</button></td>`;
 
   const flash=()=>{tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500)};
-  const fieldMap={body:'body', f:'fee_nzd', b:'broker_codes'};
+  const fieldMap={body:'body', f:'fee_nzd', b:'broker_codes',
+                  ll:'landlord', at:'agency_type'};
 
   /* A new row is only created server-side once it has some text. */
   function saveNote(patch){
@@ -540,7 +554,8 @@ function noteRow(n, section, isExpiry){
         .then(row=>{
           n.id=row.id; delete n.isNew;
           const rest={timing_date:n.td||null, fee_nzd:n.f,
-                      status_note:n.st||null, broker_codes:n.b||null, aml:n.aml||null};
+                      status_note:n.st||null, broker_codes:n.b||null, aml:n.aml||null,
+                      landlord:n.ll||null, agency_type:n.at||null};
           return DealBoardApi.editNote(n.id, rest).catch(()=>{});
         }).then(flash);
     }
@@ -1165,7 +1180,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-20b';
+const BOARD_VERSION='2026-08-20c';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
