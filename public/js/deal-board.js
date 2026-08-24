@@ -19,6 +19,14 @@ const OUTCOMES={
                               ['leased','Leased','Leased']]
 };
 const TODAY=()=>new Date().toISOString().slice(0,10);
+/* Form controls do not print their values — a date input shows 'dd.'
+   and a select prints blank. Each control therefore carries a hidden
+   text twin that only appears on paper. */
+const printDate=v=>v
+  ? new Date(v+'T00:00:00').toLocaleDateString('en-NZ',
+      {day:'2-digit',month:'short',year:'numeric'})
+  : '';
+const pt=txt=>`<span class="printonly">${esc(txt||'')}</span>`;
 
 const STATUSES=['Pending','Submitted','Committed','Deadline','Auction','Priced','Off-Market'];
 const HEAT=['Motivated','Luke warm','Slow'], KEY='dealboard:v3';
@@ -202,8 +210,9 @@ function renderBoard(){
         <th style="width:92px" class="num">Fee</th>
         ${(S().options||{}).show_probability?'<th style="width:56px" class="num">Prob</th>':''}
         <th style="width:96px">Status</th>
-        <th style="width:76px">Broker</th><th style="width:40px">AML</th>
-        <th style="width:92px"></th>
+        <th style="width:76px">Broker</th>
+        <th style="width:40px" class="noprint">AML</th>
+        <th style="width:92px" class="noprint"></th>
       </tr></thead><tbody></tbody></table>
       <button class="addrow">+ Add to ${esc(st.toLowerCase())}</button>`}`;
     /* clicking a stage header marks where the meeting is up to */
@@ -277,20 +286,21 @@ function dealRow(d){
   const stageOpts=(S().stages||[]).slice().sort((a,b)=>a.position-b.position)
     .map(x=>`<option value="${esc(x.name)}"${x.name===d.s?' selected':''}>${esc(x.name)}</option>`).join('');
   tr.innerHTML=`<td class="grip">⠿</td>
-    <td class="stagesel"><select class="stagepick">${stageOpts}</select></td>
+    <td class="stagesel"><select class="stagepick">${stageOpts}</select>${pt(d.s)}</td>
     ${(S().options||{}).show_tenant
       ? `<td class="addr"><div contenteditable data-k="tn" data-ph="Tenant">${esc(d.tn)}</div></td>` : ''}
     <td class="${(S().options||{}).show_tenant?'':'addr'}"><div contenteditable data-k="a" data-ph="Address">${esc(d.a)}</div></td>
-    <td><input type="date" class="dateinput" value="${esc(d.td)}">${
-      (!d.td && d.t) ? `<span class="legacy">${esc(d.t)}</span>` : ''}</td>
+    <td class="timingcell"><input type="date" class="dateinput" value="${esc(d.td)}">${
+      (!d.td && d.t) ? `<span class="legacy">${esc(d.t)}</span>` : ''}${
+      pt(d.td?printDate(d.td):d.t)}</td>
     <td class="num"><div contenteditable data-k="f" data-ph="0">${d.f?(+d.f).toLocaleString():''}</div></td>
     ${(S().options||{}).show_probability
       ? `<td class="num prob"><div contenteditable data-k="pr" data-ph="—">${d.pr===''?'':d.pr}</div></td>` : ''}
-    <td>${statusSelect(d.st)}</td>
+    <td class="statuscell">${statusSelect(d.st)}${pt(d.st)}</td>
     <td class="brk"><div contenteditable data-k="b" data-ph="—">${esc(d.b)}</div></td>
-    <td class="amlcell"><input type="checkbox" class="amlbox"
+    <td class="amlcell noprint"><input type="checkbox" class="amlbox"
       ${d.aml==='Y'?'checked':''} title="AML complete"></td>
-    <td class="actcell">${outcomeControl(d)}</td>`;
+    <td class="actcell noprint">${outcomeControl(d)}</td>`;
 
   const sel=tr.querySelector('.statuspick');
   if(sel){
@@ -497,8 +507,9 @@ function renderNoteSections(wrap){
         ${extras.map(x=>`<th style="width:${x.width}px">${x.label}</th>`).join('')}
         <th style="width:${isExpirySec?150:120}px">${isExpirySec?'Expiry':'Timing'}</th>
         <th style="width:88px" class="num">Fee</th><th style="width:92px">Status</th>
-        <th style="width:70px">Broker</th><th style="width:38px">AML</th>
-        <th style="width:26px"></th>
+        <th style="width:70px">Broker</th>
+        <th style="width:38px" class="noprint">AML</th>
+        <th style="width:26px" class="noprint"></th>
       </tr></thead><tbody></tbody></table>
       <button class="addrow">+ Add to ${esc(ns.name.toLowerCase())}</button>`;
     const tb=sec.querySelector('tbody');
@@ -539,14 +550,15 @@ function noteRow(n, section, isExpiry, extras){
     <td class="addr"><div contenteditable data-k="body" data-ph="Type here…">${esc(n.body)}</div></td>
     ${(extras||[]).map(x=>
       `<td><div contenteditable data-k="${x.key}" data-ph="—">${esc(n[x.key]||'')}</div></td>`).join('')}
-    <td><input type="date" class="dateinput" value="${esc(n.td)}">${
+    <td class="timingcell"><input type="date" class="dateinput" value="${esc(n.td)}">${
       isExpiry && n.td ? expiryBadge(n.td)
-        : (!n.td && n.t) ? `<span class="legacy">${esc(n.t)}</span>` : ''}</td>
+        : (!n.td && n.t) ? `<span class="legacy">${esc(n.t)}</span>` : ''}${
+      pt(n.td?printDate(n.td):n.t)}</td>
     <td class="num"><div contenteditable data-k="f" data-ph="0">${n.f?(+n.f).toLocaleString():''}</div></td>
-    <td>${statusSelect(n.st)}</td>
+    <td class="statuscell">${statusSelect(n.st)}${pt(n.st)}</td>
     <td class="brk"><div contenteditable data-k="b" data-ph="—">${esc(n.b)}</div></td>
-    <td class="amlcell"><input type="checkbox" class="amlbox" ${n.aml==='Y'?'checked':''}></td>
-    <td><button class="x" title="Actioned — clear it">×</button></td>`;
+    <td class="amlcell noprint"><input type="checkbox" class="amlbox" ${n.aml==='Y'?'checked':''}></td>
+    <td class="noprint"><button class="x" title="Actioned — clear it">×</button></td>`;
 
   const flash=()=>{tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500)};
   const fieldMap={body:'body', f:'fee_nzd', b:'broker_codes',
@@ -1214,7 +1226,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-20f';
+const BOARD_VERSION='2026-08-21a';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
