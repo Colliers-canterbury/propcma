@@ -372,12 +372,13 @@
                 <button class="dlBtn" data-slot="${esc(a.slot)}">Download</button>
                 <button class="rmBtn" data-extra-remove="${esc(a.slot)}">Remove</button>
               </span></li>`).join("")}</ul>` : `<p class="dim" style="margin:4px 0 10px">None added yet.</p>`}
-          ${!isDraft ? `<div class="extraUpload">
+          ${!isDraft ? `<div class="extraUpload" id="extraDropZone">
               <input id="extraDesc" placeholder="Description for the tax auditors (required)" />
               <label class="upBtn">Choose file<input type="file" id="extraFile" hidden /></label>
               <span id="extraFileName" class="dim"></span>
               <button id="extraUploadBtn" class="miniBtn" disabled>Add attachment</button>
               <span id="extraUploadStatus" class="miniStatus"></span>
+              <span class="dropHint">or drag &amp; drop a file anywhere in this box</span>
             </div>` : ""}
         </section>
 
@@ -478,15 +479,25 @@
     let pendingFile = null;
     const descEl = $("extraDesc"), fileBtn = $("extraFile"),
           fileNameEl = $("extraFileName"), uploadBtn = $("extraUploadBtn"),
-          statusEl = $("extraUploadStatus");
+          statusEl = $("extraUploadStatus"), dropZone = $("extraDropZone");
     const updateUploadReady = () => {
       if (uploadBtn) uploadBtn.disabled = !(pendingFile && descEl && descEl.value.trim());
     };
-    if (fileBtn) fileBtn.onchange = () => {
-      pendingFile = fileBtn.files[0] || null;
+    const setPendingFile = (file) => {
+      pendingFile = file || null;
       if (fileNameEl) fileNameEl.textContent = pendingFile ? pendingFile.name : "";
       updateUploadReady();
     };
+    if (fileBtn) fileBtn.onchange = () => setPendingFile(fileBtn.files[0]);
+    if (dropZone) {
+      dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add("dragover"); };
+      dropZone.ondragleave = () => dropZone.classList.remove("dragover");
+      dropZone.ondrop = (e) => {
+        e.preventDefault();
+        dropZone.classList.remove("dragover");
+        setPendingFile(e.dataTransfer.files[0]);
+      };
+    }
     if (descEl) descEl.oninput = updateUploadReady;
     if (uploadBtn) uploadBtn.onclick = async () => {
       const description = descEl.value.trim();

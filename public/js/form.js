@@ -231,7 +231,7 @@
     }
     return `<div class="upSlot" data-slot="${slotKey}">
       <label class="upBtn">Attach file<input type="file" class="upInput" data-slot="${slotKey}" hidden /></label>
-      <span class="upHint">${label}</span>
+      <span class="upHint">${label ? label + " — " : ""}or drag &amp; drop a file here</span>
       <span class="upProgress hidden" data-slot="${slotKey}">Uploading…</span></div>`;
   }
 
@@ -395,12 +395,13 @@
             <div class="checkRow">${chk("checklist.salePriceConfirmation","Confirmation of sale price attached (e.g. first page of the S&amp;P agreement) (optional)")}${uploadSlot("salePriceConfirmation","")}</div>
             <h3 class="subHead" style="margin-top:14px">Any other document</h3>
             ${extraAttachmentsList()}
-            ${state.dealStatus === "draft" ? `<div class="extraUpload">
+            ${state.dealStatus === "draft" ? `<div class="extraUpload" id="extraDropZone">
               <input id="extraDesc" placeholder="Description for the file (required)" />
               <label class="upBtn">Choose file<input type="file" id="extraFile" hidden /></label>
               <span id="extraFileName" class="dim"></span>
               <button id="extraUploadBtn" class="miniBtn" type="button" disabled>Add document</button>
               <span id="extraUploadStatus" class="miniStatus"></span>
+              <span class="dropHint">or drag &amp; drop a file anywhere in this box</span>
             </div>` : `<p class="note">Other documents can only be added while this deal sheet is a draft.</p>`}`)}
 
           ${section("13","Sign-off","",`<div class="grid">
@@ -551,6 +552,21 @@
         await uploadFile(slot, file);
       };
     });
+    // Drag-and-drop onto an empty checklist slot — only slots still
+    // showing "Attach file" have anywhere to receive a drop; an
+    // already-filled slot (.done) has no dropzone, same as it has no
+    // file input, so nothing to wire there.
+    $("app").querySelectorAll(".upSlot:not(.done)").forEach((zone) => {
+      const slot = zone.dataset.slot;
+      zone.ondragover = (e) => { e.preventDefault(); zone.classList.add("dragover"); };
+      zone.ondragleave = () => zone.classList.remove("dragover");
+      zone.ondrop = (e) => {
+        e.preventDefault();
+        zone.classList.remove("dragover");
+        const file = e.dataTransfer.files && e.dataTransfer.files[0];
+        if (file) uploadFile(slot, file);
+      };
+    });
     $("app").querySelectorAll(".upRemove").forEach((btn) => {
       btn.onclick = async () => {
         const slot = btn.dataset.slot;
@@ -565,15 +581,25 @@
     let pendingExtraFile = null;
     const descEl = $("extraDesc"), fileBtn = $("extraFile"),
           fileNameEl = $("extraFileName"), uploadBtn = $("extraUploadBtn"),
-          statusEl = $("extraUploadStatus");
+          statusEl = $("extraUploadStatus"), dropZone = $("extraDropZone");
     const updateExtraReady = () => {
       if (uploadBtn) uploadBtn.disabled = !(pendingExtraFile && descEl && descEl.value.trim());
     };
-    if (fileBtn) fileBtn.onchange = () => {
-      pendingExtraFile = fileBtn.files[0] || null;
+    const setPendingFile = (file) => {
+      pendingExtraFile = file || null;
       if (fileNameEl) fileNameEl.textContent = pendingExtraFile ? pendingExtraFile.name : "";
       updateExtraReady();
     };
+    if (fileBtn) fileBtn.onchange = () => setPendingFile(fileBtn.files[0]);
+    if (dropZone) {
+      dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add("dragover"); };
+      dropZone.ondragleave = () => dropZone.classList.remove("dragover");
+      dropZone.ondrop = (e) => {
+        e.preventDefault();
+        dropZone.classList.remove("dragover");
+        setPendingFile(e.dataTransfer.files[0]);
+      };
+    }
     if (descEl) descEl.oninput = updateExtraReady;
     if (uploadBtn) uploadBtn.onclick = async () => {
       const description = descEl.value.trim();
