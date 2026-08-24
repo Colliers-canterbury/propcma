@@ -373,8 +373,8 @@
               ${txt("lease.termYears","Lease term (years)",{req:true,ph:"e.g. 6"})}
               ${txt("lease.rorTimes","Rights of renewal (number)",{ph:"e.g. 2"})}
               ${txt("lease.rorYears","ROR term each (years)",{ph:"e.g. 3"})}
-              ${txt("lease.commencementDate","Commencement date",{type:"date",req:true})}
-              ${txt("lease.expiryDate","Expiry date",{type:"date"})}
+              ${txt("lease.commencementDate","Commencement date",{req:true,ph:"e.g. 1 August 2026"})}
+              ${txt("lease.expiryDate","Expiry date",{ph:"e.g. 31 July 2032"})}
               ${txt("lease.rentReviewPeriod","Rent review period",{ph:"e.g. 2 yearly"})}
               ${sel("lease.dealType","Deal type",DEAL_TYPES)}
               ${sel("lease.leaseBasis","Lease basis",["Net","Gross","Vacant"])}
