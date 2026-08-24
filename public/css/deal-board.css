@@ -129,8 +129,9 @@ select.mini:hover{border-color:var(--line);background:#fff}
   .tally .v{font-size:11pt}
   main{padding:8px 0}
   .grid2{display:block}
-  /* two columns of stages — an A3 sheet, not a long scroll */
-  #stages{column-count:2;column-gap:11mm}
+  /* One column. Nine columns of table cannot survive being halved —
+     the address ends up one word per line. */
+  #stages{column-count:1}
   .stage{break-inside:avoid;border-color:#999;margin-bottom:6px}
   .stage>header{background:#eee!important}
   td,th{padding:2px 5px}
@@ -397,3 +398,45 @@ button.src{font-family:var(--mono);font-size:10px;color:var(--navy);
 button.src:hover:not(:disabled){border-color:var(--navy);background:var(--navy-soft)}
 button.src:disabled{opacity:.55;cursor:default}
 @media print{button.src{display:none}}
+
+
+/* ===================== print =====================
+   The screen shows form controls; paper needs their values. Each
+   control has a hidden text twin (.printonly) that swaps in here. */
+.printonly{display:none}
+
+@media print{
+  @page{size:A3 landscape;margin:8mm}
+
+  .noprint,.filterbar,.tabs,.addrow,.expbtn,button.src,
+  .fine-add,.ytd button.settle,#unitPick,.top button{display:none!important}
+
+  /* controls out, their text twins in */
+  .stagesel select,.statuscell select,.dateinput,
+  td.stagesel .legacy{display:none!important}
+  .printonly{display:inline;font-size:8.5pt;color:#000}
+  td.timingcell .printonly{white-space:nowrap}
+
+  /* Stage and Address carry equal weight; everything else is sized to
+     its content so the two name columns get the remaining space. */
+  .stage table,.notes table{table-layout:fixed;width:100%}
+  .stage th:nth-child(1),.stage td:nth-child(1){width:0;padding:0;overflow:hidden}
+  .stage th:nth-child(2),.stage td:nth-child(2){width:19%}   /* Stage   */
+  .stage th:nth-child(3),.stage td:nth-child(3){width:19%}   /* Tenant/Address */
+  .stage th:nth-child(4),.stage td:nth-child(4){width:19%}   /* Address */
+  .stage th:nth-child(5),.stage td:nth-child(5){width:82px}  /* Timing  */
+  .stage th:nth-child(6),.stage td:nth-child(6){width:74px}  /* Fee     */
+  .stage th:nth-child(7),.stage td:nth-child(7){width:44px}  /* Prob    */
+  .stage th:nth-child(8),.stage td:nth-child(8){width:76px}  /* Status  */
+  .stage th:nth-child(9),.stage td:nth-child(9){width:62px}  /* Broker  */
+
+  td,th{padding:2px 5px;font-size:8.5pt;vertical-align:top}
+  td.addr,td.addr [contenteditable]{white-space:normal;overflow-wrap:break-word}
+  .grip{display:none}
+  .stage,.notes{overflow:visible;break-inside:auto}
+  .stage>table,.notes>table{min-width:0}
+  tr{break-inside:avoid}
+  .stage>header,.notes>header{background:#eee!important;-webkit-print-color-adjust:exact}
+  .meetingbar{display:grid!important;grid-template-columns:1fr 1fr 1fr;gap:6mm}
+  .expbadge{border:1px solid #999;background:none!important;color:#000!important}
+}
