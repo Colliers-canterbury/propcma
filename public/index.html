@@ -297,7 +297,7 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
           <span style="font-size:10px;color:var(--ink3);">Accepts 2023, 01/2023, 15/03/2023</span>
         </div>
       </div>
-      <button class="run-btn" onclick="applyFilters()"><i class="ti ti-refresh" aria-hidden="true"></i> Update results</button>
+      <button class="run-btn" onclick="clearFilters()"><i class="ti ti-x" aria-hidden="true"></i> Clear all filters</button>
     </div>
 
     <!-- Properties view -->
@@ -1728,6 +1728,20 @@ document.getElementById('type-chips').addEventListener('click',e=>{if(!e.target.
 document.getElementById('ls-chips').addEventListener('click',e=>{if(!e.target.classList.contains('chip'))return;document.querySelectorAll('#ls-chips .chip').forEach(c=>c.classList.remove('on'));e.target.classList.add('on');applyFilters();});
 
 // ── Filters ───────────────────────────────────────────────────
+function clearFilters(){
+  // Reset all text/number inputs
+  ['f-suburb','f-broker','f-sqm-min','f-sqm-max','f-price-min','f-price-max',
+   'f-psm-min','f-psm-max','f-yield-min','f-yield-max','f-date-from','f-date-to'
+  ].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  // Reset chip groups to "All" (first chip)
+  ['type-chips','ls-chips'].forEach(gid=>{
+    const grp=document.getElementById(gid);if(!grp)return;
+    grp.querySelectorAll('.chip').forEach(c=>c.classList.remove('on'));
+    const first=grp.querySelector('.chip');if(first)first.classList.add('on');
+  });
+  applyFilters();
+  showToast('Filters cleared');
+}
 function applyFilters(){
   const tv=document.querySelector('#type-chips .chip.on')?.dataset.val||'';
   const lv=document.querySelector('#ls-chips .chip.on')?.dataset.val||'';
