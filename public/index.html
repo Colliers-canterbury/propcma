@@ -1376,6 +1376,9 @@ async function syncFromExcel(){
       });
       if(p.sqm&&p.salePrice&&!p.pricePerSqm)p.pricePerSqm=p.salePrice/p.sqm;
       if(p.sqm&&p.pricePerSqm&&!p.salePrice)p.salePrice=p.sqm*p.pricePerSqm;
+      // Auto-calc yield ↔ rent from sale price on import
+      if(p.salePrice&&p.annualRent&&!p.initialYield)p.initialYield=Math.round((p.annualRent/p.salePrice)*10000)/100;
+      if(p.salePrice&&p.initialYield&&!p.annualRent)p.annualRent=Math.round(p.salePrice*(p.initialYield/100)*100)/100;
       p.saleDateTs=parseDate(p.saleDate);
       return p;
     }).filter(p=>p.address||p.saleDate);
@@ -2218,6 +2221,28 @@ function openEdit(propId,event){
   document.getElementById('so-sheets-status').style.display='none';
   document.getElementById('so-save-status').textContent='';
 
+  // Live auto-calc: yield ↔ annual rent based on sale price.
+  // Get sale price from whichever source has it — the read-only display or the editable input.
+  const _getSalePrice=()=>{
+    const inp=document.getElementById('so-price');
+    if(inp.style.display!=='none'&&inp.value!=='')return parseFloat(inp.value)||0;
+    return p.salePrice||0;
+  };
+  const yieldInp=document.getElementById('so-initial-yield');
+  const rentInp=document.getElementById('so-annual-rent');
+  // Track which field the user is actively editing so we don't overwrite their input.
+  let _lastEdited='';
+  yieldInp.addEventListener('input',()=>{
+    _lastEdited='yield';
+    const sp=_getSalePrice(),y=parseFloat(yieldInp.value);
+    if(sp&&!isNaN(y)&&y>0)rentInp.value=Math.round(sp*(y/100)*100)/100;
+  });
+  rentInp.addEventListener('input',()=>{
+    _lastEdited='rent';
+    const sp=_getSalePrice(),r=parseFloat(rentInp.value);
+    if(sp&&!isNaN(r)&&r>0)yieldInp.value=Math.round((r/sp)*10000)/100;
+  });
+
   // Open panel
   document.getElementById('so-backdrop').classList.add('open');
   document.getElementById('so-panel').classList.add('open');
@@ -2371,6 +2396,11 @@ async function saveEdit(){
   if(p.sqm&&p.salePrice&&!manualPsm)p.pricePerSqm=p.salePrice/p.sqm;
   // Derive sale price from a manually entered $/m² when possible
   if(manualPsm&&p.sqm&&!p.salePrice)p.salePrice=p.sqm*p.pricePerSqm;
+  // Auto-calc Initial Yield ↔ Annual Rent from Sale Price
+  if(p.salePrice&&p.annualRent!=null&&p.annualRent>0&&p.initialYield==null)
+    p.initialYield=Math.round((p.annualRent/p.salePrice)*10000)/100;
+  if(p.salePrice&&p.initialYield!=null&&p.initialYield>0&&p.annualRent==null)
+    p.annualRent=Math.round(p.salePrice*(p.initialYield/100)*100)/100;
 
   // Save to Supabase
   const{error}=await sb.from('properties').upsert(appToDb(p),{onConflict:'id'});
