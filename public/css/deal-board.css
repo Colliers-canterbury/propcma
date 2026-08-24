@@ -389,3 +389,11 @@ body.proj .expbadge{font-size:.78em}
    both are the name of the thing, and squeezing either makes the row
    harder to scan. */
 td.addr{width:auto}
+
+/* refresh button in the rankings header */
+button.src{font-family:var(--mono);font-size:10px;color:var(--navy);
+  border:1px solid var(--line);border-radius:var(--r);padding:2px 8px;
+  background:var(--paper);margin-left:8px}
+button.src:hover:not(:disabled){border-color:var(--navy);background:var(--navy-soft)}
+button.src:disabled{opacity:.55;cursor:default}
+@media print{button.src{display:none}}
