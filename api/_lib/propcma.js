@@ -145,7 +145,13 @@ export function toLeasePropertyRow(deal, newId, brokerNames = {}) {
   const divisionToCategory = (div) =>
     div === "Investment Sales" ? "Investment" : (div || null);
 
-  const dateIso = lease.commencementDate || lease.dateOfAgreement || null;
+  // commencementDate is a free-text field now (office admins add notes
+  // beyond just a date, e.g. "1 August 2026, subject to fit-out") — only
+  // use it here if it actually parses as a date, so PropCMA's date
+  // columns never end up holding a note instead of a date. Falls back
+  // to the date of agreement, which stays a real date picker.
+  const commencementParses = lease.commencementDate && !isNaN(Date.parse(lease.commencementDate));
+  const dateIso = commencementParses ? lease.commencementDate : (lease.dateOfAgreement || null);
   const dateTs = dateIso ? Date.parse(dateIso) : null;
 
   return {
