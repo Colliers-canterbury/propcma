@@ -145,7 +145,8 @@ function saveDealField(d, k){
 function saveMeetingField(patch){
   return persist(()=>DealBoardApi.saveMeeting(which, S().date, patch), 'meeting notes');
 }
-const stageTotal=st=>visibleDeals().filter(d=>d.s===st).reduce((a,d)=>a+(+d.f||0),0);
+const stageTotal=st=>visibleDeals().filter(d=>d.s===st)
+  .reduce((a,d)=>a+(brokerFilter?shareOf(d):(+d.f||0)),0);
 
 /* Weighted pipeline: Unconditional counts in full, other stages at the
    percentage set under Pipeline Settings. A stage with no weighting
@@ -176,6 +177,8 @@ const tagClass=v=>{
 };
 
 function renderTally(){
+  // On the broker tab the headline strip belongs to that broker.
+  if(brokerFilter){ renderBrokerTally(); return; }
   const st=M().stages,s=S(),vis=visibleDeals();
   const banked=stageTotal(st.find(x=>/uncondition/i.test(x))||st[st.length-1]);
   const pipe=vis.reduce((a,d)=>a+(+d.f||0),0);
@@ -192,8 +195,14 @@ function renderTally(){
 }
 
 /* ---- pipeline: same board whether on the desk or the projector ---- */
-function renderBoard(){
-  const wrap=$('#stages');wrap.innerHTML='';
+/* Row handlers call renderBoard() with no argument after an edit, so
+   the target is remembered — otherwise an edit made on the Broker
+   Pipeline tab would redraw the main board instead. */
+let boardTarget='#stages';
+function renderBoard(target){
+  if(target) boardTarget=target;
+  const wrap=$(boardTarget); if(!wrap) return;
+  wrap.innerHTML='';
   M().stages.forEach(st=>{
     const rows=visibleDeals().filter(d=>d.s===st);
     const sec=document.createElement('section');
@@ -250,7 +259,8 @@ function renderBoard(){
     });
     wrap.appendChild(sec);
   });
-  renderNoteSections(wrap);
+  // Note lists are department-wide, not per broker.
+  if(!brokerFilter) renderNoteSections(wrap);
 }
 
 /* Free-text lists that sit between the stages. Each item is one line
@@ -293,7 +303,12 @@ function dealRow(d){
     <td class="timingcell"><input type="date" class="dateinput" value="${esc(d.td)}">${
       (!d.td && d.t) ? `<span class="legacy">${esc(d.t)}</span>` : ''}${
       pt(d.td?printDate(d.td):d.t)}</td>
-    <td class="num"><div contenteditable data-k="f" data-ph="0">${d.f?(+d.f).toLocaleString():''}</div></td>
+    ${brokerFilter
+      ? `<td class="num sharecell">${d.f?money(shareOf(d)):'—'}${
+          brokersOf(d).length>1
+            ? `<span class="fullfee">of ${money(d.f)}</span>` : ''}</td>`
+      : `<td class="num"><div contenteditable data-k="f" data-ph="0">${
+          d.f?(+d.f).toLocaleString():''}</div></td>`}
     ${(S().options||{}).show_probability
       ? `<td class="num prob"><div contenteditable data-k="pr" data-ph="—">${d.pr===''?'':d.pr}</div></td>` : ''}
     <td class="statuscell">${statusSelect(d.st)}${pt(d.st)}</td>
@@ -826,6 +841,73 @@ async function renderManagement(){
   pane.innerHTML=tally+units+ranking;
 }
 
+/* Broker Pipeline — the same stage sections, filtered to one broker.
+   Shared deals (LW/WF) appear for both, counted in full for each: this
+   is a view of what a broker is working on, not a fee split. */
+function brokerOptions(){
+  const seen={};
+  S().deals.forEach(d=>brokersOf(d).forEach(c=>{ seen[c]=(seen[c]||0)+1; }));
+  return Object.keys(seen).sort().map(c=>{
+    const b=(brokerList||[]).find(x=>x.code===c);
+    return {code:c, name:b?b.first_name:'', count:seen[c]};
+  });
+}
+
+function renderBrokerTally(){
+  const tally=$('#brokerTally'); if(!tally) return;
+  const mine=visibleDeals();
+  const banked=mine.filter(d=>/^uncondition/i.test(d.s)).reduce((a,d)=>a+shareOf(d),0);
+  const weighted=mine.reduce((a,d)=>a+shareOf(d)*dealWeight(d),0);
+  const raw=mine.reduce((a,d)=>a+shareOf(d),0);
+  const won=S().deals.filter(d=>d.out==='won'&&brokersOf(d).indexOf(brokerFilter)>=0).length;
+  const lost=S().deals.filter(d=>d.out==='lost'&&brokersOf(d).indexOf(brokerFilter)>=0).length;
+  tally.innerHTML=`
+    <div><div class="k">Deals</div><div class="v">${mine.length}</div></div>
+    <div><div class="k">Unconditional</div><div class="v">${money(banked)}</div></div>
+    <div><div class="k">Pipeline (weighted)</div><div class="v">${money(weighted)}</div>
+      <div class="sub">${money(raw)} unweighted</div></div>
+    <div><div class="k">Won</div><div class="v">${won}</div></div>
+    <div><div class="k">Lost</div><div class="v">${lost}</div></div>`;
+}
+
+function renderBrokerPipeline(){
+  const sel=$('#brokerPick'); if(!sel) return;
+  const opts=brokerOptions();
+
+  if(sel.dataset.unit!==which){
+    sel.dataset.unit=which;
+    sel.innerHTML='<option value="">Choose a broker…</option>'+
+      opts.map(o=>`<option value="${esc(o.code)}"${o.code===brokerFilter?' selected':''}>${
+        esc(o.code)}${o.name?' — '+esc(o.name):''} (${o.count})</option>`).join('');
+    sel.onchange=()=>{ brokerFilter=sel.value; renderBrokerPipeline(); };
+  }
+  if(brokerFilter && !opts.some(o=>o.code===brokerFilter)){
+    brokerFilter=''; sel.value='';
+  }
+
+  const note=$('#brokerNote');
+  const tally=$('#brokerTally');
+  const stages=$('#brokerStages');
+
+  if(!brokerFilter){
+    if(note) note.textContent='Pick a broker to see everything they are working on, including deals shared with others.';
+    if(tally) tally.innerHTML='';
+    if(stages) stages.innerHTML='';
+    return;
+  }
+
+  const mine=visibleDeals();
+  const shared=mine.filter(d=>brokersOf(d).length>1).length;
+
+  if(note) note.innerHTML = shared
+    ? `Fees shown are an <b>even split</b> by number of brokers — ${shared} of these ${
+       shared===1?'deal is':'deals are'} shared. Actual commission splits are held in the finance workbook.`
+    : 'Fees shown in full — none of these deals are shared.';
+
+  renderBrokerTally();
+  renderBoard('#brokerStages');
+}
+
 /* Pipeline Settings — the percentages behind the weighted total. */
 function renderWeights(){
   const box=$('#weightRows'); if(!box) return;
@@ -901,7 +983,7 @@ async function renderFinesYtd(){
 }
 
 /* Broker dropdown, loaded once from public.brokers */
-let brokerList=[];
+let brokerList=[];   // also used by the Broker Pipeline picker
 async function loadBrokers(){
   try{
     brokerList=await DealBoardApi.listBrokers();
@@ -953,7 +1035,25 @@ function inRange(d){
   if(toDate   && d.td > toDate)   return false;
   return true;
 }
-function visibleDeals(){ return S().deals.filter(inRange); }
+/* Split 'LW/WF' into codes. A shared deal belongs to both brokers, so
+   it appears in both their pipelines. */
+function brokersOf(d){
+  return (d.b||'').split('/').map(x=>x.trim().toUpperCase()).filter(Boolean);
+}
+let brokerFilter='';
+/* A broker's share of a deal, split evenly by head count.
+   This is an ASSUMPTION, not a commission figure — actual splits live
+   in the finance workbook. Shown labelled, with the full fee alongside,
+   so it is never mistaken for the real number. */
+function shareOf(d){
+  const n=brokersOf(d).length || 1;
+  return (+d.f||0)/n;
+}
+function visibleDeals(){
+  let list=S().deals.filter(inRange);
+  if(brokerFilter) list=list.filter(d=>brokersOf(d).indexOf(brokerFilter)>=0);
+  return list;
+}
 
 function applyDateFilter(){
   fromDate=($('#fromDate')||{}).value||'';
@@ -1151,9 +1251,13 @@ async function loadUnits(){
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   b.classList.add('on');tab=b.dataset.tab;
-  ['board','register','rankings','settings','management'].forEach(t=>{
+  ['board','broker','register','rankings','settings','management'].forEach(t=>{
     const el=$('#tab-'+t); if(el) el.hidden = t!==tab;
   });
+  // The broker filter must not leak into the main pipeline view.
+  if(tab!=='broker') brokerFilter='';
+  if(tab==='board'){ renderBoard('#stages'); renderTally(); }
+  if(tab==='broker')renderBrokerPipeline();
   if(tab==='register')renderRegister();
   if(tab==='rankings')renderRankings();
   if(tab==='settings')renderWeights();
@@ -1189,7 +1293,7 @@ function renderAll(){
     .toLocaleDateString('en-NZ',{weekday:'long',day:'numeric',month:'long',year:'numeric'}).toUpperCase();
   $('#apologies').textContent=S().apologies;
   const nEl=$('#minutesBox')||$('#notes'); if(nEl) nEl.value=S().minutes;
-  renderTally();renderBoard();renderFines();renderFinesYtd();
+  renderTally();renderBoard('#stages');renderFines();renderFinesYtd();
   if(tab==='rankings')renderRankings();
   if(tab==='settings')renderWeights();
   if(tab==='register')renderRegister();
@@ -1203,7 +1307,7 @@ async function loadBoard(){
       b.classList.toggle('on', b.dataset.tab==='management');
       b.hidden = b.dataset.tab!=='management';
     });
-    ['board','register','rankings','settings','management'].forEach(t=>{
+    ['board','broker','register','rankings','settings','management'].forEach(t=>{
       const el=$('#tab-'+t); if(el) el.hidden = t!=='management';
     });
     const fb=$('#filterbar'); if(fb) fb.hidden=true;
@@ -1226,7 +1330,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-21a';
+const BOARD_VERSION='2026-08-21c';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
