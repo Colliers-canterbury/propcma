@@ -674,6 +674,7 @@ async function renderRankings(){
   pane.innerHTML=`<section class="ranks">
     <header><h2>${d.year} rankings</h2>
       <span class="as-at">${asAt?'from the master report, as at '+asAt:''}</span>
+      <button class="src" id="syncRanks">Refresh rankings</button>
     </header>
     <table><thead><tr>
       <th style="width:30px" class="rank">#</th>
@@ -698,6 +699,33 @@ async function renderRankings(){
       <td><div class="bar"><i style="width:${totPct}%"></i></div></td>
       <td class="pc">${totBudget?totPct.toFixed(0)+'%':''}</td>
     </tr></tfoot></table></section>`;
+
+  /* Pulls from the master report. Until the Graph permission is granted
+     the endpoint replies that rankings are manual — the button reports
+     that plainly rather than pretending it worked. */
+  const btn=$('#syncRanks');
+  if(btn) btn.onclick=async()=>{
+    btn.disabled=true; btn.textContent='Refreshing…';
+    try{
+      const r=await DealBoardApi.syncRankings();
+      if(r && r.skipped){
+        toast('Rankings are updated by hand at the moment');
+        console.info('sync-rankings:', r.skipped);
+      }else{
+        const n=(r.results||[]).reduce((a,x)=>a+(x.updated||0),0);
+        toast(n?`Updated ${n} broker${n===1?'':'s'}`:'No changes');
+        const bad=(r.results||[]).reduce((a,x)=>a.concat(x.unmatched||[]),[]);
+        if(bad.length) console.warn('names with no broker code:', bad);
+      }
+      await renderRankings();
+      return;
+    }catch(e){
+      toast(e.status===401||e.status===403
+        ? 'You need manager access to refresh'
+        : 'Could not refresh: '+(e.message||'unknown error'));
+    }
+    btn.disabled=false; btn.textContent='Refresh rankings';
+  };
 }
 
 /* Management — a rollup across the operating units. Each unit's
@@ -1186,7 +1214,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-20e';
+const BOARD_VERSION='2026-08-20f';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
