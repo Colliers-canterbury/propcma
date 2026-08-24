@@ -196,8 +196,9 @@ function renderBoard(){
         <span class="tot">${money(stageTotal(st))}</span></header>
       ${collapsed[st]?'':`<table><thead><tr>
         <th style="width:16px"></th><th style="width:172px">Stage</th>
-        ${(S().options||{}).show_tenant?'<th style="width:26%">Tenant</th>':''}
-        <th>Address</th><th style="width:120px">Timing</th>
+        ${(S().options||{}).show_tenant?'<th style="width:22%">Tenant</th>':''}
+        <th${(S().options||{}).show_tenant?' style="width:22%"':''}>Address</th>
+        <th style="width:120px">Timing</th>
         <th style="width:92px" class="num">Fee</th>
         ${(S().options||{}).show_probability?'<th style="width:56px" class="num">Prob</th>':''}
         <th style="width:96px">Status</th>
@@ -1185,7 +1186,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-20d';
+const BOARD_VERSION='2026-08-20e';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
