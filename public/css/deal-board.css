@@ -384,3 +384,8 @@ button.expbtn:hover{border-color:var(--amber);color:var(--amber)}
 button.expbtn.on{background:var(--navy);color:#fff;border-color:var(--navy)}
 body.proj .expbadge{font-size:.78em}
 @media print{button.expbtn{display:none}}
+
+/* Tenant and Address carry equal weight on the leasing-style board —
+   both are the name of the thing, and squeezing either makes the row
+   harder to scan. */
+td.addr{width:auto}
