@@ -533,7 +533,11 @@ async function notes(req, res, id) {
     const b = req.body || {};
     const patch = { updated_at: new Date().toISOString() };
     if ("body" in b) patch.body = String(b.body).trim();
-    for (const k of ["timing","status_note","broker_codes","aml","landlord","agency_type"])
+    // "section" lets a note move to a different board on the same
+    // department (e.g. Sole Agencies -> Executed) — the client only
+    // ever sends a name that's already in that department's
+    // db_note_sections, same trust level as every other field here.
+    for (const k of ["section","timing","status_note","broker_codes","aml","landlord","agency_type"])
       if (k in b) patch[k] = b[k] || null;
     if ("timing_date" in b) patch.timing_date = b.timing_date || null;
     if ("fee_nzd" in b) patch.fee_nzd = Number(b.fee_nzd) || 0;
