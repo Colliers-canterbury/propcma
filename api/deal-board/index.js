@@ -96,7 +96,8 @@ async function getBoard(req, res) {
     supabase.from("db_pipeline_weights")
       .select("stage_name, pct").eq("department_id", id),
     supabase.from("db_departments")
-      .select("show_tenant, show_probability, show_listing_type").eq("id", id).single(),
+      .select("show_tenant, show_probability, show_listing_type, show_conditions, hide_status")
+      .eq("id", id).single(),
     supabase.from("db_deals")
       .select("outcome").eq("department_id", id).not("outcome", "is", null),
     supabase.from("db_notes")
@@ -124,7 +125,8 @@ async function getBoard(req, res) {
     notes: noteRows.data || [],
     weights: weightRows.data || [],
     options: deptOpts.data ||
-      { show_tenant: false, show_probability: false, show_listing_type: false },
+      { show_tenant: false, show_probability: false, show_listing_type: false,
+        show_conditions: false, hide_status: false },
     outcomes: (outcomeRows.data || []).reduce((a, r) => {
       a[r.outcome] = (a[r.outcome] || 0) + 1;
       return a;
@@ -553,14 +555,20 @@ async function notes(req, res, id) {
   throw new HttpError(405, "Not allowed");
 }
 
-// ── record an outcome (won / lost / withdrawn / sold) ─────────────
+// ── record an outcome (won / lost / withdrawn / sold / leased) ────
 // Sets the outcome AND moves the deal, in one call — the two always go
 // together, and doing them separately risks a deal that moved but was
 // never counted.
 async function setOutcome(req, res, id) {
   const user = await requireUser(req, ROLES_WRITE);
   const { outcome, stageId, timing_date } = req.body || {};
-  const allowed = ["won", "lost", "withdrawn", "sold"];
+  // 'leased' was added to the db_deals outcome check constraint in
+  // leasing_extras.sql, alongside the 'Leased' stage and the outcome
+  // picker's Unconditional -> Leased option — but this allow-list was
+  // never updated to match, so every Leased pick was rejected here
+  // with a 400 while Sold succeeded. Keep this in sync with the
+  // constraint in leasing_extras.sql if another outcome is ever added.
+  const allowed = ["won", "lost", "withdrawn", "sold", "leased"];
   if (!allowed.includes(outcome)) throw new HttpError(400, "Unknown outcome");
   if (!stageId) throw new HttpError(400, "A destination stage is required");
 
