@@ -187,13 +187,18 @@ function renderTally(){
   // On the broker tab the headline strip belongs to that broker.
   if(brokerFilter){ renderBrokerTally(); return; }
   const st=M().stages,s=S(),vis=visibleDeals();
-  const banked=stageTotal(st.find(x=>/uncondition/i.test(x))||st[st.length-1]);
+  // Only departments that actually have an Unconditional-ish stage get
+  // that tile — it used to fall back to whatever stage was last in the
+  // list, which silently mislabelled a different stage's total once a
+  // department (Office) no longer has one at all.
+  const uncondStage=st.find(x=>/uncondition/i.test(x));
+  const banked=uncondStage?stageTotal(uncondStage):0;
   const pipe=vis.reduce((a,d)=>a+(+d.f||0),0);
   const fines=s.fines.reduce((a,f)=>a+(+f.amt||0),0);
   const out=S().outcomes||{};
   $('#tally').innerHTML=`
    <div><div class="k">Deals</div><div class="v">${vis.length}</div></div>
-   <div><div class="k">Unconditional</div><div class="v">${money(banked)}</div></div>
+   ${uncondStage?`<div><div class="k">Unconditional</div><div class="v">${money(banked)}</div></div>`:''}
    <div><div class="k">Pipeline (weighted)</div><div class="v">${money(weightedPipeline())}</div>
      <div class="sub">${money(pipe)} unweighted</div></div>
    <div><div class="k">Won</div><div class="v">${out.won||0}</div></div>
