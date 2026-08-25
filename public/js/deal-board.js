@@ -28,6 +28,8 @@ const printDate=v=>v
   : '';
 const pt=txt=>`<span class="printonly">${esc(txt||'')}</span>`;
 
+const LISTING_TYPES=['Sale','Lease','Sale/Lease'];
+
 const STATUSES=['Pending','Submitted','Committed','Deadline','Auction','Priced','Off-Market'];
 const HEAT=['Motivated','Luke warm','Slow'], KEY='dealboard:v3';
 let mem=null,state=null,which='',tab='board',collapsed={},current=null,proj=false;
@@ -99,7 +101,7 @@ function fromApi(dept, payload){
     deals: payload.deals.map(d=>({
       id:d.id, s:stageName[d.stage_id]||'', a:d.address||'', t:d.timing||'',
       f:Number(d.fee_nzd)||0, b:d.brokers||'', st:d.status_note||'', out:d.outcome||'',
-      td:d.timing_date||'', tn:d.tenant||'',
+      td:d.timing_date||'', tn:d.tenant||'', lt:d.listing_type||'',
       pr:(d.probability===null||d.probability===undefined)?'':Number(d.probability),
       aml:AML_OUT[d.aml]||''
     })),
@@ -133,6 +135,7 @@ function saveDealField(d, k){
     f:  () => ({fee_nzd: d.f}),
     td: () => ({timing_date: d.td || null}),
     tn: () => ({tenant: d.tn}),
+    lt: () => ({listing_type: d.lt || null}),
     pr: () => ({probability: d.pr===''?null:Number(d.pr)}),
     st: () => ({status_note: d.st}),
     aml:() => ({aml: AML_IN[(d.aml||'').toUpperCase()] || 'not_started'}),
@@ -215,6 +218,7 @@ function renderBoard(target){
         <th style="width:16px"></th><th style="width:172px">Stage</th>
         ${(S().options||{}).show_tenant?'<th style="width:22%">Tenant</th>':''}
         <th${(S().options||{}).show_tenant?' style="width:22%"':''}>Address</th>
+        ${(S().options||{}).show_listing_type?'<th style="width:96px">Sale / Lease</th>':''}
         <th style="width:120px">Timing</th>
         <th style="width:92px" class="num">Fee</th>
         ${(S().options||{}).show_probability?'<th style="width:56px" class="num">Prob</th>':''}
@@ -240,7 +244,7 @@ function renderBoard(target){
         catch(err){ console.error('row failed:', d, err); }
       });
       sec.querySelector('.addrow').onclick=()=>{
-        const d={id:'tmp'+Date.now(),s:st,a:'',tn:'',t:'',td:/^uncondition/i.test(st)?TODAY():'',f:0,pr:'',b:'',st:'',aml:'',isNew:true};
+        const d={id:'tmp'+Date.now(),s:st,a:'',tn:'',lt:'',t:'',td:/^uncondition/i.test(st)?TODAY():'',f:0,pr:'',b:'',st:'',aml:'',isNew:true};
         S().deals.push(d);renderBoard();renderTally();
         const c=wrap.querySelector(`[data-id="${d.id}"] [contenteditable]`);if(c)c.focus();
       };
@@ -271,6 +275,14 @@ let dragId=null;
    is kept as an extra option — 'Live', 'PBN', 'DBL' and so on are still
    in the imported rows, and silently blanking them would lose meaning
    the room put there. */
+function listingSelect(val){
+  const opts=LISTING_TYPES.slice();
+  if(val && opts.indexOf(val)<0) opts.unshift(val);
+  return `<select class="ltpick"><option value="">—</option>`+
+    opts.map(o=>`<option value="${esc(o)}"${o===val?' selected':''}>${esc(o)}</option>`).join('')+
+    `</select>`;
+}
+
 function statusSelect(val){
   const opts=STATUSES.slice();
   if(val && !opts.some(o=>o.toLowerCase()===val.toLowerCase())) opts.unshift(val);
@@ -300,6 +312,8 @@ function dealRow(d){
     ${(S().options||{}).show_tenant
       ? `<td class="addr"><div contenteditable data-k="tn" data-ph="Tenant">${esc(d.tn)}</div></td>` : ''}
     <td class="${(S().options||{}).show_tenant?'':'addr'}"><div contenteditable data-k="a" data-ph="Address">${esc(d.a)}</div></td>
+    ${(S().options||{}).show_listing_type
+      ? `<td class="ltcell">${listingSelect(d.lt)}${pt(d.lt)}</td>` : ''}
     <td class="timingcell"><input type="date" class="dateinput" value="${esc(d.td)}">${
       (!d.td && d.t) ? `<span class="legacy">${esc(d.t)}</span>` : ''}${
       pt(d.td?printDate(d.td):d.t)}</td>
@@ -316,6 +330,14 @@ function dealRow(d){
     <td class="amlcell noprint"><input type="checkbox" class="amlbox"
       ${d.aml==='Y'?'checked':''} title="AML complete"></td>
     <td class="actcell noprint">${outcomeControl(d)}</td>`;
+
+  const lts=tr.querySelector('.ltpick');
+  if(lts) lts.onchange=()=>{
+    const was=d.lt; d.lt=lts.value;
+    saveDealField(d,'lt')
+      .then(()=>{tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500)})
+      .catch(()=>{ d.lt=was; renderBoard(); });
+  };
 
   const sel=tr.querySelector('.statuspick');
   if(sel){
@@ -345,7 +367,7 @@ function dealRow(d){
         if(d.isNew){
           if(!d.a) return;
           persist(()=>DealBoardApi.addDeal(which, S().stageIdByName[d.s], {
-            address:d.a, tenant:d.tn||null, timing:d.t, timing_date:d.td||null,
+            address:d.a, tenant:d.tn||null, listing_type:d.lt||null, timing:d.t, timing_date:d.td||null,
             fee_nzd:d.f, probability:d.pr===''?null:Number(d.pr), status_note:d.st,
             brokers:d.b.split('/').map(x=>x.trim()).filter(Boolean)
           }), d.a).then(row=>{ d.id=row.id; delete d.isNew; done(); }).catch(()=>{});
@@ -1330,7 +1352,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-21c';
+const BOARD_VERSION='2026-08-21d';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
