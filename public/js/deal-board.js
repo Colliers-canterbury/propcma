@@ -298,8 +298,17 @@ function listingSelect(val){
     `</select>`;
 }
 
-function statusSelect(val){
-  const opts=STATUSES.slice();
+/* Sole/Pending/New Agencies use a short Executed/Awaiting Signature
+   list instead of the pipeline Status options — an agency register
+   entry isn't at any of those deal stages. */
+const NOTE_STATUS_OPTIONS={
+  'Sole Agencies':    ['Executed','Awaiting Signature'],
+  'Pending Agencies': ['Executed','Awaiting Signature'],
+  'New Agencies':     ['Executed','Awaiting Signature']
+};
+
+function statusSelect(val, list){
+  const opts=(list||STATUSES).slice();
   if(val && !opts.some(o=>o.toLowerCase()===val.toLowerCase())) opts.unshift(val);
   return `<select class="statuspick"><option value="">—</option>`+
     opts.map(o=>`<option value="${esc(o)}"${
@@ -524,6 +533,22 @@ const NOTE_EXTRA={
 };
 let expiryFilter=false;
 
+/* Sections that get a "Stage" column — a move-to-another-board picker,
+   listing every other note board in the department (so it always
+   includes "Executed" once that board exists, without hardcoding it).
+   This moves the row between note boards only — it stays a note, it
+   does not become a pipeline deal, so only note boards are offered as
+   destinations, not the real Submissions/Advanced/Leased stages. */
+const NOTE_STAGE_SECTIONS=['Sole Agencies','Pending Agencies','New Agencies'];
+
+function noteStageSelect(currentSection){
+  const opts=(S().noteSections||[]).slice().sort((a,b)=>a.position-b.position)
+    .map(x=>x.name).filter(nm=>nm!==currentSection);
+  return `<select class="notestage outcome"><option value="">Move to…</option>`+
+    opts.map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join('')+
+    `</select>`;
+}
+
 /* Sections rendered as a plain list of custom-labelled text columns
    instead of the full pipeline row (no timing, fee, status or AML).
    Each column reuses an existing db_notes field under a per-section
@@ -548,6 +573,7 @@ function renderNoteSections(wrap){
     const customCols=CUSTOM_COLUMNS[ns.name]||null;
     const isExpirySec=!customCols && EXPIRY_SECTIONS.indexOf(ns.name)>=0;
     const extras=customCols?[]:(NOTE_EXTRA[ns.name]||[]);
+    const showStage=!customCols && NOTE_STAGE_SECTIONS.indexOf(ns.name)>=0;
     let items=(S().notes||[]).filter(n=>n.section===ns.name)
       .sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
     if(isExpirySec){
@@ -585,18 +611,19 @@ function renderNoteSections(wrap){
         <th style="width:88px" class="num">Fee</th><th style="width:92px">Status</th>
         <th style="width:70px">Broker</th>
         <th style="width:38px" class="noprint">AML</th>
+        ${showStage?'<th style="width:110px" class="noprint">Stage</th>':''}
         <th style="width:26px" class="noprint"></th>`}
       </tr></thead><tbody></tbody></table>
       <button class="addrow">+ Add to ${esc(ns.name.toLowerCase())}</button>`;
     const tb=sec.querySelector('tbody');
     if(!items.length){
-      const cols=customCols?(customCols.length+1):(7+extras.length);
+      const cols=customCols?(customCols.length+1):(7+extras.length+(showStage?1:0));
       tb.innerHTML='<tr><td colspan="'+cols+'" class="empty">'+
         (expiryFilter&&isExpirySec ? 'Nothing expiring in the next 60 days.'
                                    : 'Nothing this week.')+'</td></tr>';
     }
     items.forEach(n=>{
-      try{ tb.appendChild(noteRow(n,ns.name,isExpirySec,extras,customCols)); }
+      try{ tb.appendChild(noteRow(n,ns.name,isExpirySec,extras,customCols,showStage)); }
       catch(err){ console.error('note row failed:', n, err); }
     });
     const eb=sec.querySelector('.expbtn');
@@ -620,7 +647,7 @@ function expiryBadge(td){
     : `<span class="expbadge soon">${days}d left</span>`;
 }
 
-function noteRow(n, section, isExpiry, extras, customCols){
+function noteRow(n, section, isExpiry, extras, customCols, showStage){
   const tr=document.createElement('tr');
   tr.className='row'; tr.dataset.nid=n.id;
   tr.innerHTML = customCols ? `
@@ -635,9 +662,10 @@ function noteRow(n, section, isExpiry, extras, customCols){
         : (!n.td && n.t) ? `<span class="legacy">${esc(n.t)}</span>` : ''}${
       pt(n.td?printDate(n.td):n.t)}</td>
     <td class="num"><div contenteditable data-k="f" data-ph="0">${n.f?(+n.f).toLocaleString():''}</div></td>
-    <td class="statuscell">${statusSelect(n.st)}${pt(n.st)}</td>
+    <td class="statuscell">${statusSelect(n.st, NOTE_STATUS_OPTIONS[section])}${pt(n.st)}</td>
     <td class="brk"><div contenteditable data-k="b" data-ph="—">${esc(n.b)}</div></td>
     <td class="amlcell noprint"><input type="checkbox" class="amlbox" ${n.aml==='Y'?'checked':''}></td>
+    ${showStage?`<td class="noprint">${noteStageSelect(section)}</td>`:''}
     <td class="noprint"><button class="x" title="Actioned — clear it">×</button></td>`;
 
   const flash=()=>{tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500)};
@@ -697,6 +725,16 @@ function noteRow(n, section, isExpiry, extras, customCols){
     ab.onchange=()=>{ n.aml=ab.checked?'Y':''; ab.indeterminate=false;
       saveNote({aml:n.aml||null}).catch(()=>{}); };
   }
+
+  const stg=tr.querySelector('.notestage');
+  if(stg) stg.onchange=()=>{
+    const dest=stg.value; if(!dest) return;
+    const from=n.section;
+    n.section=dest;
+    saveNote({section:dest})
+      .then(()=>{ toast(`${n.body||'Item'} → ${dest}`); renderBoard(); })
+      .catch(()=>{ n.section=from; renderBoard(); });
+  };
 
   tr.querySelector('.x').onclick=()=>{
     const go=()=>{state[which].notes=S().notes.filter(x=>x.id!==n.id);renderBoard()};
