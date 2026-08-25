@@ -605,13 +605,13 @@ function renderNoteSections(wrap){
         ${customCols.map((c,i)=>
           `<th${c.width?` style="width:${c.width}"`:(i===0?'':' style="width:110px"')}>${esc(c.label)}</th>`).join('')}
         <th style="width:26px" class="noprint"></th>` : `
+        ${showStage?'<th style="width:110px" class="noprint">Stage</th>':''}
         <th>Detail</th>
         ${extras.map(x=>`<th style="width:${x.width}px">${x.label}</th>`).join('')}
         <th style="width:${isExpirySec?150:120}px">${isExpirySec?'Expiry':'Timing'}</th>
         <th style="width:88px" class="num">Fee</th><th style="width:92px">Status</th>
         <th style="width:70px">Broker</th>
         <th style="width:38px" class="noprint">AML</th>
-        ${showStage?'<th style="width:110px" class="noprint">Stage</th>':''}
         <th style="width:26px" class="noprint"></th>`}
       </tr></thead><tbody></tbody></table>
       <button class="addrow">+ Add to ${esc(ns.name.toLowerCase())}</button>`;
@@ -654,6 +654,7 @@ function noteRow(n, section, isExpiry, extras, customCols, showStage){
     ${customCols.map(c=>
       `<td class="${c.key==='body'?'addr':'brk'}"><div contenteditable data-k="${c.key}" data-ph="${c.key==='body'?'Type here…':'—'}">${esc(n[c.key]||'')}</div></td>`).join('')}
     <td class="noprint"><button class="x" title="Actioned — clear it">×</button></td>` : `
+    ${showStage?`<td class="noprint">${noteStageSelect(section)}</td>`:''}
     <td class="addr"><div contenteditable data-k="body" data-ph="Type here…">${esc(n.body)}</div></td>
     ${(extras||[]).map(x=>
       `<td><div contenteditable data-k="${x.key}" data-ph="—">${esc(n[x.key]||'')}</div></td>`).join('')}
@@ -665,7 +666,6 @@ function noteRow(n, section, isExpiry, extras, customCols, showStage){
     <td class="statuscell">${statusSelect(n.st, NOTE_STATUS_OPTIONS[section])}${pt(n.st)}</td>
     <td class="brk"><div contenteditable data-k="b" data-ph="—">${esc(n.b)}</div></td>
     <td class="amlcell noprint"><input type="checkbox" class="amlbox" ${n.aml==='Y'?'checked':''}></td>
-    ${showStage?`<td class="noprint">${noteStageSelect(section)}</td>`:''}
     <td class="noprint"><button class="x" title="Actioned — clear it">×</button></td>`;
 
   const flash=()=>{tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500)};
