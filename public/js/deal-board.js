@@ -516,18 +516,26 @@ const NOTE_EXTRA={
 };
 let expiryFilter=false;
 
-/* Sections that are just a running list of address + broker — no
-   timing, fee, status, AML or agency-register extras. Office's Notes
-   and Chase Ups lists are plain reminders, not pipeline rows. */
-const SIMPLE_SECTIONS=['Notes','Chase Ups'];
+/* Sections rendered as a plain list of custom-labelled text columns
+   instead of the full pipeline row (no timing, fee, status or AML).
+   Each column reuses an existing db_notes field under a per-section
+   label, so no schema changes are needed to relabel them. Office's
+   Notes/Chase Ups lists are plain reminders; Listings and Signage
+   Audit are the same mechanism with different labels. */
+const CUSTOM_COLUMNS={
+  'Notes':         [{key:'body',label:'Address'},   {key:'b', label:'Broker'}],
+  'Chase Ups':     [{key:'body',label:'Address'},   {key:'b', label:'Broker'}],
+  'Listings':      [{key:'body',label:'Advertising'},{key:'ll',label:'Page 1'},{key:'at',label:'Page 2'}],
+  'Signage Audit': [{key:'body',label:'Area'},       {key:'b', label:'Broker'},{key:'ll',label:'Notes/Date'}]
+};
 
 function renderNoteSections(wrap){
   const secs=S().noteSections||[];
   const stageCount=(S().stages||[]).length;
   secs.slice().sort((a,b)=>a.position-b.position).forEach(ns=>{
-    const isSimple=SIMPLE_SECTIONS.indexOf(ns.name)>=0;
-    const isExpirySec=!isSimple && EXPIRY_SECTIONS.indexOf(ns.name)>=0;
-    const extras=isSimple?[]:(NOTE_EXTRA[ns.name]||[]);
+    const customCols=CUSTOM_COLUMNS[ns.name]||null;
+    const isExpirySec=!customCols && EXPIRY_SECTIONS.indexOf(ns.name)>=0;
+    const extras=customCols?[]:(NOTE_EXTRA[ns.name]||[]);
     let items=(S().notes||[]).filter(n=>n.section===ns.name)
       .sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
     if(isExpirySec){
@@ -553,11 +561,10 @@ function renderNoteSections(wrap){
         <span class="pill">${items.length}</span>
         ${flagged?`<button class="expbtn${expiryFilter?' on':''}">${
           expiryFilter?'Show all':`${flagged} expiring or expired`}</button>`:''}
-        <span class="tot">${isSimple||isExpirySec?'':money(items.reduce((a,n)=>a+(+n.f||0),0))}</span></header>
+        <span class="tot">${customCols||isExpirySec?'':money(items.reduce((a,n)=>a+(+n.f||0),0))}</span></header>
       <table><thead><tr>
-        ${isSimple ? `
-        <th>Address</th>
-        <th style="width:70px">Broker</th>
+        ${customCols ? `
+        ${customCols.map((c,i)=>`<th${i===0?'':' style="width:110px"'}>${esc(c.label)}</th>`).join('')}
         <th style="width:26px" class="noprint"></th>` : `
         <th>Detail</th>
         ${extras.map(x=>`<th style="width:${x.width}px">${x.label}</th>`).join('')}
@@ -570,13 +577,13 @@ function renderNoteSections(wrap){
       <button class="addrow">+ Add to ${esc(ns.name.toLowerCase())}</button>`;
     const tb=sec.querySelector('tbody');
     if(!items.length){
-      const cols=isSimple?3:(7+extras.length);
+      const cols=customCols?(customCols.length+1):(7+extras.length);
       tb.innerHTML='<tr><td colspan="'+cols+'" class="empty">'+
         (expiryFilter&&isExpirySec ? 'Nothing expiring in the next 60 days.'
                                    : 'Nothing this week.')+'</td></tr>';
     }
     items.forEach(n=>{
-      try{ tb.appendChild(noteRow(n,ns.name,isExpirySec,extras,isSimple)); }
+      try{ tb.appendChild(noteRow(n,ns.name,isExpirySec,extras,customCols)); }
       catch(err){ console.error('note row failed:', n, err); }
     });
     const eb=sec.querySelector('.expbtn');
@@ -600,12 +607,12 @@ function expiryBadge(td){
     : `<span class="expbadge soon">${days}d left</span>`;
 }
 
-function noteRow(n, section, isExpiry, extras, isSimple){
+function noteRow(n, section, isExpiry, extras, customCols){
   const tr=document.createElement('tr');
   tr.className='row'; tr.dataset.nid=n.id;
-  tr.innerHTML = isSimple ? `
-    <td class="addr"><div contenteditable data-k="body" data-ph="Type here…">${esc(n.body)}</div></td>
-    <td class="brk"><div contenteditable data-k="b" data-ph="—">${esc(n.b)}</div></td>
+  tr.innerHTML = customCols ? `
+    ${customCols.map(c=>
+      `<td class="${c.key==='body'?'addr':'brk'}"><div contenteditable data-k="${c.key}" data-ph="${c.key==='body'?'Type here…':'—'}">${esc(n[c.key]||'')}</div></td>`).join('')}
     <td class="noprint"><button class="x" title="Actioned — clear it">×</button></td>` : `
     <td class="addr"><div contenteditable data-k="body" data-ph="Type here…">${esc(n.body)}</div></td>
     ${(extras||[]).map(x=>
