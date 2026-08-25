@@ -16,7 +16,11 @@ const OUTCOMES={
                               ['lost','Lost','Lost']],
   'Campaigns / sole agency': [['withdrawn','Withdrawn','Withdrawn']],
   'Unconditional':           [['sold','Sold','Sold'],
-                              ['leased','Leased','Leased']]
+                              ['leased','Leased','Leased']],
+  // Office (leasing): Advanced Negotiations/WIP resolves to Leased or
+  // Lost, same mechanism as the Unconditional outcome picker above.
+  'Advanced Negotiations / WIP': [['lost','Lost','Lost'],
+                                  ['leased','Leased','Leased']]
 };
 const TODAY=()=>new Date().toISOString().slice(0,10);
 /* Form controls do not print their values — a date input shows 'dd.'
@@ -219,8 +223,8 @@ function renderBoard(target){
         ${(S().options||{}).show_tenant?'<th style="width:22%">Tenant</th>':''}
         <th${(S().options||{}).show_tenant?' style="width:22%"':''}>Address</th>
         ${(S().options||{}).show_listing_type?'<th style="width:96px">Sale / Lease</th>':''}
-        <th style="width:${(S().options||{}).show_conditions?'160px':'120px'}">${
-          (S().options||{}).show_conditions?'Conditions':'Timing'}</th>
+        <th style="width:${(S().options||{}).timing_label?'160px':'120px'}">${
+          esc((S().options||{}).timing_label || 'Timing')}</th>
         <th style="width:92px" class="num">Fee</th>
         ${(S().options||{}).show_probability?'<th style="width:56px" class="num">Prob</th>':''}
         ${(S().options||{}).hide_status?'':'<th style="width:96px">Status</th>'}
@@ -317,8 +321,8 @@ function dealRow(d){
     <td class="${(S().options||{}).show_tenant?'':'addr'}"><div contenteditable data-k="a" data-ph="Address">${esc(d.a)}</div></td>
     ${(S().options||{}).show_listing_type
       ? `<td class="ltcell">${listingSelect(d.lt)}${pt(d.lt)}</td>` : ''}
-    <td class="timingcell">${(S().options||{}).show_conditions
-      ? `<div contenteditable data-k="t" data-ph="Conditions">${esc(d.t)}</div>`
+    <td class="timingcell">${(S().options||{}).timing_label
+      ? `<div contenteditable data-k="t" data-ph="${esc((S().options||{}).timing_label)}">${esc(d.t)}</div>`
       : `<input type="date" class="dateinput" value="${esc(d.td)}">${
           (!d.td && d.t) ? `<span class="legacy">${esc(d.t)}</span>` : ''}${
           pt(d.td?printDate(d.td):d.t)}`}</td>
@@ -512,12 +516,18 @@ const NOTE_EXTRA={
 };
 let expiryFilter=false;
 
+/* Sections that are just a running list of address + broker — no
+   timing, fee, status, AML or agency-register extras. Office's Notes
+   and Chase Ups lists are plain reminders, not pipeline rows. */
+const SIMPLE_SECTIONS=['Notes','Chase Ups'];
+
 function renderNoteSections(wrap){
   const secs=S().noteSections||[];
   const stageCount=(S().stages||[]).length;
   secs.slice().sort((a,b)=>a.position-b.position).forEach(ns=>{
-    const isExpirySec=EXPIRY_SECTIONS.indexOf(ns.name)>=0;
-    const extras=NOTE_EXTRA[ns.name]||[];
+    const isSimple=SIMPLE_SECTIONS.indexOf(ns.name)>=0;
+    const isExpirySec=!isSimple && EXPIRY_SECTIONS.indexOf(ns.name)>=0;
+    const extras=isSimple?[]:(NOTE_EXTRA[ns.name]||[]);
     let items=(S().notes||[]).filter(n=>n.section===ns.name)
       .sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
     if(isExpirySec){
@@ -543,25 +553,30 @@ function renderNoteSections(wrap){
         <span class="pill">${items.length}</span>
         ${flagged?`<button class="expbtn${expiryFilter?' on':''}">${
           expiryFilter?'Show all':`${flagged} expiring or expired`}</button>`:''}
-        <span class="tot">${isExpirySec?'':money(items.reduce((a,n)=>a+(+n.f||0),0))}</span></header>
+        <span class="tot">${isSimple||isExpirySec?'':money(items.reduce((a,n)=>a+(+n.f||0),0))}</span></header>
       <table><thead><tr>
+        ${isSimple ? `
+        <th>Address</th>
+        <th style="width:70px">Broker</th>
+        <th style="width:26px" class="noprint"></th>` : `
         <th>Detail</th>
         ${extras.map(x=>`<th style="width:${x.width}px">${x.label}</th>`).join('')}
         <th style="width:${isExpirySec?150:120}px">${isExpirySec?'Expiry':'Timing'}</th>
         <th style="width:88px" class="num">Fee</th><th style="width:92px">Status</th>
         <th style="width:70px">Broker</th>
         <th style="width:38px" class="noprint">AML</th>
-        <th style="width:26px" class="noprint"></th>
+        <th style="width:26px" class="noprint"></th>`}
       </tr></thead><tbody></tbody></table>
       <button class="addrow">+ Add to ${esc(ns.name.toLowerCase())}</button>`;
     const tb=sec.querySelector('tbody');
     if(!items.length){
-      tb.innerHTML='<tr><td colspan="'+(7+extras.length)+'" class="empty">'+
+      const cols=isSimple?3:(7+extras.length);
+      tb.innerHTML='<tr><td colspan="'+cols+'" class="empty">'+
         (expiryFilter&&isExpirySec ? 'Nothing expiring in the next 60 days.'
                                    : 'Nothing this week.')+'</td></tr>';
     }
     items.forEach(n=>{
-      try{ tb.appendChild(noteRow(n,ns.name,isExpirySec,extras)); }
+      try{ tb.appendChild(noteRow(n,ns.name,isExpirySec,extras,isSimple)); }
       catch(err){ console.error('note row failed:', n, err); }
     });
     const eb=sec.querySelector('.expbtn');
@@ -585,10 +600,13 @@ function expiryBadge(td){
     : `<span class="expbadge soon">${days}d left</span>`;
 }
 
-function noteRow(n, section, isExpiry, extras){
+function noteRow(n, section, isExpiry, extras, isSimple){
   const tr=document.createElement('tr');
   tr.className='row'; tr.dataset.nid=n.id;
-  tr.innerHTML=`
+  tr.innerHTML = isSimple ? `
+    <td class="addr"><div contenteditable data-k="body" data-ph="Type here…">${esc(n.body)}</div></td>
+    <td class="brk"><div contenteditable data-k="b" data-ph="—">${esc(n.b)}</div></td>
+    <td class="noprint"><button class="x" title="Actioned — clear it">×</button></td>` : `
     <td class="addr"><div contenteditable data-k="body" data-ph="Type here…">${esc(n.body)}</div></td>
     ${(extras||[]).map(x=>
       `<td><div contenteditable data-k="${x.key}" data-ph="—">${esc(n[x.key]||'')}</div></td>`).join('')}
