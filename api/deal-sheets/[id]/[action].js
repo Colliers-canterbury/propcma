@@ -48,6 +48,7 @@ export default async function handler(req, res) {
       case "complete":          return await complete(req, res, deal);
       case "return":            return await returnToBroker(req, res, deal);
       case "receipt":           return await setReceiptNo(req, res, deal);
+      case "trust-deposit":     return await setTrustDeposit(req, res, deal);
       default: throw new HttpError(404, `Unknown action: ${action}`);
     }
   } catch (e) {
@@ -266,4 +267,53 @@ async function setReceiptNo(req, res, deal) {
   });
 
   return res.status(200).json({ ok: true, receiptNo: value });
+}
+
+/**
+ * Accounts adds or edits a trust deposit — including on a deal the
+ * office admin never flagged as a trust deal. This happens: a deposit
+ * can land in the trust account without the admin knowing at the time
+ * the deal sheet was filed, so accounts spots it later from the bank
+ * feed and records it here. Editable at any status after submission.
+ *
+ * Sets BOTH the top-level deposit_to_trust column AND
+ * form.depositToTrust — the column drives what accounts.html shows,
+ * but the form is what gets rewritten on every save while a deal is
+ * still editable (draft/rejected). If only the column were set and
+ * the deal were later returned to the broker and resubmitted, her
+ * form (still showing the box unticked) would silently overwrite the
+ * column back to false on the next save. Updating both keeps the
+ * correction in place regardless of what happens afterward.
+ */
+async function setTrustDeposit(req, res, deal) {
+  const user = await requireUser(req, ["accounts", "manager"]);
+  if (deal.status === "draft")
+    throw new HttpError(409, "Cannot record a trust deposit on a draft — the office admin is still preparing it");
+
+  const { amount, receiptNo } = req.body || {};
+  const amountValue = String(amount ?? "").trim();
+  const receiptValue = String(receiptNo ?? "").trim();
+
+  const form = { ...(deal.form || {}) };
+  form.deposit = { ...(form.deposit || {}), amount: amountValue, receiptNo: receiptValue };
+  form.depositToTrust = true;
+
+  const wasFlagged = !!deal.deposit_to_trust;
+  const { error } = await supabase
+    .from("deal_sheets")
+    .update({ form, deposit_to_trust: true })
+    .eq("id", deal.id);
+  if (error) throw new HttpError(500, "Could not save trust deposit");
+
+  await supabase.from("deal_sheet_events").insert({
+    deal_id: deal.id,
+    actor: user.oid,
+    from_status: deal.status,
+    to_status: deal.status,
+    note: wasFlagged
+      ? `Trust deposit updated: $${amountValue || "0"}, receipt ${receiptValue || "—"}`
+      : `Trust deposit added by accounts (not flagged by office admin): $${amountValue || "0"}, receipt ${receiptValue || "—"}`,
+  });
+
+  return res.status(200).json({ ok: true, amount: amountValue, receiptNo: receiptValue });
 }
