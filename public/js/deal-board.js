@@ -17,10 +17,13 @@ const OUTCOMES={
   'Campaigns / sole agency': [['withdrawn','Withdrawn','Withdrawn']],
   'Unconditional':           [['sold','Sold','Sold'],
                               ['leased','Leased','Leased']],
-  // Office (leasing): Advanced Negotiations/WIP resolves to Leased or
-  // Lost, same mechanism as the Unconditional outcome picker above.
-  'Advanced Negotiations / WIP': [['lost','Lost','Lost'],
-                                  ['leased','Leased','Leased']]
+  // Office (leasing): Advanced Negotiations/WIP resolves to Leased,
+  // Lost or Withdrawn, same mechanism as the Unconditional outcome
+  // picker above. The Withdrawn stage still exists for Office even
+  // though nothing else on the board routes to it any more.
+  'Advanced Negotiations / WIP': [['leased','Leased','Leased'],
+                                  ['lost','Lost','Lost'],
+                                  ['withdrawn','Withdrawn','Withdrawn']]
 };
 const TODAY=()=>new Date().toISOString().slice(0,10);
 /* Form controls do not print their values — a date input shows 'dd.'
