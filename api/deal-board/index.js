@@ -23,7 +23,7 @@ const ROLES_WRITE = ["office_admin", "accounts", "manager"];
 const ROLES_ADMIN = ["manager"];
 
 const EDITABLE = [
-  "address", "tenant", "timing", "timing_date", "fee_nzd", "probability",
+  "address", "tenant", "listing_type", "timing", "timing_date", "fee_nzd", "probability",
   "status_note", "method_of_sale", "vendor_contact", "aml",
 ];
 
@@ -96,7 +96,7 @@ async function getBoard(req, res) {
     supabase.from("db_pipeline_weights")
       .select("stage_name, pct").eq("department_id", id),
     supabase.from("db_departments")
-      .select("show_tenant, show_probability").eq("id", id).single(),
+      .select("show_tenant, show_probability, show_listing_type").eq("id", id).single(),
     supabase.from("db_deals")
       .select("outcome").eq("department_id", id).not("outcome", "is", null),
     supabase.from("db_notes")
@@ -123,7 +123,8 @@ async function getBoard(req, res) {
     noteSections: noteSections.data || [],
     notes: noteRows.data || [],
     weights: weightRows.data || [],
-    options: deptOpts.data || { show_tenant: false, show_probability: false },
+    options: deptOpts.data ||
+      { show_tenant: false, show_probability: false, show_listing_type: false },
     outcomes: (outcomeRows.data || []).reduce((a, r) => {
       a[r.outcome] = (a[r.outcome] || 0) + 1;
       return a;
@@ -155,6 +156,7 @@ async function addDeal(req, res) {
       sort_order: (last?.sort_order ?? 0) + 1000,
       address,
       tenant: b.tenant || null,
+      listing_type: b.listing_type || null,
       timing: b.timing || null,
       timing_date: b.timing_date || null,
       probability: b.probability ?? null,
@@ -507,6 +509,7 @@ async function notes(req, res, id) {
       department_id: dept, section: b.section,
       body: (b.body || "").trim(),
       tenant: b.tenant || null,
+      listing_type: b.listing_type || null,
       timing: b.timing || null,
       timing_date: b.timing_date || null,
       probability: b.probability ?? null,
