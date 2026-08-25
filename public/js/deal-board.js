@@ -219,10 +219,11 @@ function renderBoard(target){
         ${(S().options||{}).show_tenant?'<th style="width:22%">Tenant</th>':''}
         <th${(S().options||{}).show_tenant?' style="width:22%"':''}>Address</th>
         ${(S().options||{}).show_listing_type?'<th style="width:96px">Sale / Lease</th>':''}
-        <th style="width:120px">Timing</th>
+        <th style="width:${(S().options||{}).show_conditions?'160px':'120px'}">${
+          (S().options||{}).show_conditions?'Conditions':'Timing'}</th>
         <th style="width:92px" class="num">Fee</th>
         ${(S().options||{}).show_probability?'<th style="width:56px" class="num">Prob</th>':''}
-        <th style="width:96px">Status</th>
+        ${(S().options||{}).hide_status?'':'<th style="width:96px">Status</th>'}
         <th style="width:76px">Broker</th>
         <th style="width:40px" class="noprint">AML</th>
         <th style="width:92px" class="noprint"></th>
@@ -236,7 +237,9 @@ function renderBoard(target){
     if(!collapsed[st]){
       const tb=sec.querySelector('tbody');
       if(!rows.length){
-        tb.innerHTML='<tr><td colspan="9" class="empty">'+
+        const cols=9+((S().options||{}).show_tenant?1:0)+((S().options||{}).show_listing_type?1:0)+
+          ((S().options||{}).show_probability?1:0)-((S().options||{}).hide_status?1:0);
+        tb.innerHTML=`<tr><td colspan="${cols}" class="empty">`+
           (fromDate||toDate ? 'Nothing in this date range.' : 'Nothing here yet.')+'</td></tr>';
       }
       rows.forEach(d=>{
@@ -314,9 +317,11 @@ function dealRow(d){
     <td class="${(S().options||{}).show_tenant?'':'addr'}"><div contenteditable data-k="a" data-ph="Address">${esc(d.a)}</div></td>
     ${(S().options||{}).show_listing_type
       ? `<td class="ltcell">${listingSelect(d.lt)}${pt(d.lt)}</td>` : ''}
-    <td class="timingcell"><input type="date" class="dateinput" value="${esc(d.td)}">${
-      (!d.td && d.t) ? `<span class="legacy">${esc(d.t)}</span>` : ''}${
-      pt(d.td?printDate(d.td):d.t)}</td>
+    <td class="timingcell">${(S().options||{}).show_conditions
+      ? `<div contenteditable data-k="t" data-ph="Conditions">${esc(d.t)}</div>`
+      : `<input type="date" class="dateinput" value="${esc(d.td)}">${
+          (!d.td && d.t) ? `<span class="legacy">${esc(d.t)}</span>` : ''}${
+          pt(d.td?printDate(d.td):d.t)}`}</td>
     ${brokerFilter
       ? `<td class="num sharecell">${d.f?money(shareOf(d)):'—'}${
           brokersOf(d).length>1
@@ -325,7 +330,7 @@ function dealRow(d){
           d.f?(+d.f).toLocaleString():''}</div></td>`}
     ${(S().options||{}).show_probability
       ? `<td class="num prob"><div contenteditable data-k="pr" data-ph="—">${d.pr===''?'':d.pr}</div></td>` : ''}
-    <td class="statuscell">${statusSelect(d.st)}${pt(d.st)}</td>
+    ${(S().options||{}).hide_status ? '' : `<td class="statuscell">${statusSelect(d.st)}${pt(d.st)}</td>`}
     <td class="brk"><div contenteditable data-k="b" data-ph="—">${esc(d.b)}</div></td>
     <td class="amlcell noprint"><input type="checkbox" class="amlbox"
       ${d.aml==='Y'?'checked':''} title="AML complete"></td>
@@ -632,6 +637,14 @@ function noteRow(n, section, isExpiry, extras){
 
   const di=tr.querySelector('.dateinput');
   if(di) di.onchange=()=>{ n.td=di.value||''; saveNote({timing_date:n.td||null}).catch(()=>{}); };
+
+  const lts=tr.querySelector('.ltpick');
+  if(lts) lts.onchange=()=>{
+    const was=d.lt; d.lt=lts.value;
+    saveDealField(d,'lt')
+      .then(()=>{tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500)})
+      .catch(()=>{ d.lt=was; renderBoard(); });
+  };
 
   const sel=tr.querySelector('.statuspick');
   if(sel){
