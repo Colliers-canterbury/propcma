@@ -526,7 +526,11 @@ const CUSTOM_COLUMNS={
   'Notes':         [{key:'body',label:'Address'},   {key:'b', label:'Broker'}],
   'Chase Ups':     [{key:'body',label:'Address'},   {key:'b', label:'Broker'}],
   'Listings':      [{key:'body',label:'Advertising'},{key:'ll',label:'Page 1'},{key:'at',label:'Page 2'}],
-  'Signage Audit': [{key:'body',label:'Area'},       {key:'b', label:'Broker'},{key:'ll',label:'Notes/Date'}]
+  // Address-ish column closest to full width, Broker and Notes/Date
+  // narrower and immediately after it — 1/3 : 1/4 : rest.
+  'Signage Audit': [{key:'body',label:'Area',       width:'33.33%'},
+                     {key:'b', label:'Broker',      width:'25%'},
+                     {key:'ll',label:'Notes/Date',  width:'41.67%'}]
 };
 
 function renderNoteSections(wrap){
@@ -564,7 +568,8 @@ function renderNoteSections(wrap){
         <span class="tot">${customCols||isExpirySec?'':money(items.reduce((a,n)=>a+(+n.f||0),0))}</span></header>
       <table><thead><tr>
         ${customCols ? `
-        ${customCols.map((c,i)=>`<th${i===0?'':' style="width:110px"'}>${esc(c.label)}</th>`).join('')}
+        ${customCols.map((c,i)=>
+          `<th${c.width?` style="width:${c.width}"`:(i===0?'':' style="width:110px"')}>${esc(c.label)}</th>`).join('')}
         <th style="width:26px" class="noprint"></th>` : `
         <th>Detail</th>
         ${extras.map(x=>`<th style="width:${x.width}px">${x.label}</th>`).join('')}
