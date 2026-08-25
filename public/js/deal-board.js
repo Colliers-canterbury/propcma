@@ -302,9 +302,9 @@ function listingSelect(val){
    list instead of the pipeline Status options — an agency register
    entry isn't at any of those deal stages. */
 const NOTE_STATUS_OPTIONS={
-  'Sole Agencies':    ['Executed','Awaiting Signature'],
-  'Pending Agencies': ['Executed','Awaiting Signature'],
-  'New Agencies':     ['Executed','Awaiting Signature']
+  'Sole Agencies':    ['Executed','Awaiting Signature','Withdrawn'],
+  'Pending Agencies': ['Executed','Awaiting Signature','Withdrawn'],
+  'New Agencies':     ['Executed','Awaiting Signature','Withdrawn']
 };
 
 function statusSelect(val, list){
