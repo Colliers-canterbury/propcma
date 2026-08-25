@@ -96,7 +96,7 @@ async function getBoard(req, res) {
     supabase.from("db_pipeline_weights")
       .select("stage_name, pct").eq("department_id", id),
     supabase.from("db_departments")
-      .select("show_tenant, show_probability, show_listing_type, show_conditions, hide_status")
+      .select("show_tenant, show_probability, show_listing_type, timing_label, hide_status")
       .eq("id", id).single(),
     supabase.from("db_deals")
       .select("outcome").eq("department_id", id).not("outcome", "is", null),
@@ -126,7 +126,7 @@ async function getBoard(req, res) {
     weights: weightRows.data || [],
     options: deptOpts.data ||
       { show_tenant: false, show_probability: false, show_listing_type: false,
-        show_conditions: false, hide_status: false },
+        timing_label: null, hide_status: false },
     outcomes: (outcomeRows.data || []).reduce((a, r) => {
       a[r.outcome] = (a[r.outcome] || 0) + 1;
       return a;
