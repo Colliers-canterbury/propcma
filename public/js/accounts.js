@@ -339,15 +339,31 @@
             `}
             <div class="hl"><dt>Total to invoice (excl GST)</dt><dd>$${fmt(d.total_invoice_ex_gst)}</dd></div>
           </dl>
-          ${d.form && d.form.deposit && d.deposit_to_trust ? `<h3>Trust deposit</h3><dl>
-            <div><dt>Amount</dt><dd>$${fmt(d.form.deposit.amount)}</dd></div>
+          ${!isDraft ? `<h3>Trust deposit</h3>
+          ${d.deposit_to_trust ? `<dl>
+            <div><dt>Amount</dt><dd>
+              <span class="receiptEdit">
+                <input id="trustAmount" value="${esc(d.form?.deposit?.amount||"")}" placeholder="0.00" />
+                <span class="miniStatus">excl GST</span>
+              </span></dd></div>
             <div><dt>Receipt no.</dt><dd>
-              ${isDraft ? esc(d.form.deposit.receiptNo||"—") : `<span class="receiptEdit">
-                <input id="receiptNo" value="${esc(d.form.deposit.receiptNo||"")}" placeholder="Enter receipt no." />
-                <button id="receiptSave" class="miniBtn">Save</button>
-                <span id="receiptStatus" class="miniStatus"></span>
-              </span>`}</dd></div>
-</dl>` : ""}
+              <span class="receiptEdit">
+                <input id="trustReceiptNo" value="${esc(d.form?.deposit?.receiptNo||"")}" placeholder="Enter receipt no." />
+              </span></dd></div>
+            <div><dt></dt><dd>
+              <button id="trustSave" class="miniBtn">Save</button>
+              <span id="trustStatus" class="miniStatus"></span></dd></div>
+          </dl>` : `
+          <p class="note">Not flagged as a trust deposit by the office admin. If a deposit has come through to the trust account, add it here.</p>
+          <button id="addTrustBtn" class="linkBtn">+ Add trust deposit</button>
+          <div id="addTrustForm" class="hidden">
+            <div class="grid" style="margin-top:8px">
+              <label class="fld"><span class="lbl">Amount (excl GST)</span><input id="trustAmount" placeholder="0.00" /></label>
+              <label class="fld"><span class="lbl">Receipt no.</span><input id="trustReceiptNo" placeholder="Enter receipt no." /></label>
+            </div>
+            <button id="trustSave" class="miniBtn" style="margin-top:8px">Save</button>
+            <span id="trustStatus" class="miniStatus"></span>
+          </div>`}` : ""}
           <h3>Commission split</h3>
           <table class="tbl"><tbody>${splits.map((s) =>
             `<tr><td>${esc(s.party_name)}</td><td class="r">${s.split_pct}%</td><td class="r mono">$${fmt(s.split_amount)}</td></tr>`).join("")||`<tr><td class="dim">No splits recorded</td></tr>`}</tbody></table>
@@ -436,21 +452,30 @@
     const cb = $("completeBtn"); if (cb) cb.onclick = doComplete;
     const rb = $("returnBtn"); if (rb) { rb.disabled = !state.note.trim(); rb.onclick = doReturn; }
 
-    const rSave = $("receiptSave");
-    if (rSave) rSave.onclick = async () => {
-      const val = ($("receiptNo").value || "").trim();
-      const rst = $("receiptStatus");
-      rSave.disabled = true;
-      if (rst) rst.textContent = "Saving…";
+    const addTrustBtn = $("addTrustBtn");
+    if (addTrustBtn) addTrustBtn.onclick = () => {
+      $("addTrustForm").classList.remove("hidden");
+      addTrustBtn.classList.add("hidden");
+    };
+
+    const trustSave = $("trustSave");
+    if (trustSave) trustSave.onclick = async () => {
+      const amount = ($("trustAmount").value || "").trim();
+      const receiptNo = ($("trustReceiptNo").value || "").trim();
+      const tst = $("trustStatus");
+      trustSave.disabled = true;
+      if (tst) tst.textContent = "Saving…";
       try {
-        await api.setReceipt(state.deal.id, val);
+        await api.setTrustDeposit(state.deal.id, amount, receiptNo);
         state.deal.form = state.deal.form || {};
-        state.deal.form.deposit = { ...(state.deal.form.deposit || {}), receiptNo: val };
-        if (rst) rst.textContent = "Saved ✓";
+        state.deal.form.deposit = { ...(state.deal.form.deposit || {}), amount, receiptNo };
+        state.deal.deposit_to_trust = true;
+        if (tst) tst.textContent = "Saved ✓";
+        render();
       } catch (e) {
-        if (rst) rst.textContent = "Failed — try again";
+        if (tst) tst.textContent = "Failed — try again";
       } finally {
-        rSave.disabled = false;
+        trustSave.disabled = false;
       }
     };
 

@@ -41,6 +41,7 @@
     assignDealNumber: (id, dealNo) => call(`/${id}/assign-deal-number`, { method: "POST", body: { dealNo } }),
     markComplete: (id, comment) => call(`/${id}/complete`, { method: "POST", body: { comment } }),
     setReceipt: (id, receiptNo) => call(`/${id}/receipt`, { method: "POST", body: { receiptNo } }),
+    setTrustDeposit: (id, amount, receiptNo) => call(`/${id}/trust-deposit`, { method: "POST", body: { amount, receiptNo } }),
     returnToBroker: (id, note) => call(`/${id}/return`, { method: "POST", body: { note } }),
 
     // ---- attachments ----
@@ -235,6 +236,12 @@
       const d = findDeal(id);
       d.form = d.form || {}; d.form.deposit = { ...(d.form.deposit || {}), receiptNo };
       return delay({ ok: true, receiptNo });
+    },
+    setTrustDeposit: (id, amount, receiptNo) => {
+      const d = findDeal(id);
+      d.form = d.form || {}; d.form.deposit = { ...(d.form.deposit || {}), amount, receiptNo };
+      d.deposit_to_trust = true;
+      return delay({ ok: true, amount, receiptNo });
     },
     invoiceClient: (id) => {
       const d = findDeal(id);
