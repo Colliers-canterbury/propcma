@@ -37,6 +37,11 @@ export function computeDerived(form) {
   const adminFee = form.comm?.adminFee ? 500 : 0;
   const recoverMarketing = num(form.comm?.recoverMarketing);
   const recoverOther = num(form.comm?.recoverOther);
+  // Deducted from the commission itself (not a pass-through cost
+  // recovery like recoverMarketing/recoverOther above), so it comes off
+  // before commissionBase is worked out below — third parties and
+  // salespeople are paid on the reduced amount.
+  const deductMarketing = num(form.comm?.deductMarketing);
 
   // Flat Fee mode: a single typed dollar figure replaces the whole
   // tiered %-of-sale-price calculation.
@@ -47,12 +52,15 @@ export function computeDerived(form) {
     num(form.comm?.otherFee) +
     adminFee +
     recoverMarketing +
-    recoverOther;
+    recoverOther -
+    deductMarketing;
 
   // Base the third-party share (and, in turn, the internal pool) is
   // calculated on. The admin fee and cost recoveries are pass-throughs,
   // not commission, so neither third parties nor salespeople take a
-  // share of them.
+  // share of them. The marketing deduction, by contrast, reduces the
+  // commission itself, so it stays baked into totalInvoice here rather
+  // than being added back.
   const commissionBase = totalInvoice - adminFee - recoverMarketing - recoverOther;
 
   const thirdPartyRows = (form.thirdParty || [])
