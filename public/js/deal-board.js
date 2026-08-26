@@ -37,7 +37,7 @@ const pt=txt=>`<span class="printonly">${esc(txt||'')}</span>`;
 
 const LISTING_TYPES=['Sale','Lease','Sale/Lease'];
 
-const STATUSES=['Pending','Submitted','Committed','Deadline','Auction','Priced','Off-Market'];
+const STATUSES=['Pending','Submitted','Committed','Deadline','Auction','Priced','Off-Market','PBN'];
 const HEAT=['Motivated','Luke warm','Slow'], KEY='dealboard:v3';
 let mem=null,state=null,which='',tab='board',collapsed={},current=null,proj=false;
 
@@ -1441,7 +1441,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-21d';
+const BOARD_VERSION='2026-08-26a';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
