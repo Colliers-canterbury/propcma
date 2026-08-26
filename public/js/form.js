@@ -67,8 +67,8 @@
       depositToTrust: false,
       deposit: { amount:"", dateReceived:"", receiptNo:"", earlyRelease:false, vendorAuthSent:false, vendorAuthReceived:false, purchaserAuthSent:false, purchaserAuthReceived:false },
       comm: { flatFee:false, flatFeeAmount:"", tiers:[{pct:"",base:""},{pct:"",base:""},{pct:"",base:""}], otherDesc:"", otherFee:"", adminFee:true, recoverMarketing:"", recoverOtherDesc:"", recoverOther:"", deductMarketingDesc:"", deductMarketing:"" },
-      splits: [ {person:"",pct:""},{person:"",pct:""},{person:"",pct:""},{person:"",pct:""},{person:"",pct:""} ],
-      thirdParty: [ {name:"",pct:""},{name:"",pct:""},{name:"",pct:""} ],
+      splits: [ {person:"",pct:"",fixed:""},{person:"",pct:"",fixed:""},{person:"",pct:"",fixed:""},{person:"",pct:"",fixed:""},{person:"",pct:"",fixed:""} ],
+      thirdParty: [ {name:"",pct:"",fixed:""},{name:"",pct:"",fixed:""},{name:"",pct:"",fixed:""} ],
       buyerSource:"", buyerSourceOther:"",
       listingSource:"", listingReferralWho:"", listingReferralInternal:"Yes", listingOther:"",
       checklist: { agencyAgreement:false, unconditionalConfirmation:false, salePriceConfirmation:false, marketingReport:false, amlComplete:false, spAgreement:false, executedAgreement:false },
@@ -130,18 +130,32 @@
     // marketing deduction, by contrast, reduces the commission itself, so
     // it stays baked into totalInvoice here rather than being added back.
     const commissionBase = totalInvoice - adminFee - recoverMarketing - recoverOther;
+    // A split can be a fixed $ amount OR a percentage. Fixed wins when set.
+    const tpAmount = (s, base) => num(s.fixed) > 0 ? num(s.fixed) : (num(s.pct)/100)*base;
     const thirdPartyPctTotal = f.thirdParty.reduce((a,s)=>a+num(s.pct),0);
-    const thirdPartyTotal = f.thirdParty.reduce((a,s)=>a + (num(s.pct)/100)*commissionBase, 0);
+    const thirdPartyTotal = f.thirdParty.reduce((a,s) => a + tpAmount(s, commissionBase), 0);
     // Salespeople DO split the admin fee between them (third parties
     // still don't) — added back in here, after the third-party share
     // is taken out of the pure commission.
     const internalPool = (commissionBase - thirdPartyTotal) + adminFee;
     const internalPctTotal = f.splits.reduce((a,s)=>a+num(s.pct),0);
-    const internalOk = internalPctTotal === 0 || Math.abs(internalPctTotal-100) < 0.01;
+    const internalFixedTotal = f.splits.reduce((a,s) => a + (num(s.fixed) > 0 ? num(s.fixed) : 0), 0);
+    // With fixed amounts in the mix, "100%" no longer strictly applies —
+    // consider it balanced if the paid-out internal total matches the pool.
+    const internalPaid = f.splits.reduce((a,s) => a + (num(s.fixed) > 0 ? num(s.fixed) : (num(s.pct)/100)*internalPool), 0);
+    const internalOk = Math.abs(internalPaid - internalPool) < 1
+      || internalPctTotal === 0 && internalFixedTotal === 0;
 
     return { salePrice, yieldCalc, yieldPct, tierFees, tierBases, commissionFee, adminFee, totalInvoice,
              commissionBase, thirdPartyPctTotal, thirdPartyTotal, internalPool,
-             internalPctTotal, internalOk };
+             internalPctTotal, internalPaid, internalOk, tpAmount };
+  }
+
+  function splitStatusText(d) {
+    if (d.internalPctTotal === 0 && d.internalPaid === 0) return "No salesperson split entered";
+    const paid = "$" + fmt(d.internalPaid) + " of $" + fmt(d.internalPool);
+    return d.internalOk ? `Salesperson split balances (${paid}) ✓`
+                        : `Salesperson split ${paid} — doesn't balance`;
   }
 
   function validate(d) {
@@ -171,9 +185,9 @@
       m.push(f.comm.flatFee ? "Commission works out to $0 — check the flat fee amount"
                              : "Commission works out to $0 — check the tier percentages");
     }
-    if (d.internalPctTotal === 0) m.push("Commission split");
-    else if (!d.internalOk) m.push("Salesperson split must total 100%");
-    if (d.thirdPartyPctTotal >= 100) m.push("Third-party share must be under 100%");
+    if (d.internalPaid === 0) m.push("Commission split");
+    else if (!d.internalOk) m.push("Salesperson split must balance to the pool");
+    if (d.thirdPartyTotal >= d.totalInvoice) m.push("Third-party share can't exceed the commission");
     if (!f.buyerSource) m.push("Buyer source");
     if (!f.listingSource) m.push("Listing source");
     if (!f.checklist.agencyAgreement) m.push("Checklist — signed agency agreement");
@@ -282,12 +296,14 @@
         <option value="">${dealBrokers.length?"Select…":"Add salespeople in section 1"}</option>
         ${dealBrokers.map((b) => `<option value="${esc(b.name)}" ${s.person===b.name?"selected":""}>${esc(b.name)}</option>`).join("")}
         </select></td>
-      <td><input class="cell" data-recalc data-path="splits.${i}.pct" value="${esc(s.pct)}" placeholder="%" /></td>
-      <td class="r mono">${num(s.pct)?fmt((num(s.pct)/100)*d.internalPool):"—"}</td></tr>`).join("");
+      <td><input class="cell" data-recalc data-path="splits.${i}.pct" value="${esc(s.pct)}" placeholder="%" ${num(s.fixed)>0?"disabled":""} /></td>
+      <td><input class="cell r" data-money data-recalc data-path="splits.${i}.fixed" value="${esc(s.fixed)}" placeholder="fixed $" /></td>
+      <td class="r mono">${(num(s.fixed)||num(s.pct))?fmt(d.tpAmount(s,d.internalPool)):"—"}</td></tr>`).join("");
     const tpRows = f.thirdParty.map((s,i) => `<tr>
       <td><input class="cell" data-path="thirdParty.${i}.name" value="${esc(s.name)}" placeholder="Office / party" /></td>
-      <td><input class="cell" data-recalc data-path="thirdParty.${i}.pct" value="${esc(s.pct)}" placeholder="%" /></td>
-      <td class="r mono">${num(s.pct)?fmt((num(s.pct)/100)*d.commissionBase):"—"}</td></tr>`).join("");
+      <td><input class="cell" data-recalc data-path="thirdParty.${i}.pct" value="${esc(s.pct)}" placeholder="%" ${num(s.fixed)>0?"disabled":""} /></td>
+      <td><input class="cell r" data-money data-recalc data-path="thirdParty.${i}.fixed" value="${esc(s.fixed)}" placeholder="fixed $" /></td>
+      <td class="r mono">${(num(s.fixed)||num(s.pct))?fmt(d.tpAmount(s,d.commissionBase)):"—"}</td></tr>`).join("");
 
     $("app").innerHTML = `
       <header class="top">
@@ -377,13 +393,13 @@
             </tbody>
             <tfoot><tr><td colspan="3">Total amount to be invoiced (excl GST)</td><td class="r mono total">$${fmt(d.totalInvoice)}</td></tr></tfoot></table>`)}
 
-          ${section("9","Commission split","Third parties take a percentage of the commission (excluding the administration fee). Salespeople then split what remains, which must total 100%.",`
-            <h3 class="subHead">Third party / other office <span class="dim">(conjunctional / referral — % of commission)</span></h3>
-            <table class="tbl"><tbody>${tpRows}</tbody></table>
+          ${section("9","Commission split","Third parties take a percentage of the commission (excluding the administration fee), or a fixed dollar amount. Salespeople then split what remains.",`
+            <h3 class="subHead">Third party / other office <span class="dim">(conjunctional / referral — % of commission, or a fixed $)</span></h3>
+            <table class="tbl"><thead><tr><th>Office / party</th><th>%</th><th class="r">Fixed $</th><th class="r">Amount $</th></tr></thead><tbody>${tpRows}</tbody></table>
             ${d.thirdPartyTotal ? `<div class="poolNote">Third party share: <b>$${fmt(d.thirdPartyTotal)}</b> of $${fmt(d.commissionBase)} commission</div>` : ""}
             <h3 class="subHead">Salespeople <span class="dim">(split the remaining $${fmt(d.internalPool)})</span></h3>
-            <table class="tbl"><thead><tr><th>Salesperson</th><th>%</th><th class="r">Amount $</th></tr></thead><tbody>${splitRows}</tbody></table>
-            <div class="splitStatus ${d.internalPctTotal===0?"":d.internalOk?"ok":"bad"}">Salesperson split: ${d.internalPctTotal.toFixed(2)}%${d.internalPctTotal!==0?(d.internalOk?" ✓":" — must equal 100%"):""}</div>`)}
+            <table class="tbl"><thead><tr><th>Salesperson</th><th>%</th><th class="r">Fixed $</th><th class="r">Amount $</th></tr></thead><tbody>${splitRows}</tbody></table>
+            <div class="splitStatus ${d.internalOk?"ok":"bad"}">${splitStatusText(d)}</div>`)}
 
 
           ${section("10","Buyer & listing source","",`<div class="grid">
@@ -428,7 +444,7 @@
             <div><dt>Sale price</dt><dd>${d.salePrice?"$"+fmt(d.salePrice):"—"}</dd></div>
             <div><dt>${f.sale.rentalBasis==="Vacant"?"Yield":f.sale.rentalBasis+" yield"}</dt><dd>${d.yieldPct?d.yieldPct.toFixed(2)+"%":"—"}</dd></div>
             <div class="hl"><dt>Total to invoice</dt><dd>$${fmt(d.totalInvoice)}</dd></div>
-            <div><dt>Salesperson split</dt><dd class="${d.internalPctTotal&&!d.internalOk?"bad":""}">${d.internalPctTotal.toFixed(0)}%</dd></div>
+            <div><dt>Salesperson split</dt><dd class="${!d.internalOk?"bad":""}">${d.internalPaid?"$"+fmt(d.internalPaid):"—"}</dd></div>
           </dl>
           <div class="readiness">${missing.length===0?'<span class="ok">✓ Ready to send</span>':`${missing.length} item${missing.length===1?"":"s"} outstanding`}</div>
           <button class="primary" id="sendBtn">Send to accounts</button>
@@ -544,7 +560,7 @@
     if (dds[2]) dds[2].textContent = d.salePrice ? "$" + fmt(d.salePrice) : "—";
     if (dds[3]) dds[3].textContent = d.yieldPct ? d.yieldPct.toFixed(2) + "%" : "—";
     if (dds[4]) dds[4].textContent = "$" + fmt(d.totalInvoice);
-    if (dds[5]) { dds[5].textContent = d.internalPctTotal.toFixed(0) + "%"; dds[5].className = d.internalPctTotal && !d.internalOk ? "bad" : ""; }
+    if (dds[5]) { dds[5].textContent = d.internalPaid ? "$" + fmt(d.internalPaid) : "—"; dds[5].className = !d.internalOk ? "bad" : ""; }
     const readiness = rail.querySelector(".readiness");
     if (readiness) readiness.innerHTML = missing.length === 0
       ? '<span class="ok">✓ Ready to send</span>'
