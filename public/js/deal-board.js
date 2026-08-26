@@ -156,7 +156,7 @@ function saveMeetingField(patch){
   return persist(()=>DealBoardApi.saveMeeting(which, S().date, patch), 'meeting notes');
 }
 const stageTotal=st=>visibleDeals().filter(d=>d.s===st)
-  .reduce((a,d)=>a+(brokerFilter?shareOf(d):(+d.f||0)),0);
+  .reduce((a,d)=>a+(brokerFilter?shareOf(d,brokerFilter):(+d.f||0)),0);
 
 /* Weighted pipeline: Unconditional counts in full, other stages at the
    percentage set under Pipeline Settings. A stage with no weighting
@@ -344,7 +344,7 @@ function dealRow(d){
           (!d.td && d.t) ? `<span class="legacy">${esc(d.t)}</span>` : ''}${
           pt(d.td?printDate(d.td):d.t)}`}</td>
     ${brokerFilter
-      ? `<td class="num sharecell">${d.f?money(shareOf(d)):'—'}${
+      ? `<td class="num sharecell">${d.f?money(shareOf(d,brokerFilter)):'—'}${
           brokersOf(d).length>1
             ? `<span class="fullfee">of ${money(d.f)}</span>` : ''}</td>`
       : `<td class="num"><div contenteditable data-k="f" data-ph="0">${
@@ -957,7 +957,10 @@ async function renderManagement(){
    is a view of what a broker is working on, not a fee split. */
 function brokerOptions(){
   const seen={};
-  S().deals.forEach(d=>brokersOf(d).forEach(c=>{ seen[c]=(seen[c]||0)+1; }));
+  S().deals.forEach(d=>{
+    const uniq=[...new Set(brokersOf(d))];
+    uniq.forEach(c=>{ seen[c]=(seen[c]||0)+1; });
+  });
   return Object.keys(seen).sort().map(c=>{
     const b=(brokerList||[]).find(x=>x.code===c);
     return {code:c, name:b?b.first_name:'', count:seen[c]};
@@ -967,9 +970,9 @@ function brokerOptions(){
 function renderBrokerTally(){
   const tally=$('#brokerTally'); if(!tally) return;
   const mine=visibleDeals();
-  const banked=mine.filter(d=>/^uncondition/i.test(d.s)).reduce((a,d)=>a+shareOf(d),0);
-  const weighted=mine.reduce((a,d)=>a+shareOf(d)*dealWeight(d),0);
-  const raw=mine.reduce((a,d)=>a+shareOf(d),0);
+  const banked=mine.filter(d=>/^uncondition/i.test(d.s)).reduce((a,d)=>a+shareOf(d,brokerFilter),0);
+  const weighted=mine.reduce((a,d)=>a+shareOf(d,brokerFilter)*dealWeight(d),0);
+  const raw=mine.reduce((a,d)=>a+shareOf(d,brokerFilter),0);
   const won=S().deals.filter(d=>d.out==='won'&&brokersOf(d).indexOf(brokerFilter)>=0).length;
   const lost=S().deals.filter(d=>d.out==='lost'&&brokersOf(d).indexOf(brokerFilter)>=0).length;
   tally.innerHTML=`
@@ -1011,8 +1014,8 @@ function renderBrokerPipeline(){
   const shared=mine.filter(d=>brokersOf(d).length>1).length;
 
   if(note) note.innerHTML = shared
-    ? `Fees shown are an <b>even split</b> by number of brokers — ${shared} of these ${
-       shared===1?'deal is':'deals are'} shared. Actual commission splits are held in the finance workbook.`
+    ? `Fees shown are split by how many times each broker is listed against a deal — <code>CK/OS</code> is still 50/50, but list a code twice for a bigger share (e.g. <code>PM/PM/OS/CK</code> for a 50/25/25 split). ${shared} of these ${
+       shared===1?'deal is':'deals are'} shared this way. The finance workbook remains the record for actual commission splits.`
     : 'Fees shown in full — none of these deals are shared.';
 
   renderBrokerTally();
@@ -1147,18 +1150,26 @@ function inRange(d){
   return true;
 }
 /* Split 'LW/WF' into codes. A shared deal belongs to both brokers, so
-   it appears in both their pipelines. */
+   it appears in both their pipelines. Listing a code more than once
+   (e.g. 'PM/PM/OS/CK') is how an uneven split is recorded — see
+   shareOf() below. */
 function brokersOf(d){
   return (d.b||'').split('/').map(x=>x.trim().toUpperCase()).filter(Boolean);
 }
 let brokerFilter='';
-/* A broker's share of a deal, split evenly by head count.
-   This is an ASSUMPTION, not a commission figure — actual splits live
-   in the finance workbook. Shown labelled, with the full fee alongside,
-   so it is never mistaken for the real number. */
-function shareOf(d){
-  const n=brokersOf(d).length || 1;
-  return (+d.f||0)/n;
+/* A broker's share of a deal. Weight is how many times that broker's
+   code appears in the Broker field: 'CK/OS' still splits 50/50 (one
+   mention each of two), but 'PM/PM/OS/CK' gives PM a double mention
+   out of four — 50% to PM, 25% each to OS and CK. This is a board
+   CONVENTION for the pipeline display, not a commission figure —
+   actual splits are confirmed in the finance workbook. Shown labelled,
+   with the full fee alongside, so it is never mistaken for the real
+   number. */
+function shareOf(d, code){
+  const list=brokersOf(d);
+  if(!list.length) return +d.f||0;
+  const mine = code ? list.filter(c=>c===code).length : 1;
+  return (+d.f||0) * mine / list.length;
 }
 function visibleDeals(){
   let list=S().deals.filter(inRange);
@@ -1441,7 +1452,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-26a';
+const BOARD_VERSION='2026-08-26b';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
