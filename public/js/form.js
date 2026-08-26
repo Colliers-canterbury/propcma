@@ -66,7 +66,7 @@
       sale: { dateOfAgreement:"", unconditionalDate:"", salePrice:"", rentalBasis:"Net", rentalIncome:"", yieldManual:"", titleType:"Freehold", landArea:"", wale:"", tenancies:"", occupiedArea:"", auction:false, tenancySchedule:false },
       depositToTrust: false,
       deposit: { amount:"", dateReceived:"", receiptNo:"", earlyRelease:false, vendorAuthSent:false, vendorAuthReceived:false, purchaserAuthSent:false, purchaserAuthReceived:false },
-      comm: { flatFee:false, flatFeeAmount:"", tiers:[{pct:"",base:""},{pct:"",base:""},{pct:"",base:""}], otherDesc:"", otherFee:"", adminFee:true, recoverMarketing:"", recoverOtherDesc:"", recoverOther:"" },
+      comm: { flatFee:false, flatFeeAmount:"", tiers:[{pct:"",base:""},{pct:"",base:""},{pct:"",base:""}], otherDesc:"", otherFee:"", adminFee:true, recoverMarketing:"", recoverOtherDesc:"", recoverOther:"", deductMarketingDesc:"", deductMarketing:"" },
       splits: [ {person:"",pct:""},{person:"",pct:""},{person:"",pct:""},{person:"",pct:""},{person:"",pct:""} ],
       thirdParty: [ {name:"",pct:""},{name:"",pct:""},{name:"",pct:""} ],
       buyerSource:"", buyerSourceOther:"",
@@ -116,12 +116,19 @@
     const adminFee = f.comm.adminFee ? 500 : 0;
     const recoverMarketing = num(f.comm.recoverMarketing);
     const recoverOther = num(f.comm.recoverOther);
+    // Deducted from the commission itself (not a pass-through cost
+    // recovery like recoverMarketing/recoverOther above), so it comes off
+    // before commissionBase is worked out below — third parties and
+    // salespeople are paid on the reduced amount.
+    const deductMarketing = num(f.comm.deductMarketing);
     const totalInvoice = commissionFee + num(f.comm.otherFee) + adminFee
-      + recoverMarketing + recoverOther;
+      + recoverMarketing + recoverOther - deductMarketing;
 
     // commissionBase is the actual commission-earning amount — the admin
     // fee and cost recoveries are pass-throughs, not commission, so
-    // neither third parties nor salespeople take a share of them.
+    // neither third parties nor salespeople take a share of them. The
+    // marketing deduction, by contrast, reduces the commission itself, so
+    // it stays baked into totalInvoice here rather than being added back.
     const commissionBase = totalInvoice - adminFee - recoverMarketing - recoverOther;
     const thirdPartyPctTotal = f.thirdParty.reduce((a,s)=>a+num(s.pct),0);
     const thirdPartyTotal = f.thirdParty.reduce((a,s)=>a + (num(s.pct)/100)*commissionBase, 0);
@@ -365,6 +372,8 @@
                 <td class="r"><input class="cell r" data-money data-recalc data-path="comm.recoverMarketing" value="${esc(f.comm.recoverMarketing)}" placeholder="0.00" /></td></tr>
               <tr><td>Recover other costs</td><td colspan="2"><input class="cell" data-path="comm.recoverOtherDesc" value="${esc(f.comm.recoverOtherDesc)}" placeholder="Please specify" /></td>
                 <td class="r"><input class="cell r" data-money data-recalc data-path="comm.recoverOther" value="${esc(f.comm.recoverOther)}" placeholder="0.00" /></td></tr>
+              <tr><td>Deduct marketing costs</td><td colspan="2"><input class="cell" data-path="comm.deductMarketingDesc" value="${esc(f.comm.deductMarketingDesc)}" placeholder="Description (optional)" /></td>
+                <td class="r"><input class="cell r" data-money data-recalc data-path="comm.deductMarketing" value="${esc(f.comm.deductMarketing)}" placeholder="0.00" /></td></tr>
             </tbody>
             <tfoot><tr><td colspan="3">Total amount to be invoiced (excl GST)</td><td class="r mono total">$${fmt(d.totalInvoice)}</td></tr></tfoot></table>`)}
 
