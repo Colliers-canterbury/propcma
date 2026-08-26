@@ -77,17 +77,25 @@ export function computeLeaseDerived(form) {
   const commissionFee = num(form.comm?.fee);
   const recoverMarketing = num(form.comm?.recoverMarketing);
   const recoverOther = num(form.comm?.recoverOther);
+  // Deducted from the commission itself (not a pass-through cost
+  // recovery like recoverMarketing/recoverOther above), so it comes off
+  // before commissionBase is worked out below — third parties and
+  // salespeople are paid on the reduced amount.
+  const deductMarketing = num(form.comm?.deductMarketing);
   const totalInvoice =
     commissionFee +
     num(form.comm?.otherFee) +
     adminFee +
     recoverMarketing +
-    recoverOther;
+    recoverOther -
+    deductMarketing;
 
   // ---- splits (Option B, identical to sales) ----
   // commissionBase is the actual commission-earning amount — the admin
   // fee and cost recoveries are pass-throughs, not commission, so
-  // neither third parties nor salespeople take a share of them.
+  // neither third parties nor salespeople take a share of them. The
+  // marketing deduction, by contrast, reduces the commission itself, so
+  // it stays baked into totalInvoice here rather than being added back.
   const commissionBase = totalInvoice - adminFee - recoverMarketing - recoverOther;
 
   // A split can be a fixed $ amount OR a percentage. Fixed wins when set.
