@@ -96,7 +96,8 @@
                  lessorAuthSent:false, lessorAuthReceived:false, lesseeAuthSent:false, lesseeAuthReceived:false },
       // Commission amounts are entered manually for leases.
       comm: { feeDesc:"", fee:"", otherDesc:"", otherFee:"", adminFee:true,
-              recoverMarketingDesc:"", recoverMarketing:"", recoverOtherDesc:"", recoverOther:"" },
+              recoverMarketingDesc:"", recoverMarketing:"", recoverOtherDesc:"", recoverOther:"",
+              deductMarketingDesc:"", deductMarketing:"" },
       splits: [ {person:"",pct:"",fixed:""},{person:"",pct:"",fixed:""},{person:"",pct:"",fixed:""},{person:"",pct:"",fixed:""},{person:"",pct:"",fixed:""} ],
       thirdParty: [ {name:"",pct:"",fixed:""},{name:"",pct:"",fixed:""},{name:"",pct:"",fixed:""} ],
       tenantSource: "", tenantSourceOther: "", tenantReferralWho: "",
@@ -145,12 +146,19 @@
     const adminFee = f.comm.adminFee ? 500 : 0;
     const recoverMarketing = num(f.comm.recoverMarketing);
     const recoverOther = num(f.comm.recoverOther);
+    // Deducted from the commission itself (not a pass-through cost
+    // recovery like recoverMarketing/recoverOther above), so it comes off
+    // before commissionBase is worked out below — third parties and
+    // salespeople are paid on the reduced amount.
+    const deductMarketing = num(f.comm.deductMarketing);
     const totalInvoice = num(f.comm.fee) + num(f.comm.otherFee) + adminFee
-      + recoverMarketing + recoverOther;
+      + recoverMarketing + recoverOther - deductMarketing;
 
     // commissionBase is the actual commission-earning amount — the admin
     // fee and cost recoveries are pass-throughs, not commission, so
-    // neither third parties nor salespeople take a share of them.
+    // neither third parties nor salespeople take a share of them. The
+    // marketing deduction, by contrast, reduces the commission itself, so
+    // it stays baked into totalInvoice here rather than being added back.
     const commissionBase = totalInvoice - adminFee - recoverMarketing - recoverOther;
 
     // A split can be a fixed $ amount OR a percentage. Fixed wins when set.
@@ -421,6 +429,9 @@
                 <tr><td>Recover other costs</td>
                   <td><input class="cell" data-path="comm.recoverOtherDesc" value="${esc(f.comm.recoverOtherDesc)}" placeholder="Please specify" /></td>
                   <td class="r"><input class="cell r" data-money data-recalc data-path="comm.recoverOther" value="${esc(f.comm.recoverOther)}" placeholder="0.00" /></td></tr>
+                <tr><td>Deduct marketing costs</td>
+                  <td><input class="cell" data-path="comm.deductMarketingDesc" value="${esc(f.comm.deductMarketingDesc)}" placeholder="Description (optional)" /></td>
+                  <td class="r"><input class="cell r" data-money data-recalc data-path="comm.deductMarketing" value="${esc(f.comm.deductMarketing)}" placeholder="0.00" /></td></tr>
                 <tr class="total"><td colspan="2">Total amount to be invoiced (excl GST)</td><td class="r mono" id="totalInvoiceCell">${fmt(d.totalInvoice)}</td></tr>
               </tbody></table>`)}
 
