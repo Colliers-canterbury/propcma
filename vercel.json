@@ -2,8 +2,12 @@
   "version": 2,
   "routes": [
     { "src": "/api/generate-pdf", "dest": "/api/generate_pdf.py" },
+    { "src": "/api/deal-board/sync-rankings", "dest": "/api/deal-board/sync-rankings" },
     { "src": "/api/deal-board/(.*)", "dest": "/api/deal-board?path=$1" },
     { "src": "/api/(.*)",         "dest": "/api/$1" },
     { "src": "/(.*)",             "dest": "/public/$1" }
+  ],
+  "crons": [
+    { "path": "/api/deal-board/sync-rankings", "schedule": "0 20 * * *" }
   ]
 }
