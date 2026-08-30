@@ -19,6 +19,14 @@ const num = (v) => {
  *     third-party share). Their % must total 100% of that remainder.
  *   - Everything therefore reconciles: third-party $ + internal $
  *     = total invoiced.
+ *
+ * A split row (third party OR salesperson) can be entered as a
+ * percentage OR a fixed dollar amount — fixed wins when set. This
+ * mirrors public/js/form.js's derive() exactly; keep the two in sync,
+ * since a row that's only understood on one side silently vanishes
+ * from deal_sheet_splits at submit time (this previously happened
+ * for every fixed-$ row — it was filtered out here before the fix
+ * below, even though the form fully supported entering it that way).
  */
 export function computeDerived(form) {
   const salePrice = num(form.sale?.salePrice);
@@ -63,17 +71,20 @@ export function computeDerived(form) {
   // than being added back.
   const commissionBase = totalInvoice - adminFee - recoverMarketing - recoverOther;
 
+  // A split can be a fixed $ amount OR a percentage. Fixed wins when set.
+  const splitAmount = (s, base) => num(s.fixed) > 0 ? num(s.fixed) : (num(s.pct) / 100) * base;
+
   const thirdPartyRows = (form.thirdParty || [])
-    .filter((s) => num(s.pct) > 0)
+    .filter((s) => num(s.fixed) > 0 || num(s.pct) > 0)
     .map((s) => ({
       party_type: "third_party",
       party_name: s.name || "(unnamed)",
       split_pct: num(s.pct),
-      split_amount: +((num(s.pct) / 100) * commissionBase).toFixed(2),
+      split_amount: +splitAmount(s, commissionBase).toFixed(2),
     }));
 
   const thirdPartyTotal = thirdPartyRows.reduce((a, s) => a + s.split_amount, 0);
-  const thirdPartyPctTotal = thirdPartyRows.reduce((a, s) => a + s.split_pct, 0);
+  const thirdPartyPctTotal = (form.thirdParty || []).reduce((a, s) => a + num(s.pct), 0);
 
   // What internal brokers divide between them.
   // Salespeople DO split the admin fee between them (third parties
@@ -82,15 +93,22 @@ export function computeDerived(form) {
   const internalPool = +((commissionBase - thirdPartyTotal) + adminFee).toFixed(2);
 
   const internalRows = (form.splits || [])
-    .filter((s) => num(s.pct) > 0)
+    .filter((s) => num(s.fixed) > 0 || num(s.pct) > 0)
     .map((s) => ({
       party_type: "salesperson",
       party_name: s.person || "(unnamed)",
       split_pct: num(s.pct),
-      split_amount: +((num(s.pct) / 100) * internalPool).toFixed(2),
+      split_amount: +splitAmount(s, internalPool).toFixed(2),
     }));
 
-  const internalPctTotal = internalRows.reduce((a, s) => a + s.split_pct, 0);
+  const internalPctTotal = (form.splits || []).reduce((a, s) => a + num(s.pct), 0);
+  const internalFixedTotal = (form.splits || []).reduce((a, s) => a + (num(s.fixed) > 0 ? num(s.fixed) : 0), 0);
+  const internalPaid = internalRows.reduce((a, s) => a + s.split_amount, 0);
+  // With fixed amounts in the mix, "100%" no longer strictly applies —
+  // consider it balanced if the paid-out internal total matches the pool.
+  // Mirrors the form's internalOk exactly.
+  const internalOk = Math.abs(internalPaid - internalPool) < 1
+    || (internalPctTotal === 0 && internalFixedTotal === 0);
 
   return {
     salePrice: +salePrice.toFixed(2),
@@ -101,6 +119,8 @@ export function computeDerived(form) {
     thirdPartyPctTotal,
     internalPool,
     internalPctTotal,
+    internalPaid: +internalPaid.toFixed(2),
+    internalOk,
     splits: [...internalRows, ...thirdPartyRows],
   };
 }
@@ -160,11 +180,13 @@ export function validateForSubmit(form, derived) {
     missing.push(form.comm?.flatFee ? "Commission works out to $0 — check the flat fee amount"
                                      : "Commission works out to $0 — check the tier percentages");
   }
-  if (derived.internalPctTotal === 0) missing.push("Commission split");
-  else if (Math.abs(derived.internalPctTotal - 100) > 0.01)
-    missing.push("Salesperson split must total 100%");
-  if (derived.thirdPartyPctTotal >= 100)
-    missing.push("Third-party share must be under 100% of commission");
+  // Fixed-$ splits mean "must total 100%" no longer holds — a split is
+  // ready when what's actually paid out balances the pool. Mirrors the
+  // form's validate() exactly.
+  if (derived.internalPaid === 0) missing.push("Commission split");
+  else if (!derived.internalOk) missing.push("Salesperson split must balance to the pool");
+  if (derived.thirdPartyTotal >= derived.totalInvoice)
+    missing.push("Third-party share can't exceed the commission");
   if (!form.buyerSource) missing.push("Buyer source");
   if (!form.listingSource) missing.push("Listing source");
 
