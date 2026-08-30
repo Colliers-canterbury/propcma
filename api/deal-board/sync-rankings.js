@@ -62,14 +62,49 @@ import { requireUser, sendError, HttpError } from "../_lib/auth.js";
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
 
+// Patch for api/deal-board/sync-rankings.js
+//
+// Replace the top of graphToken() with the version below.
+//
+// The current message lists all three variables whenever any one of
+// them is missing, which is why it cannot tell you which to fix. This
+// reports the missing names only.
+//
+// Names only — never values. A client secret must not reach a browser
+// or a log, so this checks presence and stops there.
+
 async function graphToken() {
-  const tenant = process.env.GRAPH_TENANT_ID;
-  const id = process.env.GRAPH_CLIENT_ID;
-  const secret = process.env.GRAPH_CLIENT_SECRET;
-  if (!tenant || !id || !secret) {
+  const env = {
+    GRAPH_TENANT_ID: process.env.GRAPH_TENANT_ID,
+    GRAPH_CLIENT_ID: process.env.GRAPH_CLIENT_ID,
+    GRAPH_CLIENT_SECRET: process.env.GRAPH_CLIENT_SECRET,
+  };
+
+  // Empty string counts as missing — a var saved with a blank value
+  // behaves the same as one that was never added.
+  const missing = Object.entries(env)
+    .filter(([, v]) => !v || !String(v).trim())
+    .map(([k]) => k);
+
+  if (missing.length) {
+    // Any GRAPH_-ish names that ARE present, to catch the case where
+    // the values were set under a different prefix. Keys only.
+    const nearby = Object.keys(process.env)
+      .filter((k) => /GRAPH|AZURE|TENANT|CLIENT|MSAL/i.test(k) && !/SECRET/i.test(k))
+      .sort();
+    console.error("sync-rankings: missing env", { missing, nearby });
+
     throw new HttpError(500,
-      "Graph credentials are not configured (GRAPH_TENANT_ID / GRAPH_CLIENT_ID / GRAPH_CLIENT_SECRET)");
+      `Not configured: ${missing.join(", ")} ` +
+      `(${3 - missing.length} of 3 Graph variables present)`);
   }
+
+  const tenant = env.GRAPH_TENANT_ID.trim();
+  const id = env.GRAPH_CLIENT_ID.trim();
+  // Secrets are the usual casualty of copy-paste — a trailing newline
+  // survives the presence check above and then fails authentication
+  // with an unhelpful AADSTS error.
+  const secret = env.GRAPH_CLIENT_SECRET.trim();
 
   const res = await fetch(
     `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
@@ -86,6 +121,17 @@ async function graphToken() {
   );
   const data = await res.json();
   if (!res.ok) {
+    console.error("sync-rankings: token request rejected", {
+      status: res.status,
+      error: data.error,
+      // AADSTS codes identify the cause precisely:
+      //   AADSTS7000215  invalid secret (wrong value, or the secret ID
+      //                  was pasted instead of the value)
+      //   AADSTS7000222  secret expired
+      //   AADSTS700016   client id not found in this tenant
+      //   AADSTS900023   tenant id not recognised
+      description: data.error_description,
+    });
     throw new HttpError(502, `Graph sign-in failed: ${data.error_description || res.status}`);
   }
   return data.access_token;
