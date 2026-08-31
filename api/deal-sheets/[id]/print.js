@@ -224,7 +224,6 @@ ${deal.deposit_to_trust ? `
     ${comm.adminFee ? `<tr><td>Administration fee</td><td class="r"></td><td class="r">${money(500)}</td></tr>` : ""}
     ${comm.recoverMarketing ? `<tr><td>Recover marketing costs</td><td class="r"></td><td class="r">${money(comm.recoverMarketing)}</td></tr>` : ""}
     ${comm.recoverOther ? `<tr><td>Recover other — ${dash(comm.recoverOtherDesc)}</td><td class="r"></td><td class="r">${money(comm.recoverOther)}</td></tr>` : ""}
-    ${comm.deductMarketing ? `<tr><td>Deduct marketing costs${comm.deductMarketingDesc ? " — " + dash(comm.deductMarketingDesc) : ""}</td><td class="r"></td><td class="r">−${money(comm.deductMarketing)}</td></tr>` : ""}
     <tr class="total"><td>Total to invoice (excl GST)</td><td></td><td class="r">${money(deal.total_invoice_ex_gst)}</td></tr>
   </tbody>
 </table>
@@ -303,6 +302,8 @@ function renderLeasePrintable(deal, splits, attachments, brokers, preparedBy) {
     { key:"retail",    label:"Retail",         unit:"sqm"  },
     { key:"office",    label:"Office",         unit:"sqm"  },
     { key:"warehouse", label:"Warehouse",      unit:"sqm"  },
+    { key:"industrial",label:"Industrial",     unit:"sqm"  },
+    { key:"yard",      label:"Yard",           unit:"sqm"  },
     { key:"canopy",    label:"Canopy / Deck",  unit:"sqm"  },
     { key:"naming",    label:"Naming Rights",  unit:null   },
     { key:"carparks",  label:"Carparks",       unit:"cpks" },
@@ -344,7 +345,7 @@ function renderLeasePrintable(deal, splits, attachments, brokers, preparedBy) {
 
   const adminFee = comm.adminFee ? 500 : 0;
   const totalInvoice = n(comm.fee) + n(comm.otherFee) + adminFee
-    + n(comm.recoverMarketing) + n(comm.recoverOther) - n(comm.deductMarketing);
+    + n(comm.recoverMarketing) + n(comm.recoverOther);
 
   const rorText = lease.rorTimes
     ? `${esc(lease.rorTimes)} × ${dash(lease.rorYears)} year${n(lease.rorYears) === 1 ? "" : "s"}`
@@ -438,7 +439,6 @@ ${deal.deposit_to_trust ? `
     ${adminFee ? `<tr><td>Administration fee</td><td></td><td class="r">${money(500)}</td></tr>` : ""}
     ${comm.recoverMarketing ? `<tr><td>Recover marketing costs</td><td></td><td class="r">${money(comm.recoverMarketing)}</td></tr>` : ""}
     ${comm.recoverOther ? `<tr><td>Recover other costs</td><td>${dash(comm.recoverOtherDesc)}</td><td class="r">${money(comm.recoverOther)}</td></tr>` : ""}
-    ${comm.deductMarketing ? `<tr><td>Deduct marketing costs</td><td>${dash(comm.deductMarketingDesc)}</td><td class="r">−${money(comm.deductMarketing)}</td></tr>` : ""}
     <tr class="total"><td colspan="2">Total to invoice (excl GST)</td><td class="r">${money(totalInvoice)}</td></tr>
   </tbody>
 </table>
