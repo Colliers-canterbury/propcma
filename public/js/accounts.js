@@ -91,8 +91,8 @@
       : [["marketingReport", "Marketing campaign report"]];
 
     return {
-      required: required.map(([k, label]) => ({ ok: !!c[k], label })),
-      optional: optional.map(([k, label]) => ({ ok: !!c[k], label })),
+      required: required.map(([k, label]) => ({ key: k, ok: !!c[k], label })),
+      optional: optional.map(([k, label]) => ({ key: k, ok: !!c[k], label })),
     };
   }
 
@@ -310,6 +310,10 @@
     el.className = "detail";
     const meta = META[d.status] || { cls: "pillDraft", label: "Draft" };
     const isDraft = d.status === "draft";
+    // Accounts can complete/attach a missing mandatory item herself,
+    // rather than always having to bounce the deal back to the broker
+    // — available for as long as she's actively working the deal.
+    const canEditChecklist = ["submitted", "invoiced", "deposit_received"].includes(d.status);
     el.innerHTML = `
       <div class="detailHead">
         <div><h2>${esc(d.property_address||"—")}</h2>
@@ -344,6 +348,7 @@
             <div><dt>Amount</dt><dd>
               <span class="receiptEdit">
                 <input id="trustAmount" value="${esc(d.form?.deposit?.amount||"")}" placeholder="0.00" />
+                <span class="miniStatus">excl GST</span>
               </span></dd></div>
             <div><dt>Receipt no.</dt><dd>
               <span class="receiptEdit">
@@ -367,7 +372,15 @@
           <table class="tbl"><tbody>${splits.map((s) =>
             `<tr><td>${esc(s.party_name)}</td><td class="r">${s.split_pct}%</td><td class="r mono">$${fmt(s.split_amount)}</td></tr>`).join("")||`<tr><td class="dim">No splits recorded</td></tr>`}</tbody></table>
           <h3>Mandatory checklist</h3>
-          <ul class="checks">${checks.map((c) => `<li class="${c.ok?"":"bad"}">${c.label}</li>`).join("")}</ul>
+          ${canEditChecklist ? `
+          <ul class="checks editable">${checks.map((c) => `<li class="${c.ok?"":"bad"}">
+            <label class="chk"><input type="checkbox" class="checklistToggle" data-key="${c.key}" ${c.ok?"checked":""} /><span>${c.label}</span></label>
+            ${!c.ok ? `<span class="checklistUpload">
+              <label class="upBtn small">Attach<input type="file" class="checklistUploadInput" data-key="${c.key}" hidden /></label>
+              <span class="miniStatus" data-upload-status="${c.key}"></span>
+            </span>` : ""}
+          </li>`).join("")}</ul>` : `
+          <ul class="checks">${checks.map((c) => `<li class="${c.ok?"":"bad"}">${c.label}</li>`).join("")}</ul>`}
           ${optionalChecks.length ? `<h3>Other documents <span class="dim">(not mandatory)</span></h3>
           <ul class="checks optional">${optionalChecks.map((c) => `<li class="${c.ok?"":"muted"}">${c.label}</li>`).join("")}</ul>` : ""}
           ${(checklistAttachments.length) ? `<h3>Attachments</h3>
@@ -477,6 +490,39 @@
         trustSave.disabled = false;
       }
     };
+
+    // ---- mandatory checklist: tick or attach an outstanding item ----
+    el.querySelectorAll(".checklistToggle").forEach((cb) => {
+      cb.onchange = async () => {
+        cb.disabled = true;
+        try {
+          await api.setChecklistItem(state.deal.id, cb.dataset.key, cb.checked);
+          state.deal.form = state.deal.form || {};
+          state.deal.form.checklist = { ...(state.deal.form.checklist || {}), [cb.dataset.key]: cb.checked };
+          render();
+        } catch (e) {
+          alert("Could not update checklist: " + e.message);
+          cb.checked = !cb.checked;
+          cb.disabled = false;
+        }
+      };
+    });
+    el.querySelectorAll(".checklistUploadInput").forEach((input) => {
+      input.onchange = async () => {
+        const key = input.dataset.key, file = input.files[0];
+        if (!file) return;
+        const status = el.querySelector(`[data-upload-status="${key}"]`);
+        if (status) status.textContent = "Uploading…";
+        try {
+          await api.uploadAttachment(state.deal.id, key, file);
+          await loadDeal(state.deal.id);
+          render();
+        } catch (e) {
+          if (status) status.textContent = "Failed";
+          alert("Upload failed: " + e.message);
+        }
+      };
+    });
 
     el.querySelectorAll(".dlBtn").forEach((b) => {
       b.onclick = async () => {
