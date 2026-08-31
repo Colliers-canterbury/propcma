@@ -507,14 +507,18 @@ async function notes(req, res, id) {
       .eq("is_done", false)
       .order("sort_order", { ascending: false }).limit(1).maybeSingle();
 
+    // db_notes never got tenant / listing_type / probability columns
+    // (only db_deals has those) — notes_columns.sql and
+    // leasing_extras.sql only ever added timing, timing_date, fee_nzd,
+    // status_note, broker_codes, aml, landlord, agency_type. Inserting
+    // those three fields made every "add new" on every note board
+    // (Agencies, Executed, Problem Property, etc.) fail with a
+    // database error, surfaced client-side as "Not saved: note".
     const { data, error } = await supabase.from("db_notes").insert({
       department_id: dept, section: b.section,
       body: (b.body || "").trim(),
-      tenant: b.tenant || null,
-      listing_type: b.listing_type || null,
       timing: b.timing || null,
       timing_date: b.timing_date || null,
-      probability: b.probability ?? null,
       fee_nzd: Number(b.fee_nzd) || 0,
       status_note: b.status_note || null,
       broker_codes: b.broker_codes || null,
