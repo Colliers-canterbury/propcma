@@ -25,6 +25,27 @@ const OUTCOMES={
                                   ['lost','Lost','Lost'],
                                   ['withdrawn','Withdrawn','Withdrawn']]
 };
+/* Sentinel destination meaning "archive it, don't move it to a stage". */
+const ARCHIVE='__ARCHIVE__';
+/* Retail doesn't chase Lost or Withdrawn deals — those stages and the
+   outcome options that led to them are removed from this department
+   entirely (see claude/2026-08-31_retail_osa_fixes.sql). Leased
+   doesn't move to a stage either: once a retail property is leased the
+   team has no reason to keep tracking it on the board, so picking
+   Leased archives the deal outright — the same effect as the ×, just
+   reached from the outcome picker and recorded as a 'leased' outcome
+   for the record. This also removes Retail's dependency on a 'Leased'
+   stage existing at all, which is what made that pick silently fail to
+   save before (there was no such stage on this department to move it
+   to — same class of bug as Industrial's missing outcome stages). */
+const OUTCOMES_RETAIL={
+  'Unconditional':               [['sold','Sold','Sold'],
+                                  ['leased','Leased',ARCHIVE]],
+  'Advanced Negotiations / WIP': [['leased','Leased',ARCHIVE]]
+};
+function outcomesFor(stage){
+  return which==='retail' ? OUTCOMES_RETAIL[stage] : OUTCOMES[stage];
+}
 const TODAY=()=>new Date().toISOString().slice(0,10);
 /* Form controls do not print their values — a date input shows 'dd.'
    and a select prints blank. Each control therefore carries a hidden
@@ -317,13 +338,16 @@ function statusSelect(val, list){
 }
 
 /* The action at the end of a row: an outcome picker on the stages that
-   have one, a plain remove everywhere else. */
+   have one, plus a plain remove — always available, so an accidental
+   double-add can be cleared without having to route it through an
+   outcome first. */
 function outcomeControl(d){
-  const opts=OUTCOMES[d.s];
-  if(!opts) return '<button class="x" title="Remove">×</button>';
+  const opts=outcomesFor(d.s);
+  const remove='<button class="x" title="Remove">×</button>';
+  if(!opts) return remove;
   return `<select class="outcome"><option value="">—</option>`+
     opts.map(o=>`<option value="${o[0]}">${o[1]}</option>`).join('')+
-    `</select>`;
+    `</select>`+remove;
 }
 
 function dealRow(d){
@@ -462,13 +486,31 @@ function dealRow(d){
   const oc=tr.querySelector('.outcome');
   if(oc) oc.onchange=()=>{
     const val=oc.value; if(!val) return;
-    const row=(OUTCOMES[d.s]||[]).find(o=>o[0]===val);
+    const row=(outcomesFor(d.s)||[]).find(o=>o[0]===val);
     if(!row){oc.value='';return}
-    const label=row[1], dest=row[2];
-    if(!confirm(`Mark ${d.a||'this deal'} as ${label}?\n\nIt moves to ${dest}.`)){
+    const label=row[1], dest=row[2], archiving=dest===ARCHIVE;
+    const msg=archiving
+      ? `Mark ${d.a||'this deal'} as ${label}?\n\nIt's removed from the board — leased properties aren't tracked here.`
+      : `Mark ${d.a||'this deal'} as ${label}?\n\nIt moves to ${dest}.`;
+    if(!confirm(msg)){
       oc.value=''; return;
     }
-    if(d.isNew){ d.s=dest; d.out=val; renderBoard(); renderTally(); return; }
+    if(d.isNew){
+      if(archiving){ state[which].deals=S().deals.filter(x=>x.id!==d.id); }
+      else { d.s=dest; d.out=val; }
+      renderBoard(); renderTally();
+      return;
+    }
+    if(archiving){
+      persist(()=>DealBoardApi.setOutcome(d.id, val, null, undefined, true), d.a||'deal')
+        .then(()=>{
+          state[which].deals=S().deals.filter(x=>x.id!==d.id);
+          renderBoard(); renderTally();
+          toast(`${d.a||'Deal'} marked ${label}`);
+        })
+        .catch(()=>{ oc.value=''; });
+      return;
+    }
     const from=d.s, wasOut=d.out;
     const stamp=/^uncondition/i.test(dest) ? TODAY() : undefined;
     d.s=dest; d.out=val; if(stamp) d.td=stamp;
@@ -704,14 +746,6 @@ function noteRow(n, section, isExpiry, extras, customCols, showStage){
   const di=tr.querySelector('.dateinput');
   if(di) di.onchange=()=>{ n.td=di.value||''; saveNote({timing_date:n.td||null}).catch(()=>{}); };
 
-  const lts=tr.querySelector('.ltpick');
-  if(lts) lts.onchange=()=>{
-    const was=d.lt; d.lt=lts.value;
-    saveDealField(d,'lt')
-      .then(()=>{tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500)})
-      .catch(()=>{ d.lt=was; renderBoard(); });
-  };
-
   const sel=tr.querySelector('.statuspick');
   if(sel){
     sel.className='statuspick '+(tagClass(n.st)||'');
@@ -838,111 +872,32 @@ async function renderRankings(){
       <td class="pc">${totBudget?totPct.toFixed(0)+'%':''}</td>
     </tr></tfoot></table></section>`;
 
-  /* The master report carries in-file IRM, so the server cannot read it
-     over Graph - see the note at the top of sync-rankings.js. Desktop
-     Excel can, which makes copy-and-paste the one route that works. */
+  /* Pulls from the master report. Until the Graph permission is granted
+     the endpoint replies that rankings are manual — the button reports
+     that plainly rather than pretending it worked. */
   const btn=$('#syncRanks');
-  if(btn) btn.onclick=()=>rankingsPastePanel().then(changed=>{
-    if(changed) renderRankings();
-  });
-}
-
-/* Paste-in for the rankings. Resolves true if anything was written. */
-function rankingsPastePanel(){
-  return new Promise(resolve=>{
-    const ov=document.createElement('div');
-    ov.className='pasteov';
-    ov.innerHTML=`<div class="pastecard" role="dialog" aria-label="Update rankings">
-      <h2>Update rankings from the master report</h2>
-      <ol class="pastesteps">
-        <li>Open <b>FF Main Report - DO NOT AMEND.xlsx</b> in Excel on your computer.</li>
-        <li>Go to the <b>Summary</b> sheet.</li>
-        <li>Select columns <b>A to T</b> \u2014 click the A heading, then shift-click T \u2014 and copy.</li>
-        <li>Click in the box below and paste, then check it before updating.</li>
-      </ol>
-      <textarea class="pastebox" placeholder="Paste here"></textarea>
-      <div class="pasteout"></div>
-      <div class="pastebtns">
-        <button data-a="cancel">Cancel</button>
-        <button data-a="check">Check the paste</button>
-        <button class="go" data-a="commit" disabled>Update rankings</button>
-      </div>
-    </div>`;
-    document.body.appendChild(ov);
-
-    const box=ov.querySelector('.pastebox');
-    const out=ov.querySelector('.pasteout');
-    const bCheck=ov.querySelector('[data-a="check"]');
-    const bCommit=ov.querySelector('[data-a="commit"]');
-    let wrote=false;
-
-    const close=()=>{document.removeEventListener('keydown',onKey);ov.remove();resolve(wrote)};
-    const onKey=e=>{if(e.key==='Escape')close()};
-    document.addEventListener('keydown',onKey);
-    ov.onclick=e=>{if(e.target===ov)close()};
-    ov.querySelector('[data-a="cancel"]').onclick=close;
-
-    /* Any edit invalidates a previous check, so nobody can check one
-       paste and then commit a different one. */
-    box.oninput=()=>{bCommit.disabled=true;out.innerHTML=''};
-
-    const LABEL={investment:'Investment',industrial:'Industrial',
-                 leasing:'Office Leasing',retail:'Retail'};
-
-    function report(r){
-      const rows=r.results||[];
-      const lines=rows.map(x=>{
-        const name=LABEL[x.slug]||x.slug;
-        if(x.error)   return `<li class="bad">${name}: could not save</li>`;
-        if(x.skipped) return `<li class="warn">${name}: nothing found in the paste</li>`;
-        const un=(x.unmatched||[]).length;
-        return `<li>${name}: <b>${x.updated}</b> broker${x.updated===1?'':'s'}, `+
-               `${money(x.total_fees)}`+
-               (un?` <span class="warn">\u2014 ${un} name${un===1?'':'s'} not recognised</span>`:'')+
-               `</li>`;
-      });
-      /* Unrecognised names are the failure that hides: the run looks
-         clean and that broker simply never appears. Name them. */
-      const bad=rows.reduce((a,x)=>a.concat(x.unmatched||[]),[]);
-      out.innerHTML=`<ul class="pastelist">${lines.join('')}</ul>`+
-        (bad.length?`<p class="warn">Not matched to a broker code: ${bad.map(esc).join(', ')}. `+
-          `These will be left out.</p>`:'')+
-        `<p class="muted">${r.pasted_rows} rows read, ${r.pasted_width} columns wide.</p>`;
-    }
-
-    bCheck.onclick=async()=>{
-      if(!box.value.trim()){out.innerHTML='<p class="warn">Nothing pasted yet.</p>';return}
-      bCheck.disabled=true; bCheck.textContent='Checking\u2026';
-      try{
-        const r=await DealBoardApi.pasteRankings(box.value,false);
-        report(r);
-        const any=(r.results||[]).some(x=>x.updated>0);
-        bCommit.disabled=!any;
-        if(!any) out.innerHTML+='<p class="warn">Nothing to update from this paste.</p>';
-      }catch(e){
-        out.innerHTML=`<p class="bad">${esc(e.status===401||e.status===403
-          ? 'You need manager access to update the rankings'
-          : (e.message||'Could not read the paste'))}</p>`;
-      }
-      bCheck.disabled=false; bCheck.textContent='Check the paste';
-    };
-
-    bCommit.onclick=async()=>{
-      bCommit.disabled=true; bCommit.textContent='Updating\u2026';
-      try{
-        const r=await DealBoardApi.pasteRankings(box.value,true);
+  if(btn) btn.onclick=async()=>{
+    btn.disabled=true; btn.textContent='Refreshing…';
+    try{
+      const r=await DealBoardApi.syncRankings();
+      if(r && r.skipped){
+        toast('Rankings are updated by hand at the moment');
+        console.info('sync-rankings:', r.skipped);
+      }else{
         const n=(r.results||[]).reduce((a,x)=>a+(x.updated||0),0);
-        wrote=true;
-        toast(`Updated ${n} broker${n===1?'':'s'}`);
-        close();
-      }catch(e){
-        out.innerHTML=`<p class="bad">${esc(e.message||'Could not update')}</p>`;
-        bCommit.disabled=false; bCommit.textContent='Update rankings';
+        toast(n?`Updated ${n} broker${n===1?'':'s'}`:'No changes');
+        const bad=(r.results||[]).reduce((a,x)=>a.concat(x.unmatched||[]),[]);
+        if(bad.length) console.warn('names with no broker code:', bad);
       }
-    };
-
-    setTimeout(()=>box.focus(),50);
-  });
+      await renderRankings();
+      return;
+    }catch(e){
+      toast(e.status===401||e.status===403
+        ? 'You need manager access to refresh'
+        : 'Could not refresh: '+(e.message||'unknown error'));
+    }
+    btn.disabled=false; btn.textContent='Refresh rankings';
+  };
 }
 
 /* Management — a rollup across the operating units. Each unit's
@@ -1329,8 +1284,20 @@ click('#addReg', ()=>{
 
 /* Save meeting — a dated, self-contained snapshot the EA can keep.
    Opens a print view; the browser's "Save as PDF" destination writes
-   the file. Nothing on the board changes: the sheet stays live. */
-function saveMeetingSnapshot(){
+   the file. Nothing on the board changes: the sheet stays live.
+
+   The Ranking results are pulled in and printed at the bottom, below
+   Minutes / actions, so the pipeline and the season's rankings go out
+   as one document rather than two separate printouts. */
+async function saveMeetingSnapshot(){
+  // Opened immediately, synchronously with the click — waiting on the
+  // rankings fetch first would make some browsers treat the later
+  // window.open() as a pop-up rather than a response to the click, and
+  // block it.
+  const w=window.open('','_blank');
+  if(!w){ alert('Please allow pop-ups to save the meeting.'); return; }
+  w.document.write('<p style="font:14px sans-serif;padding:40px;color:#555">Preparing the meeting summary…</p>');
+
   const d=new Date();
   const stamp=d.toLocaleDateString('en-NZ',
     {weekday:'long',day:'numeric',month:'long',year:'numeric'});
@@ -1374,6 +1341,33 @@ function saveMeetingSnapshot(){
   });
   while(ni<noteSecs.length) blocks.push(noteBlock(noteSecs[ni++]));
 
+  // Ranking results — same figures as the Rankings tab, laid out as a
+  // simple table so it prints cleanly alongside everything else. If the
+  // fetch fails the rest of the snapshot still prints; the rankings
+  // section is just left out rather than blocking the whole printout.
+  let rankingsBlock='';
+  try{
+    const rd=await DealBoardApi.rankings(which);
+    if(rd && rd.brokers && rd.brokers.length){
+      const rows=withRanks(rd.brokers);
+      const asAt=rd.synced_at
+        ? new Date(rd.synced_at).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'})
+        : '';
+      rankingsBlock=`<section class="rankblock"><h2>${rd.year} Rankings${
+        asAt?` <span>as at ${esc(asAt)}</span>`:''}</h2>
+        <table><thead><tr><th style="width:34px">#</th><th>Broker</th>
+          <th class="n">Fees</th><th class="n">Budget</th><th style="width:150px">Progress</th></tr></thead><tbody>${
+        rows.map(b=>{
+          const pct=b.budget?Math.min(100,b.fees/b.budget*100):0;
+          return `<tr><td>${esc(b.rankLabel)}</td><td>${esc(b.code)} — ${esc(b.name)}</td>
+            <td class="n">${money(b.fees)}</td><td class="n">${b.budget?money(b.budget):'—'}</td>
+            <td><span class="pbarwrap"><span class="pbar" style="width:${pct}%"></span></span>
+              <span class="pct">${b.budget?pct.toFixed(0)+'%':''}</span></td></tr>`;
+        }).join('')
+      }</tbody></table></section>`;
+    }
+  }catch(e){ console.error('rankings for save-meeting snapshot failed', e); }
+
   const html=`<!DOCTYPE html><html lang="en-NZ"><head><meta charset="utf-8">
 <title>${esc(M().title)} — ${fileStamp}</title>
 <style>
@@ -1400,6 +1394,13 @@ function saveMeetingSnapshot(){
     padding:1px 7px;margin:0 4px 4px 0;font-size:8.5pt}
   footer{margin-top:16px;border-top:1px solid #ddd;padding-top:5px;
     font-size:7.5pt;color:#777}
+  /* Rankings — always blue, never yellow: this isn't the place to flag
+     someone as behind budget. */
+  .rankblock table{margin-top:2px}
+  .pbarwrap{display:inline-block;width:96px;height:6px;background:#e5e5e5;
+    border-radius:3px;overflow:hidden;vertical-align:middle}
+  .pbar{display:block;height:100%;background:#16385c}
+  .pct{display:inline-block;margin-left:6px;font-size:8pt;color:#555}
 </style></head><body>
 <header class="doc"><h1>${esc(M().title)}</h1><div class="d">${stamp}</div></header>
 <div class="tot">
@@ -1413,11 +1414,10 @@ ${blocks.filter(Boolean).join('')}
 ${fines.length?`<section><h2>Fines</h2><div class="fines">${
   fines.map(f=>`<span>${esc(f.b)} $${f.amt}</span>`).join('')}</div></section>`:''}
 <section><h2>Minutes / actions</h2><div class="box">${esc(S().minutes||'')}</div></section>
+${rankingsBlock}
 <footer>Snapshot taken ${d.toLocaleString('en-NZ')} — the board remains live and editable.</footer>
 </body></html>`;
 
-  const w=window.open('','_blank');
-  if(!w){ alert('Please allow pop-ups to save the meeting.'); return; }
   w.document.open(); w.document.write(html); w.document.close();
   w.focus();
   setTimeout(()=>w.print(), 350);
@@ -1531,7 +1531,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-26b';
+const BOARD_VERSION='2026-08-31a';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
