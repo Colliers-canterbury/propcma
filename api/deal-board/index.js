@@ -177,25 +177,6 @@ async function addDeal(req, res) {
 }
 
 // ── edit ──────────────────────────────────────────────────────────
-// Patch for api/deal-board/index.js
-//
-// Replace the existing editDeal() with the version below.
-//
-// Two changes:
-//
-//   1. The Postgres error is logged before it is turned into an
-//      HttpError. It still never reaches the browser — the operator
-//      gets the same plain sentence — but the Vercel function log now
-//      names the actual cause instead of the symptom.
-//
-//   2. `.single()` becomes `.maybeSingle()`. `.single()` treats "zero
-//      rows updated" as an error, so a PATCH against an id that is not
-//      in db_deals reported as a 500 database failure when it is really
-//      a 404. That distinction matters here: the board renders notes
-//      and deals as very similar-looking rows, and a note id sent to
-//      this endpoint would produce exactly the error you are seeing.
-
-// ── edit ──────────────────────────────────────────────────────────
 async function editDeal(req, res, id) {
   const user = await requireUser(req, ROLES_WRITE);
   const b = req.body || {};
@@ -213,37 +194,24 @@ async function editDeal(req, res, id) {
   }
 
   const { data, error } = await supabase.from("db_deals")
-    .update(patch).eq("id", id).select().maybeSingle();
-
-  if (error) {
-    // Everything needed to identify the cause, in one line:
-    //   PGRST204  a column in EDITABLE is not on db_deals
-    //   23514     a check constraint rejected the value
-    //             (listing_type outside Sale/Lease/Sale-Lease,
-    //              probability outside 0-100, outcome outside its list)
-    //   22P02     invalid enum — aml given something outside db_aml_status
-    //   23503     FK violation, usually from the audit trigger
-    //   42501 / 42P17  RLS or a trigger running as the wrong role
-    console.error("editDeal failed", {
-      deal_id: id,
-      fields: Object.keys(patch),
-      code: error.code,
-      message: error.message,
-      details: error.details,
-      hint: error.hint,
-    });
-    throw new HttpError(500, "Could not save the change");
-  }
-
-  // No row matched. Not a database failure — the id is wrong, the deal
-  // was archived, or this is a note being sent to the deal endpoint.
-  if (!data) {
-    console.error("editDeal matched no row", { deal_id: id, fields: Object.keys(patch) });
-    throw new HttpError(404, "That deal is no longer on the board — refresh and try again");
-  }
+    .update(patch).eq("id", id).select().single();
+  if (error) throw new HttpError(500, "Could not save the change");
 
   if (Array.isArray(b.brokers)) await setBrokers(id, b.brokers);
   return res.status(200).json(data);
+}
+
+async function setBrokers(dealId, codes) {
+  await supabase.from("db_deal_brokers")
+    .delete().eq("deal_id", dealId);
+  const rows = [...new Set(codes.map((c) => String(c).toUpperCase()))]
+    .map((broker_code) => ({ deal_id: dealId, broker_code }));
+  if (rows.length) {
+    const { error } = await supabase.from("db_deal_brokers").insert(rows);
+    // A code not in public.brokers fails the FK — report it rather than
+    // silently dropping the broker off the deal.
+    if (error) throw new HttpError(400, "One of those broker codes isn't on the list");
+  }
 }
 
 // ── move (drag) ───────────────────────────────────────────────────
@@ -595,9 +563,14 @@ async function notes(req, res, id) {
 // Sets the outcome AND moves the deal, in one call — the two always go
 // together, and doing them separately risks a deal that moved but was
 // never counted.
+//
+// archive:true skips the move and archives the deal instead — used by
+// outcomes that remove the property from the board entirely rather
+// than sending it to another stage (Retail's Leased). stageId is not
+// required in that case.
 async function setOutcome(req, res, id) {
   const user = await requireUser(req, ROLES_WRITE);
-  const { outcome, stageId, timing_date } = req.body || {};
+  const { outcome, stageId, timing_date, archive } = req.body || {};
   // 'leased' was added to the db_deals outcome check constraint in
   // leasing_extras.sql, alongside the 'Leased' stage and the outcome
   // picker's Unconditional -> Leased option — but this allow-list was
@@ -606,14 +579,19 @@ async function setOutcome(req, res, id) {
   // constraint in leasing_extras.sql if another outcome is ever added.
   const allowed = ["won", "lost", "withdrawn", "sold", "leased"];
   if (!allowed.includes(outcome)) throw new HttpError(400, "Unknown outcome");
-  if (!stageId) throw new HttpError(400, "A destination stage is required");
+  if (!archive && !stageId) throw new HttpError(400, "A destination stage is required");
 
   const patch = {
     outcome,
     outcome_at: new Date().toISOString(),
-    stage_id: stageId,
     updated_by_oid: user.oid,
   };
+  if (archive) {
+    patch.is_archived = true;
+    patch.archived_at = new Date().toISOString();
+  } else {
+    patch.stage_id = stageId;
+  }
   if (timing_date) patch.timing_date = timing_date;
 
   const { data, error } = await supabase.from("db_deals")
