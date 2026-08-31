@@ -1,60 +1,46 @@
 // /api/deal-board/sync-rankings.js
 //
-// Reads each department's rankings workbook from SharePoint via Microsoft
-// Graph and upserts public.db_broker_rankings.
+// Updates public.db_broker_rankings from the master finance report.
 //
-// Runs daily on a Vercel cron (see vercel.json) and can also be called
-// by hand with ?force=1 while signed in as a manager.
+// TWO WAYS IN, ONE PARSER
+// ---------------------------------------------------------------------
+//   POST  { text, commit }   rows pasted from Excel by a manager.
+//                            This is the live path.
+//   GET   ?force=1 / cron    reads the workbook over Microsoft Graph.
+//                            DORMANT - see below.
+//
+// Both feed the same parseMaster() and the same applyParsed(), so the
+// figures cannot drift between them.
 //
 // ---------------------------------------------------------------------
-// SETUP — three things before this works
+// WHY THE GRAPH PATH IS DORMANT (Aug 2026)
 // ---------------------------------------------------------------------
-// 1. App registration (the PropCMA one is fine) needs the APPLICATION
-//    permission Files.Read.All or Sites.Read.All, with admin consent.
-//    This runs without a signed-in user, so delegated permissions will
-//    not do.
+// The permissions work is DONE and verified: Sites.Selected is consented
+// on the PropCMA registration, and a per-site read grant on
+// https://cjch.sharepoint.com/sites/Admin resolves. The app can list the
+// library and read most workbooks in it.
 //
-// 2. Environment variables in Vercel:
-//      GRAPH_TENANT_ID       your Entra tenant id
-//      GRAPH_CLIENT_ID       app registration (client) id
-//      GRAPH_CLIENT_SECRET   client secret — server-side only
-//      CRON_SECRET           any long random string; Vercel sends it
+// The master itself cannot be read. 'FF Main Report - DO NOT AMEND.xlsx'
+// carries in-file IRM ("Access to this workbook has been restricted to
+// certain people"). Graph returns 501 on /workbook/ for it while
+// returning 200 on the same call for unprotected siblings, and metadata
+// reads fine throughout - so this is encryption, not permissions. An
+// app-only token has no user identity for the rights service to issue a
+// decryption licence to, so no amount of SharePoint permission work
+// fixes it. Excel for the web refuses the same file interactively.
 //
-// 3. The MASTER workbook's location, as env vars. Two ways — the path
-//    form needs no Graph Explorer lookup:
-//
-//    (a) By path (easiest). From the SharePoint URL
-//        https://cjch.sharepoint.com/sites/Admin/Shared%20Documents/Management/FF%20Main%20Report%20-%20DO%20NOT%20AMEND.xlsx
-//        take the site after /sites/ and the path after the document
-//        library, un-escaping %20 back to spaces:
-//
-//          RANKINGS_SITE_PATH = Admin
-//          RANKINGS_FILE_PATH = Management/FF Main Report - DO NOT AMEND.xlsx
-//
-//    (b) By id, if you already have them:
-//          RANKINGS_SITE_ID   cjch.sharepoint.com,<guid>,<guid>
-//          RANKINGS_ITEM_ID   the drive item id
-//
-//    Optional in both cases:
-//          RANKINGS_HOSTNAME  defaults to cjch.sharepoint.com
-//          RANKINGS_SHEET     defaults to 'Summary'
-//
-//    Without any of these the job exits cleanly and rankings stay
-//    manual (scripts/refresh_rankings.sql).
+// It is left in place because it is a few env vars from working if the
+// protection is ever lifted or an unprotected extract is published.
+// Leaving RANKINGS_ITEM_ID unset keeps it switched off cleanly.
 //
 // ---------------------------------------------------------------------
 // WHY THE MASTER, NOT THE FOUR RANKINGS FILES
 // ---------------------------------------------------------------------
 // The four "<Unit> rankings.xlsx" files are external-link views onto
-// this master — every cell is =[1]Summary!$N$6. Graph returns the
-// CACHED value of such a cell, i.e. whatever was there when someone
-// last opened the file in Excel. Checked against the master in
-// Aug 2026, several brokers were behind by about a month of fees with
-// no error anywhere. Read the master.
-//
-// The master is on a restricted drive. That is fine: this job runs as
-// an application, not as a user, so it does not need anyone's access —
-// and only the fee/budget figures reach the board, never the workbook.
+// this master - every cell is =[1]Summary!$N$6. Those return the CACHED
+// value, i.e. whatever was there when someone last opened the file.
+// Checked in Aug 2026, several brokers were behind by about a month of
+// fees with no error anywhere. Read the master.
 // ---------------------------------------------------------------------
 
 import { supabase } from "../_lib/supabase.js";
@@ -62,120 +48,19 @@ import { requireUser, sendError, HttpError } from "../_lib/auth.js";
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
 
-// Patch for api/deal-board/sync-rankings.js
-//
-// Replace the top of graphToken() with the version below.
-//
-// The current message lists all three variables whenever any one of
-// them is missing, which is why it cannot tell you which to fix. This
-// reports the missing names only.
-//
-// Names only — never values. A client secret must not reach a browser
-// or a log, so this checks presence and stops there.
-
-async function graphToken() {
-  const env = {
-    GRAPH_TENANT_ID: process.env.GRAPH_TENANT_ID,
-    GRAPH_CLIENT_ID: process.env.GRAPH_CLIENT_ID,
-    GRAPH_CLIENT_SECRET: process.env.GRAPH_CLIENT_SECRET,
-  };
-
-  // Empty string counts as missing — a var saved with a blank value
-  // behaves the same as one that was never added.
-  const missing = Object.entries(env)
-    .filter(([, v]) => !v || !String(v).trim())
-    .map(([k]) => k);
-
-  if (missing.length) {
-    // Any GRAPH_-ish names that ARE present, to catch the case where
-    // the values were set under a different prefix. Keys only.
-    const nearby = Object.keys(process.env)
-      .filter((k) => /GRAPH|AZURE|TENANT|CLIENT|MSAL/i.test(k) && !/SECRET/i.test(k))
-      .sort();
-    console.error("sync-rankings: missing env", { missing, nearby });
-
-    throw new HttpError(500,
-      `Not configured: ${missing.join(", ")} ` +
-      `(${3 - missing.length} of 3 Graph variables present)`);
-  }
-
-  const tenant = env.GRAPH_TENANT_ID.trim();
-  const id = env.GRAPH_CLIENT_ID.trim();
-  // Secrets are the usual casualty of copy-paste — a trailing newline
-  // survives the presence check above and then fails authentication
-  // with an unhelpful AADSTS error.
-  const secret = env.GRAPH_CLIENT_SECRET.trim();
-
-  const res = await fetch(
-    `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: id,
-        client_secret: secret,
-        scope: "https://graph.microsoft.com/.default",
-        grant_type: "client_credentials",
-      }),
-    }
-  );
-  const data = await res.json();
-  if (!res.ok) {
-    console.error("sync-rankings: token request rejected", {
-      status: res.status,
-      error: data.error,
-      // AADSTS codes identify the cause precisely:
-      //   AADSTS7000215  invalid secret (wrong value, or the secret ID
-      //                  was pasted instead of the value)
-      //   AADSTS7000222  secret expired
-      //   AADSTS700016   client id not found in this tenant
-      //   AADSTS900023   tenant id not recognised
-      description: data.error_description,
-    });
-    throw new HttpError(502, `Graph sign-in failed: ${data.error_description || res.status}`);
-  }
-  return data.access_token;
-}
-
-// Resolve the site by path (cjch.sharepoint.com:/sites/Admin) so no
-// pre-looked-up GUID is needed.
-async function resolveSite(token, hostname, sitePath) {
-  const url = `${GRAPH}/sites/${hostname}:/sites/${sitePath}`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new HttpError(502,
-      `Could not find site /sites/${sitePath}: ${data.error?.message || res.status}`);
-  }
-  return data.id;
-}
-
-async function readSheet(token, cfg, sheet) {
-  const siteId = cfg.site_id ||
-    await resolveSite(token, cfg.hostname, cfg.site_path);
-
-  // Either address the file by path within the default document
-  // library, or by its item id when one was supplied.
-  const base = cfg.item_id
-    ? `${GRAPH}/sites/${siteId}/drive/items/${cfg.item_id}`
-    : `${GRAPH}/sites/${siteId}/drive/root:/${
-        cfg.file_path.split("/").map(encodeURIComponent).join("/")}:`;
-
-  const url = `${base}/workbook/worksheets/${encodeURIComponent(sheet)}` +
-              `/usedRange(valuesOnly=true)`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new HttpError(502,
-      `Could not read ${sheet}: ${data.error?.message || res.status}`);
-  }
-  return data.values || [];
-}
+// ── shared parsing ────────────────────────────────────────────────
 
 const num = (v) => {
   if (v === null || v === undefined || v === "") return null;
-  const n = Number(String(v).replace(/[$,\s]/g, ""));
-  return Number.isFinite(n) ? n : null;
+  let s = String(v).trim();
+  // Excel renders negatives in parentheses in this workbook.
+  const neg = /^\(.*\)$/.test(s);
+  if (neg) s = s.slice(1, -1);
+  s = s.replace(/[$,\s]/g, "");
+  if (s === "" || s === "-") return null;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  return neg ? -n : n;
 };
 
 // The master Summary sheet holds all four business units in one sheet:
@@ -185,7 +70,7 @@ const num = (v) => {
 // and closed by a Sub-total row.
 //
 // The header is split across two rows ("Total" in row 4, "Budget" in
-// row 5), so header-matching does not work here — fixed columns are
+// row 5), so header-matching does not work here - fixed columns are
 // used instead, and verified against the block labels before any row
 // is trusted.
 const COL = { name: 0, fees: 13, budget: 15, deals: 19 };
@@ -216,15 +101,34 @@ function parseMaster(rows) {
   return out;
 }
 
-async function syncMaster(token, cfg, depts, nameMap) {
-  const rows = await readSheet(token, cfg, cfg.sheet || "Summary");
-  const parsed = parseMaster(rows);
+// Excel puts tab-separated text on the clipboard. Cells containing a
+// tab or newline arrive wrapped in quotes with inner quotes doubled.
+function parsePaste(text) {
+  return String(text)
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => line.split("\t").map((cell) => {
+      const v = cell.trim();
+      if (v.length > 1 && v.startsWith('"') && v.endsWith('"')) {
+        return v.slice(1, -1).replace(/""/g, '"');
+      }
+      return v;
+    }));
+}
+
+// ── writing ───────────────────────────────────────────────────────
+// commit=false does everything except the write, so a manager can see
+// what would change before it changes. Rankings are upserted per
+// broker, never deleted, so a partial paste updates what it covers and
+// leaves the rest alone.
+async function applyParsed(parsed, depts, nameMap, commit) {
   const year = new Date().getFullYear();
   const results = [];
 
   for (const dept of depts) {
     const block = parsed[dept.slug];
-    if (!block) { results.push({ slug: dept.slug, skipped: "no block in master" }); continue; }
+    if (!block) { results.push({ slug: dept.slug, skipped: "no block found" }); continue; }
 
     const upserts = [];
     const unmatched = [];
@@ -241,13 +145,19 @@ async function syncMaster(token, cfg, depts, nameMap) {
       });
     }
 
-    if (upserts.length) {
+    if (commit && upserts.length) {
       const { error } = await supabase.from("db_broker_rankings")
         .upsert(upserts, { onConflict: "department_id,broker_code,financial_year" });
-      if (error) { results.push({ slug: dept.slug, error: error.message }); continue; }
+      if (error) {
+        console.error("rankings upsert failed", {
+          slug: dept.slug, code: error.code, message: error.message, details: error.details,
+        });
+        results.push({ slug: dept.slug, error: "could not save" });
+        continue;
+      }
     }
 
-    if (unmatched.length) {
+    if (commit && unmatched.length) {
       await supabase.from("db_ranking_sync_issues").insert(
         unmatched.map((n) => ({
           ranking_name: n,
@@ -256,56 +166,156 @@ async function syncMaster(token, cfg, depts, nameMap) {
       );
     }
 
-    results.push({ slug: dept.slug, updated: upserts.length, unmatched });
+    results.push({
+      slug: dept.slug,
+      updated: upserts.length,
+      total_fees: upserts.reduce((a, u) => a + (u.fees_nzd || 0), 0),
+      unmatched,
+    });
   }
   return results;
 }
 
+async function loadRefs() {
+  const { data: depts, error } = await supabase.from("db_departments").select("id, slug");
+  if (error) throw new HttpError(500, "Could not load departments");
+
+  const { data: names } = await supabase.from("db_broker_ranking_names")
+    .select("broker_code, ranking_name");
+  const nameMap = Object.fromEntries(
+    (names || []).map((n) => [n.ranking_name.toLowerCase(), n.broker_code])
+  );
+  return { depts: depts || [], nameMap };
+}
+
+// ── POST: pasted from Excel ───────────────────────────────────────
+
+async function handlePaste(req, res) {
+  await requireUser(req, ["manager"]);
+
+  const { text, commit } = req.body || {};
+  if (!text || !String(text).trim()) throw new HttpError(400, "Nothing was pasted");
+
+  const rows = parsePaste(text);
+  if (rows.length < 5) {
+    throw new HttpError(400,
+      `Only ${rows.length} row${rows.length === 1 ? "" : "s"} came through. ` +
+      `Select the whole Summary sheet before copying.`);
+  }
+
+  // The fee column is N, the fourteenth. A narrower paste means columns
+  // were left out of the selection, and every fee would read as blank -
+  // which would look like a clean run that changed nothing.
+  const width = Math.max(...rows.map((r) => r.length));
+  if (width <= COL.fees) {
+    throw new HttpError(400,
+      `The paste is only ${width} column${width === 1 ? "" : "s"} wide. ` +
+      `Fees are in column N, so select at least columns A to P.`);
+  }
+
+  const parsed = parseMaster(rows);
+  const found = Object.keys(parsed);
+  if (!found.length) {
+    throw new HttpError(400,
+      "No unit headings found in column A. Expected Commercial Sales, " +
+      "Industrial, Commercial Leasing or Retail.");
+  }
+
+  const { depts, nameMap } = await loadRefs();
+  const results = await applyParsed(parsed, depts, nameMap, !!commit);
+
+  return res.status(200).json({
+    ran_at: new Date().toISOString(),
+    source: "paste",
+    committed: !!commit,
+    pasted_rows: rows.length,
+    pasted_width: width,
+    results,
+  });
+}
+
+// ── GET: Microsoft Graph (dormant) ────────────────────────────────
+
+async function graphToken() {
+  const env = {
+    GRAPH_TENANT_ID: process.env.GRAPH_TENANT_ID,
+    GRAPH_CLIENT_ID: process.env.GRAPH_CLIENT_ID,
+    GRAPH_CLIENT_SECRET: process.env.GRAPH_CLIENT_SECRET,
+  };
+  const missing = Object.entries(env).filter(([, v]) => !v || !String(v).trim()).map(([k]) => k);
+  if (missing.length) throw new HttpError(500, `Not configured: ${missing.join(", ")}`);
+
+  const res = await fetch(
+    `https://login.microsoftonline.com/${env.GRAPH_TENANT_ID.trim()}/oauth2/v2.0/token`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: env.GRAPH_CLIENT_ID.trim(),
+        client_secret: env.GRAPH_CLIENT_SECRET.trim(),
+        scope: "https://graph.microsoft.com/.default",
+        grant_type: "client_credentials",
+      }),
+    }
+  );
+  const data = await res.json();
+  if (!res.ok) {
+    console.error("graph token rejected", { error: data.error, description: data.error_description });
+    throw new HttpError(502, `Graph sign-in failed: ${data.error_description || res.status}`);
+  }
+  return data.access_token;
+}
+
+async function readSheet(token, siteId, itemId, sheet) {
+  const url = `${GRAPH}/sites/${siteId}/drive/items/${itemId}` +
+              `/workbook/worksheets/${encodeURIComponent(sheet)}/usedRange(valuesOnly=true)`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const data = await res.json();
+  if (!res.ok) {
+    // 501 here means the workbook is IRM-protected: the Excel service
+    // cannot open an encrypted package for an app-only caller.
+    if (res.status === 501) {
+      throw new HttpError(502,
+        "The master workbook is rights-protected, so it cannot be read automatically. Use the paste option.");
+    }
+    throw new HttpError(502, `Could not read ${sheet}: ${data.error?.message || res.status}`);
+  }
+  return data.values || [];
+}
+
+async function handleGraph(req, res) {
+  const auth = req.headers.authorization || "";
+  const isCron = process.env.CRON_SECRET && auth === `Bearer ${process.env.CRON_SECRET}`;
+  if (!isCron) {
+    if (!req.query.force) throw new HttpError(401, "Not authorised");
+    await requireUser(req, ["manager"]);
+  }
+
+  const cfg = {
+    site_id: process.env.RANKINGS_SITE_ID,
+    item_id: process.env.RANKINGS_ITEM_ID,
+    sheet: process.env.RANKINGS_SHEET || "Summary",
+  };
+  if (!cfg.site_id || !cfg.item_id) {
+    return res.status(200).json({
+      ran_at: new Date().toISOString(),
+      skipped: "RANKINGS_ITEM_ID not set - the master is rights-protected, rankings are pasted in by hand",
+    });
+  }
+
+  const { depts, nameMap } = await loadRefs();
+  const token = await graphToken();
+  const rows = await readSheet(token, cfg.site_id, cfg.item_id, cfg.sheet);
+  const results = await applyParsed(parseMaster(rows), depts, nameMap, true);
+  return res.status(200).json({ ran_at: new Date().toISOString(), source: "graph", results });
+}
+
+// ── entry ─────────────────────────────────────────────────────────
+
 export default async function handler(req, res) {
   try {
-    // Vercel cron sends the CRON_SECRET as a bearer token. A manager can
-    // also trigger it by hand with ?force=1.
-    const auth = req.headers.authorization || "";
-    const isCron = process.env.CRON_SECRET &&
-                   auth === `Bearer ${process.env.CRON_SECRET}`;
-    if (!isCron) {
-      if (!req.query.force) throw new HttpError(401, "Not authorised");
-      await requireUser(req, ["manager"]);
-    }
-
-    // One master workbook covers every unit, so the location lives in
-    // env vars rather than per-department rows.
-    const cfg = {
-      hostname: process.env.RANKINGS_HOSTNAME || "cjch.sharepoint.com",
-      site_path: process.env.RANKINGS_SITE_PATH,
-      file_path: process.env.RANKINGS_FILE_PATH,
-      site_id: process.env.RANKINGS_SITE_ID,
-      item_id: process.env.RANKINGS_ITEM_ID,
-      sheet: process.env.RANKINGS_SHEET || "Summary",
-    };
-    const haveById = cfg.site_id && cfg.item_id;
-    const haveByPath = cfg.site_path && cfg.file_path;
-    if (!haveById && !haveByPath) {
-      return res.status(200).json({
-        ran_at: new Date().toISOString(),
-        skipped: "RANKINGS_SITE_PATH / RANKINGS_FILE_PATH not set — " +
-                 "rankings are being maintained by hand",
-      });
-    }
-
-    const { data: depts, error } = await supabase.from("db_departments")
-      .select("id, slug");
-    if (error) throw new HttpError(500, "Could not load departments");
-
-    const { data: names } = await supabase.from("db_broker_ranking_names")
-      .select("broker_code, ranking_name");
-    const nameMap = Object.fromEntries(
-      (names || []).map((n) => [n.ranking_name.toLowerCase(), n.broker_code])
-    );
-
-    const token = await graphToken();
-    const results = await syncMaster(token, cfg, depts || [], nameMap);
-    return res.status(200).json({ ran_at: new Date().toISOString(), results });
+    if (req.method === "POST") return await handlePaste(req, res);
+    return await handleGraph(req, res);
   } catch (e) {
     sendError(res, e);
   }
