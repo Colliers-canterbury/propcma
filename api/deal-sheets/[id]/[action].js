@@ -49,6 +49,7 @@ export default async function handler(req, res) {
       case "return":            return await returnToBroker(req, res, deal);
       case "receipt":           return await setReceiptNo(req, res, deal);
       case "trust-deposit":     return await setTrustDeposit(req, res, deal);
+      case "checklist":         return await setChecklistItem(req, res, deal);
       default: throw new HttpError(404, `Unknown action: ${action}`);
     }
   } catch (e) {
@@ -316,4 +317,46 @@ async function setTrustDeposit(req, res, deal) {
   });
 
   return res.status(200).json({ ok: true, amount: amountValue, receiptNo: receiptValue });
+}
+
+/**
+ * Accounts marks a mandatory checklist item complete (or clears it),
+ * directly on accounts.html — without needing to bounce the deal back
+ * to the broker for something she can confirm or attach herself.
+ * Editable while the deal is somewhere between submitted and complete
+ * — not on a draft (still the broker's own work), and not once a
+ * deal is fully complete (nothing left to unblock at that point).
+ */
+const CHECKLIST_KEYS = new Set([
+  "agencyAgreement", "unconditionalConfirmation", "executedAgreement", "amlComplete",
+  "spAgreement", "marketingReport", "leaseValueConfirmation", "leaseDeed",
+  "appraisals", "salePriceConfirmation", "tenancySchedule",
+]);
+
+async function setChecklistItem(req, res, deal) {
+  const user = await requireUser(req, ["accounts", "manager"]);
+  if (!["submitted", "invoiced", "deposit_received"].includes(deal.status))
+    throw new HttpError(409, `Cannot edit the checklist from status '${deal.status}'`);
+
+  const { key, value } = req.body || {};
+  if (!CHECKLIST_KEYS.has(key)) throw new HttpError(400, "Invalid checklist item");
+
+  const form = { ...(deal.form || {}) };
+  form.checklist = { ...(form.checklist || {}), [key]: !!value };
+
+  const { error } = await supabase
+    .from("deal_sheets")
+    .update({ form })
+    .eq("id", deal.id);
+  if (error) throw new HttpError(500, "Could not save checklist item");
+
+  await supabase.from("deal_sheet_events").insert({
+    deal_id: deal.id,
+    actor: user.oid,
+    from_status: deal.status,
+    to_status: deal.status,
+    note: `Checklist — ${key} marked ${value ? "complete" : "incomplete"} by accounts`,
+  });
+
+  return res.status(200).json({ ok: true, key, value: !!value });
 }
