@@ -74,6 +74,33 @@
       }
       return data;
     },
+
+    // Rows pasted out of Excel go to the same endpoint by POST. The
+    // master report is rights-protected, so the server cannot read it
+    // directly - desktop Excel can, which makes paste the working route.
+    // commit=false is a dry run: the server parses and reports back,
+    // and writes nothing.
+    async pasteRankings(text, commit) {
+      const token = await window.DealSheetAuth.getToken();
+      const res = await fetch(
+        `${cfg.apiBase}/api/deal-board/sync-rankings`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ text, commit: !!commit }),
+        }
+      );
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        const err = new Error(data?.error || `Update failed (${res.status})`);
+        err.status = res.status;
+        throw err;
+      }
+      return data;
+    },
     getSummary: (year) => call(`/summary${year?`?year=${year}`:""}`),
     setOutcome: (id, outcome, stageId, timing_date) =>
       call(`/${id}/outcome`, { method: "POST", body: { outcome, stageId, timing_date } }),
@@ -126,6 +153,7 @@
       listDepartments: () => wait([{slug:"industrial",name:"Industrial"}]),
       getSummary: () => wait({ units: [], totals: {}, ranking: [] }),
       syncRankings: () => wait({ skipped: "demo mode" }),
+      pasteRankings: () => wait({ committed: false, pasted_rows: 0, pasted_width: 0, results: [] }),
       finesYtd: () => wait({ year: new Date().getFullYear(), total: 0, brokers: [] }),
       settleFine: () => wait({ ok: true }),
       setOutcome: (id, outcome) => wait({ id, outcome }),
