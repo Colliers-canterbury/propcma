@@ -368,6 +368,8 @@
             <button id="trustSave" class="miniBtn" style="margin-top:8px">Save</button>
             <span id="trustStatus" class="miniStatus"></span>
           </div>`}` : ""}
+          ${d.form?.specialClauses && d.form?.specialClausesText ? `<h3>Special Clauses</h3>
+          <p>${esc(d.form.specialClausesText)}</p>` : ""}
           <h3>Commission split</h3>
           <table class="tbl"><tbody>${splits.map((s) =>
             `<tr><td>${esc(s.party_name)}</td><td class="r">${s.split_pct}%</td><td class="r mono">$${fmt(s.split_amount)}</td></tr>`).join("")||`<tr><td class="dim">No splits recorded</td></tr>`}</tbody></table>
