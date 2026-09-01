@@ -112,7 +112,10 @@
       <header class="top">
         <div class="brand"><span class="brandMark">SIC</span>
           <div><h1>Deal Sheet Processing</h1><p>Accounts · South Island Commercial (2004) Limited</p></div></div>
-        <div class="counts">${counts()}</div>
+        <div class="headerRight">
+          <a class="opsManualLink" href="operations-manual.html">📖 Operations Manual</a>
+          <div class="counts">${counts()}</div>
+        </div>
       </header>
       <div class="tabs">
         <button class="tab ${state.tab==="queue"?"on":""}" data-tab="queue">Queue${
