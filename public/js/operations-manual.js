@@ -235,7 +235,18 @@
 
   function wireSidebar() {
     const input = $("manualSearch");
-    input.oninput = () => { state.query = input.value; render(); input.focus(); input.setSelectionRange(input.value.length, input.value.length); };
+    input.oninput = () => {
+      // render() rebuilds the whole sidebar via innerHTML, which destroys
+      // this <input> and creates a fresh one — so refocus the NEW element
+      // (re-queried from the live DOM), not this now-detached `input`
+      // reference. Focusing the stale node was silently a no-op, which
+      // dropped focus after every keystroke (bug: only one letter at a
+      // time would register before you had to click back into the box).
+      state.query = input.value;
+      render();
+      const el = $("manualSearch");
+      if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+    };
     const clearBtn = $("clearSearch");
     if (clearBtn) clearBtn.onclick = () => { state.query = ""; render(); };
     $("app").querySelectorAll("[data-chapter]").forEach((b) => b.onclick = () => {
