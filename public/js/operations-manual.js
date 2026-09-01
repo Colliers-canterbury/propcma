@@ -75,6 +75,12 @@
     const d = parseISO(s);
     return d ? d.toLocaleDateString("en-NZ", { day: "2-digit", month: "short" }) : "—";
   }
+  // Day + month only, no year — birthdays/anniversaries recur every year,
+  // so the year on file (often decades old for DOB) isn't the point.
+  function fmtDayMonth(s) {
+    const d = parseISO(s);
+    return d ? d.toLocaleDateString("en-NZ", { day: "numeric", month: "long" }) : "—";
+  }
   function today() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
 
   function licenseExpiryStatus(dateStr) {
@@ -356,7 +362,10 @@
     const licensed = d.roster.filter((a) => a.licenceNumber && !isSuspended(a));
     const expiringSoon = licensed.filter((a) => licenseExpiryStatus(a.licenseExpiry).cls === "bad").length;
     const trainingBehind = licensed.filter((a) => Number(a.verifiableHours || 0) < 10).length;
-    const birthdays = d.roster.filter((a) => isThisMonth(a.dob)).length;
+    const birthdayAgents = d.roster.filter((a) => isThisMonth(a.dob));
+    const birthdays = birthdayAgents.length;
+    const birthdayTitle = birthdayAgents
+      .map((a) => `${a.firstName} ${a.surname} — ${fmtDayMonth(a.dob)}`).join("\n");
     const suspended = d.roster.filter(isSuspended).length;
 
     const selected = state.selectedAgent ? d.roster.find((a) => `${a.firstName}|${a.surname}` === state.selectedAgent) : null;
@@ -367,7 +376,7 @@
         <div class="statCard ${expiringSoon ? "bad" : "ok"}"><div class="n">${expiringSoon}</div><div class="l">Licenses due this/next month</div></div>
         <div class="statCard ${trainingBehind ? "warn" : "ok"}"><div class="n">${trainingBehind}</div><div class="l">Behind on verifiable training</div></div>
         <div class="statCard ${suspended ? "bad" : "ok"}"><div class="n">${suspended}</div><div class="l">Suspended licenses</div></div>
-        <div class="statCard"><div class="n">${birthdays}</div><div class="l">Birthdays this month</div></div>
+        <div class="statCard"${birthdays ? ` title="${esc(birthdayTitle)}"` : ""}><div class="n">${birthdays}</div><div class="l">Birthdays this month</div></div>
       </div>
       <div class="dashHead">
         <input class="dashSearch" id="dashSearch" placeholder="Search name, role, email…" value="${esc(state.dashQuery)}" />
@@ -381,7 +390,7 @@
         <tbody>
           ${rows.map((a) => `
             <tr class="agentRow" data-agent="${esc(a.firstName)}|${esc(a.surname)}">
-              <td><strong>${esc(a.firstName)} ${esc(a.surname)}</strong>${isThisMonth(a.dob) ? ' <span class="pill ok">🎂 this month</span>' : ""}</td>
+              <td><strong>${esc(a.firstName)} ${esc(a.surname)}</strong>${isThisMonth(a.dob) ? ` <span class="pill ok" title="Birthday: ${esc(fmtDayMonth(a.dob))}">🎂 this month</span>` : ""}</td>
               <td>${esc(a.jobTitle || "—")}</td>
               <td class="mono">${esc(a.licenceNumber || "—")}${isSuspended(a) ? ' <span class="pill warn">Suspended</span>' : ""}</td>
               <td>${a.licenceNumber ? pill(licenseExpiryStatus(a.licenseExpiry)) : '<span class="dimText">—</span>'}</td>
