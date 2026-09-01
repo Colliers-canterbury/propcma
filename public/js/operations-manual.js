@@ -97,10 +97,11 @@
     if (!dateStr) return { cls: "dim", label: "—" };
     const d = parseISO(dateStr), t = today();
     const thisMonth = d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth();
-    const next = new Date(t.getFullYear(), t.getMonth() + 1, 1);
-    const nextMonth = d.getFullYear() === next.getFullYear() && d.getMonth() === next.getMonth();
-    if (d < t) return { cls: "bad", label: `Expired ${fmtDDMM(dateStr)}` };
-    if (thisMonth || nextMonth) return { cls: "bad", label: `Due ${fmtDDMM(dateStr)}` };
+    // Simple monthly check, matching how the team actually works the list:
+    // red + "Due dd/mm" only for a renewal due in the CURRENT calendar
+    // month (whatever the day), everything else — future or past — shows
+    // green with just the plain date.
+    if (thisMonth) return { cls: "bad", label: `Due ${fmtDDMM(dateStr)}` };
     return { cls: "ok", label: fmtDDMM(dateStr) };
   }
   function hoursStatus(hrs) {
@@ -383,7 +384,7 @@
     return `
       <div class="statGrid">
         <div class="statCard"><div class="n">${d.roster.length}</div><div class="l">Team members</div></div>
-        <div class="statCard ${expiringSoon ? "bad" : "ok"}"><div class="n">${expiringSoon}</div><div class="l">Licenses due this/next month</div></div>
+        <div class="statCard ${expiringSoon ? "bad" : "ok"}"><div class="n">${expiringSoon}</div><div class="l">Licenses due this month</div></div>
         <div class="statCard ${trainingBehind ? "warn" : "ok"}"><div class="n">${trainingBehind}</div><div class="l">Behind on verifiable training</div></div>
         <div class="statCard ${suspended ? "bad" : "ok"}"><div class="n">${suspended}</div><div class="l">Suspended licenses</div></div>
         <div class="statCard"${birthdays ? ` title="${esc(birthdayTitle)}"` : ""}><div class="n">${birthdays}</div><div class="l">Birthdays this month</div></div>
@@ -411,7 +412,7 @@
             </tr>`).join("") || `<tr><td colspan="8"><div class="emptyState">No matches.</div></td></tr>`}
         </tbody>
       </table></div>
-      <p class="smallNote">Red = license expired, or due this month or next month (matches the spreadsheet's own highlighting). Verifiable/non-verifiable training hours are green at 10+ hours, red below — each broker needs 10 verifiable CPD hours completed by 31 December.</p>
+      <p class="smallNote">Red = license renewal due this calendar month. Verifiable/non-verifiable training hours are green at 10+ hours, red below — each broker needs 10 verifiable CPD hours completed by 31 December.</p>
       ${selected ? renderAgentDetail(selected) : ""}
     `;
   }
