@@ -33,7 +33,7 @@
 
   const state = {
     manual: null, dashboard: null,
-    view: "manual",           // "manual" | "dashboard"
+    view: "dashboard",        // "manual" | "dashboard" — lands on the Team Dashboard by default
     sectionId: null,
     dashTab: "roster",
     query: "",                // manual search
@@ -81,6 +81,16 @@
     const d = parseISO(s);
     return d ? d.toLocaleDateString("en-NZ", { day: "numeric", month: "long" }) : "—";
   }
+  // dd/mm, no year — used for License Expiry specifically, since the year
+  // isn't what staff scan for; the day/month is what tells you "is this
+  // due soon".
+  function fmtDDMM(s) {
+    const d = parseISO(s);
+    if (!d) return "—";
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}`;
+  }
   function today() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
 
   function licenseExpiryStatus(dateStr) {
@@ -89,9 +99,9 @@
     const thisMonth = d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth();
     const next = new Date(t.getFullYear(), t.getMonth() + 1, 1);
     const nextMonth = d.getFullYear() === next.getFullYear() && d.getMonth() === next.getMonth();
-    if (d < t) return { cls: "bad", label: `Expired ${fmtDate(dateStr)}` };
-    if (thisMonth || nextMonth) return { cls: "bad", label: `Due ${fmtDate(dateStr)}` };
-    return { cls: "ok", label: fmtDate(dateStr) };
+    if (d < t) return { cls: "bad", label: `Expired ${fmtDDMM(dateStr)}` };
+    if (thisMonth || nextMonth) return { cls: "bad", label: `Due ${fmtDDMM(dateStr)}` };
+    return { cls: "ok", label: fmtDDMM(dateStr) };
   }
   function hoursStatus(hrs) {
     if (hrs == null || hrs === "") return { cls: "dim", label: "—" };
@@ -418,7 +428,7 @@
           <div><dt>Years with Colliers</dt><dd>${esc(a.yearsWithColliers || "—")}</dd></div>
           <div><dt>Experience (real estate)</dt><dd>${esc(a.experience || "—")}</dd></div>
           <div><dt>Licence number</dt><dd>${esc(a.licenceNumber || "—")}</dd></div>
-          <div><dt>Licence expiry</dt><dd>${fmtDate(a.licenseExpiry)}</dd></div>
+          <div><dt>Licence expiry</dt><dd>${fmtDDMM(a.licenseExpiry)}</dd></div>
           <div><dt>Supervision level</dt><dd>${esc(a.supervisionLevel || "—")}</dd></div>
           <div><dt>Supervision plan start</dt><dd>${fmtDate(a.supervisionPlanStart)}</dd></div>
           <div><dt>Review date</dt><dd>${fmtDate(a.reviewDate)}</dd></div>
