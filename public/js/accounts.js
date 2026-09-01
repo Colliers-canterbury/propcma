@@ -351,7 +351,6 @@
             <div><dt>Amount</dt><dd>
               <span class="receiptEdit">
                 <input id="trustAmount" value="${esc(d.form?.deposit?.amount||"")}" placeholder="0.00" />
-                <span class="miniStatus">excl GST</span>
               </span></dd></div>
             <div><dt>Receipt no.</dt><dd>
               <span class="receiptEdit">
