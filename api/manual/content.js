@@ -1,7 +1,7 @@
 // AUTO-GENERATED manual content, converted from
 // "Colliers International - Operations Manual.docx" (v1.2, Aug 25 2026).
 // To update: edit the source .docx, then regenerate this file (ask Claude,
-// or hand-edit the html/text fields below directly).
+// or hand-edit the html/text fields below directly). Need to deploy
 
 export const MANUAL_VERSION = "1.3";
 export const MANUAL_UPDATED = "2026-09-01";
