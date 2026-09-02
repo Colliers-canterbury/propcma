@@ -34,6 +34,18 @@
 // all four reads through it sequentially, which reuses the already-open
 // calculation session instead of re-opening a 22MB file four times, with
 // one retry on a transient 502/504.
+//
+// SECOND ISSUE (found 2026-09-02, same day): with the session fix in
+// place, "Broker Contract Audits" then failed usedRange with a hard 400
+// RangeExceedsLimit — Graph refusing because the sheet's "used range" is
+// far bigger than its real data (almost certainly formatting applied
+// across many more rows/columns than are actually filled in). That's
+// also the more likely real explanation for the original 504 on
+// "Suppliers & Sponsors" — computing a bloated used range is slow as
+// well as, here, too big. Fixed by not asking for usedRange at all:
+// each sheet is now read as an explicit bounded range() sized to its
+// known columns (see RANGE_ADDRESS below), which Graph answers directly
+// without ever having to work out how large the "real" data area is.
 
 import { supabase } from "../_lib/supabase.js";
 import { graphToken } from "../_lib/graph.js";
@@ -64,6 +76,25 @@ const SHEETS = {
   audits: "Broker Contract Audits",
   issues: "Project - Open Issues Register",
   suppliers: "Suppliers & Sponsors",
+};
+
+// Explicit bounded ranges, NOT usedRange. Found 2026-09-02: this
+// workbook's "used range" on at least one sheet is wildly inflated
+// (formatting applied across way more rows/columns than have real data
+// in them) — Graph rejects usedRange on it with 400 RangeExceedsLimit,
+// and computing it at all is almost certainly what made usedRange time
+// out (504) on other sheets too. A fixed range sized to the known
+// columns (see scripts/build-manual-roster.py for the column layout)
+// sidesteps this completely — Graph never has to work out how big the
+// "real" used area is. 2000 rows is generous headroom for a company
+// roster/audit/issue/supplier list; raise ROW_CAP if a sheet ever
+// genuinely grows past that.
+const ROW_CAP = 2000;
+const RANGE_ADDRESS = {
+  roster: `A1:U${ROW_CAP}`,     // columns A–U, per build-manual-roster.py (cols 1–21)
+  audits: `A1:E${ROW_CAP}`,     // columns A–E
+  issues: `A1:J${ROW_CAP}`,     // columns A–J
+  suppliers: `A1:M${ROW_CAP}`,  // columns A–M
 };
 
 // ── Graph helpers ────────────────────────────────────────────────
@@ -153,11 +184,22 @@ async function closeWorkbookSession(token, driveId, itemId, sessionId) {
   } catch { /* best-effort */ }
 }
 
-async function readSheetRows(token, driveId, itemId, sheetName, sessionId) {
+// Trims trailing all-blank rows so parsing doesn't have to scan the
+// full ROW_CAP padding on every sheet (values still line up from row 0).
+function trimTrailingBlankRows(rows) {
+  let end = rows.length;
+  while (end > 0 && rows[end - 1].every((v) => v === null || v === undefined || v === "")) {
+    end--;
+  }
+  return rows.slice(0, end);
+}
+
+async function readSheetRange(token, driveId, itemId, sheetName, address, sessionId) {
   const url = `${GRAPH}/drives/${driveId}/items/${itemId}` +
-    `/workbook/worksheets/${encodeURIComponent(sheetName)}/usedRange(valuesOnly=true)?$select=values`;
-  const data = await graphGet(url, token, `read sheet "${sheetName}"`, { sessionId, retries: 1 });
-  return data.values || [];
+    `/workbook/worksheets/${encodeURIComponent(sheetName)}` +
+    `/range(address='${encodeURIComponent(address)}')?$select=values`;
+  const data = await graphGet(url, token, `read sheet "${sheetName}" ${address}`, { sessionId, retries: 1 });
+  return trimTrailingBlankRows(data.values || []);
 }
 
 // ── value conversion ─────────────────────────────────────────────
@@ -303,10 +345,10 @@ async function runSync() {
     // Sequential, not Promise.all: four concurrent reads against the
     // same ~22MB workbook session is exactly what was timing out.
     // One at a time is slower per-call but far more reliable here.
-    rosterRows = await readSheetRows(token, item.driveId, item.itemId, SHEETS.roster, sessionId);
-    auditRows = await readSheetRows(token, item.driveId, item.itemId, SHEETS.audits, sessionId);
-    issueRows = await readSheetRows(token, item.driveId, item.itemId, SHEETS.issues, sessionId);
-    supplierRows = await readSheetRows(token, item.driveId, item.itemId, SHEETS.suppliers, sessionId);
+    rosterRows = await readSheetRange(token, item.driveId, item.itemId, SHEETS.roster, RANGE_ADDRESS.roster, sessionId);
+    auditRows = await readSheetRange(token, item.driveId, item.itemId, SHEETS.audits, RANGE_ADDRESS.audits, sessionId);
+    issueRows = await readSheetRange(token, item.driveId, item.itemId, SHEETS.issues, RANGE_ADDRESS.issues, sessionId);
+    supplierRows = await readSheetRange(token, item.driveId, item.itemId, SHEETS.suppliers, RANGE_ADDRESS.suppliers, sessionId);
   } finally {
     await closeWorkbookSession(token, item.driveId, item.itemId, sessionId);
   }
