@@ -872,32 +872,112 @@ async function renderRankings(){
       <td class="pc">${totBudget?totPct.toFixed(0)+'%':''}</td>
     </tr></tfoot></table></section>`;
 
-  /* Pulls from the master report. Until the Graph permission is granted
-     the endpoint replies that rankings are manual — the button reports
-     that plainly rather than pretending it worked. */
+  /* The master report carries in-file IRM, so the server cannot read it
+     over Graph - see the note at the top of sync-rankings.js. Desktop
+     Excel can, which makes copy-and-paste the one route that works. */
   const btn=$('#syncRanks');
-  if(btn) btn.onclick=async()=>{
-    btn.disabled=true; btn.textContent='Refreshing…';
-    try{
-      const r=await DealBoardApi.syncRankings();
-      if(r && r.skipped){
-        toast('Rankings are updated by hand at the moment');
-        console.info('sync-rankings:', r.skipped);
-      }else{
-        const n=(r.results||[]).reduce((a,x)=>a+(x.updated||0),0);
-        toast(n?`Updated ${n} broker${n===1?'':'s'}`:'No changes');
-        const bad=(r.results||[]).reduce((a,x)=>a.concat(x.unmatched||[]),[]);
-        if(bad.length) console.warn('names with no broker code:', bad);
-      }
-      await renderRankings();
-      return;
-    }catch(e){
-      toast(e.status===401||e.status===403
-        ? 'You need manager access to refresh'
-        : 'Could not refresh: '+(e.message||'unknown error'));
+  if(btn) btn.onclick=()=>rankingsPastePanel().then(changed=>{
+    if(changed) renderRankings();
+  });
+}
+
+/* Paste-in for the rankings, replacing the Graph sync. Resolves true
+   if anything was written. */
+function rankingsPastePanel(){
+  return new Promise(resolve=>{
+    const ov=document.createElement('div');
+    ov.className='pasteov';
+    ov.innerHTML=`<div class="pastecard" role="dialog" aria-label="Update rankings">
+      <h2>Update rankings from the master report</h2>
+      <ol class="pastesteps">
+        <li>Open <b>FF Main Report - DO NOT AMEND.xlsx</b> in Excel on your computer.</li>
+        <li>Go to the <b>Summary</b> sheet.</li>
+        <li>Select columns <b>A to T</b> \u2014 click the A heading, then shift-click T \u2014 and copy.</li>
+        <li>Click in the box below and paste, then check it before updating.</li>
+      </ol>
+      <textarea class="pastebox" placeholder="Paste here"></textarea>
+      <div class="pasteout"></div>
+      <div class="pastebtns">
+        <button data-a="cancel">Cancel</button>
+        <button data-a="check">Check the paste</button>
+        <button class="go" data-a="commit" disabled>Update rankings</button>
+      </div>
+    </div>`;
+    document.body.appendChild(ov);
+
+    const box=ov.querySelector('.pastebox');
+    const out=ov.querySelector('.pasteout');
+    const bCheck=ov.querySelector('[data-a="check"]');
+    const bCommit=ov.querySelector('[data-a="commit"]');
+    let wrote=false;
+
+    const close=()=>{document.removeEventListener('keydown',onKey);ov.remove();resolve(wrote)};
+    const onKey=e=>{if(e.key==='Escape')close()};
+    document.addEventListener('keydown',onKey);
+    ov.onclick=e=>{if(e.target===ov)close()};
+    ov.querySelector('[data-a="cancel"]').onclick=close;
+
+    /* Any edit invalidates a previous check, so nobody can check one
+       paste and then commit a different one. */
+    box.oninput=()=>{bCommit.disabled=true;out.innerHTML=''};
+
+    const LABEL={investment:'Investment',industrial:'Industrial',
+                 leasing:'Office Leasing',retail:'Retail'};
+
+    function report(r){
+      const rows=r.results||[];
+      const lines=rows.map(x=>{
+        const name=LABEL[x.slug]||x.slug;
+        if(x.error)   return `<li class="bad">${name}: could not save</li>`;
+        if(x.skipped) return `<li class="warn">${name}: nothing found in the paste</li>`;
+        const un=(x.unmatched||[]).length;
+        return `<li>${name}: <b>${x.updated}</b> broker${x.updated===1?'':'s'}, `+
+               `${money(x.total_fees)}`+
+               (un?` <span class="warn">\u2014 ${un} name${un===1?'':'s'} not recognised</span>`:'')+
+               `</li>`;
+      });
+      /* Unrecognised names are the failure that hides: the run looks
+         clean and that broker simply never appears. Name them. */
+      const bad=rows.reduce((a,x)=>a.concat(x.unmatched||[]),[]);
+      out.innerHTML=`<ul class="pastelist">${lines.join('')}</ul>`+
+        (bad.length?`<p class="warn">Not matched to a broker code: ${bad.map(esc).join(', ')}. `+
+          `These will be left out.</p>`:'')+
+        `<p class="muted">${r.pasted_rows} rows read, ${r.pasted_width} columns wide.</p>`;
     }
-    btn.disabled=false; btn.textContent='Refresh rankings';
-  };
+
+    bCheck.onclick=async()=>{
+      if(!box.value.trim()){out.innerHTML='<p class="warn">Nothing pasted yet.</p>';return}
+      bCheck.disabled=true; bCheck.textContent='Checking\u2026';
+      try{
+        const r=await DealBoardApi.pasteRankings(box.value,false);
+        report(r);
+        const any=(r.results||[]).some(x=>x.updated>0);
+        bCommit.disabled=!any;
+        if(!any) out.innerHTML+='<p class="warn">Nothing to update from this paste.</p>';
+      }catch(e){
+        out.innerHTML=`<p class="bad">${esc(e.status===401||e.status===403
+          ? 'You need manager access to update the rankings'
+          : (e.message||'Could not read the paste'))}</p>`;
+      }
+      bCheck.disabled=false; bCheck.textContent='Check the paste';
+    };
+
+    bCommit.onclick=async()=>{
+      bCommit.disabled=true; bCommit.textContent='Updating\u2026';
+      try{
+        const r=await DealBoardApi.pasteRankings(box.value,true);
+        const n=(r.results||[]).reduce((a,x)=>a+(x.updated||0),0);
+        wrote=true;
+        toast(`Updated ${n} broker${n===1?'':'s'}`);
+        close();
+      }catch(e){
+        out.innerHTML=`<p class="bad">${esc(e.message||'Could not update')}</p>`;
+        bCommit.disabled=false; bCommit.textContent='Update rankings';
+      }
+    };
+
+    setTimeout(()=>box.focus(),50);
+  });
 }
 
 /* Management — a rollup across the operating units. Each unit's
@@ -1531,7 +1611,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-08-31a';
+const BOARD_VERSION='2026-09-02a';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
