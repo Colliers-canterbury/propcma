@@ -10,18 +10,25 @@
 // includes staff dates of birth, personal mobiles and home addresses,
 // and the manual itself covers AML, insurance and franchise terms —
 // none of that should ever be served as a plain static file.
+//
+// The four spreadsheet-driven datasets (roster, broker contract audits,
+// open issues register, suppliers & sponsors) are read live from
+// Supabase, refreshed every Friday by api/manual/sync-roster.js from
+// "Real Estate Agent Management Dashboard.xlsx" on SharePoint — see
+// that file and sql/manual_dashboard_setup.sql. Supervision process
+// text and the REINZ awards note are narrative, not tabular, so they
+// stay as hand-edited constants in roster-data.js, same as before.
 
 import { requireUser, sendError } from "../_lib/auth.js";
+import { supabase } from "../_lib/supabase.js";
 import { MANUAL, MANUAL_VERSION, MANUAL_UPDATED } from "./content.js";
-import {
-  DASHBOARD_SNAPSHOT_DATE,
-  ROSTER,
-  BROKER_CONTRACT_AUDITS,
-  OPEN_ISSUES_REGISTER,
-  SUPPLIERS_SPONSORS,
-  REINZ_AWARDS,
-  SUPERVISION_PROCESS,
-} from "./roster-data.js";
+import { SUPERVISION_PROCESS, REINZ_AWARDS } from "./roster-data.js";
+
+async function loadDashboardTable(table) {
+  const { data, error } = await supabase.from(table).select("data").order("id");
+  if (error) throw new Error(`Loading ${table} failed: ${error.message}`);
+  return (data || []).map((row) => row.data);
+}
 
 export default async function handler(req, res) {
   try {
@@ -31,6 +38,19 @@ export default async function handler(req, res) {
     }
     await requireUser(req, ["accounts", "manager"]);
 
+    const [roster, brokerContractAudits, openIssuesRegister, suppliersSponsors, meta] =
+      await Promise.all([
+        loadDashboardTable("manual_dashboard_roster"),
+        loadDashboardTable("manual_dashboard_broker_audits"),
+        loadDashboardTable("manual_dashboard_open_issues"),
+        loadDashboardTable("manual_dashboard_suppliers"),
+        supabase
+          .from("manual_dashboard_meta")
+          .select("snapshot_date, synced_at, status, last_error")
+          .eq("id", "singleton")
+          .maybeSingle(),
+      ]);
+
     return res.status(200).json({
       manual: {
         version: MANUAL_VERSION,
@@ -38,12 +58,15 @@ export default async function handler(req, res) {
         chapters: MANUAL,
       },
       dashboard: {
-        snapshotDate: DASHBOARD_SNAPSHOT_DATE,
-        roster: ROSTER,
+        snapshotDate: meta.data?.snapshot_date || null,
+        syncedAt: meta.data?.synced_at || null,
+        syncStatus: meta.data?.status || null,
+        syncError: meta.data?.status === "error" ? meta.data?.last_error : null,
+        roster,
         supervisionProcess: SUPERVISION_PROCESS,
-        brokerContractAudits: BROKER_CONTRACT_AUDITS,
-        openIssuesRegister: OPEN_ISSUES_REGISTER,
-        suppliersSponsors: SUPPLIERS_SPONSORS,
+        brokerContractAudits,
+        openIssuesRegister,
+        suppliersSponsors,
         reinzAwards: REINZ_AWARDS,
       },
     });
