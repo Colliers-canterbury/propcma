@@ -24,10 +24,26 @@
 // Run sql/manual_dashboard_setup.sql in Supabase once before this
 // is used. See the Operations Manual build log for the rest of the
 // one-time setup checklist.
+//
+// PERFORMANCE NOTE (found 2026-09-02 testing against the real file):
+// the workbook is ~22MB. Reading its four sheets as four independent
+// cold usedRange calls (as this first did) intermittently hits Graph's
+// own MaxRequestDurationExceeded (504) on a file this size — Excel has
+// to open and calculate the whole workbook fresh each time. Fixed by
+// opening one Graph workbook session (persistChanges: false) and doing
+// all four reads through it sequentially, which reuses the already-open
+// calculation session instead of re-opening a 22MB file four times, with
+// one retry on a transient 502/504.
 
 import { supabase } from "../_lib/supabase.js";
 import { graphToken } from "../_lib/graph.js";
 import { requireUser, sendError, HttpError } from "../_lib/auth.js";
+
+// Vercel default function timeout (10s) is nowhere near enough for a
+// 22MB workbook read; bump it. Needs a plan that allows it — Hobby caps
+// at 60s, Pro/Enterprise can go higher (see Vercel's Functions settings
+// if this still isn't enough).
+export const config = { maxDuration: 60 };
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
 
@@ -52,17 +68,34 @@ const SHEETS = {
 
 // ── Graph helpers ────────────────────────────────────────────────
 
-async function graphGet(url, token, step) {
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!res.ok) {
+const RETRYABLE_STATUS = new Set([502, 504]);
+
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+async function graphGet(url, token, step, { sessionId, retries = 1 } = {}) {
+  const headers = { Authorization: `Bearer ${token}` };
+  if (sessionId) headers["workbook-session-id"] = sessionId;
+
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, { headers });
+    if (res.ok) return res.json();
+
     const body = await res.text();
     if (res.status === 501) {
       throw new HttpError(502,
         `[${step}] the workbook could not be opened (501) — it may be rights-protected.`);
     }
+    // Graph gateway timeouts (504) and bad-gateway (502) on this large
+    // (~22MB) workbook are usually transient — one retry clears most of
+    // them without needing a person to re-run anything.
+    const isTransient = RETRYABLE_STATUS.has(res.status) ||
+      body.includes("MaxRequestDurationExceeded");
+    if (isTransient && attempt < retries) {
+      await sleep(1500);
+      continue;
+    }
     throw new HttpError(502, `Graph GET failed at [${step}] ${res.status}: ${body.slice(0, 300)}`);
   }
-  return res.json();
 }
 
 async function resolveWorkbookItem(token) {
@@ -85,10 +118,45 @@ async function resolveWorkbookItem(token) {
   return { driveId: drive.id, itemId: item.id, name: item.name };
 }
 
-async function readSheetRows(token, driveId, itemId, sheetName) {
+// A session keeps the workbook open across all four sheet reads instead
+// of Excel re-opening and recalculating this ~22MB file from scratch on
+// every call — the fix for the MaxRequestDurationExceeded 504s seen
+// reading sheets cold. persistChanges: false since this only ever reads.
+async function openWorkbookSession(token, driveId, itemId) {
+  const res = await fetch(
+    `${GRAPH}/drives/${driveId}/items/${itemId}/workbook/createSession`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ persistChanges: false }),
+    }
+  );
+  if (!res.ok) {
+    // Not fatal — fall back to sessionless (cold) reads.
+    console.error("createSession failed, continuing without a session", res.status);
+    return null;
+  }
+  const data = await res.json();
+  return data.id || null;
+}
+
+async function closeWorkbookSession(token, driveId, itemId, sessionId) {
+  if (!sessionId) return;
+  try {
+    await fetch(
+      `${GRAPH}/drives/${driveId}/items/${itemId}/workbook/closeSession`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "workbook-session-id": sessionId },
+      }
+    );
+  } catch { /* best-effort */ }
+}
+
+async function readSheetRows(token, driveId, itemId, sheetName, sessionId) {
   const url = `${GRAPH}/drives/${driveId}/items/${itemId}` +
     `/workbook/worksheets/${encodeURIComponent(sheetName)}/usedRange(valuesOnly=true)?$select=values`;
-  const data = await graphGet(url, token, `read sheet "${sheetName}"`);
+  const data = await graphGet(url, token, `read sheet "${sheetName}"`, { sessionId, retries: 1 });
   return data.values || [];
 }
 
@@ -228,13 +296,20 @@ async function replaceTable(table, rows) {
 async function runSync() {
   const token = await graphToken();
   const item = await resolveWorkbookItem(token);
+  const sessionId = await openWorkbookSession(token, item.driveId, item.itemId);
 
-  const [rosterRows, auditRows, issueRows, supplierRows] = await Promise.all([
-    readSheetRows(token, item.driveId, item.itemId, SHEETS.roster),
-    readSheetRows(token, item.driveId, item.itemId, SHEETS.audits),
-    readSheetRows(token, item.driveId, item.itemId, SHEETS.issues),
-    readSheetRows(token, item.driveId, item.itemId, SHEETS.suppliers),
-  ]);
+  let rosterRows, auditRows, issueRows, supplierRows;
+  try {
+    // Sequential, not Promise.all: four concurrent reads against the
+    // same ~22MB workbook session is exactly what was timing out.
+    // One at a time is slower per-call but far more reliable here.
+    rosterRows = await readSheetRows(token, item.driveId, item.itemId, SHEETS.roster, sessionId);
+    auditRows = await readSheetRows(token, item.driveId, item.itemId, SHEETS.audits, sessionId);
+    issueRows = await readSheetRows(token, item.driveId, item.itemId, SHEETS.issues, sessionId);
+    supplierRows = await readSheetRows(token, item.driveId, item.itemId, SHEETS.suppliers, sessionId);
+  } finally {
+    await closeWorkbookSession(token, item.driveId, item.itemId, sessionId);
+  }
 
   const roster = parseRoster(rosterRows);
   const audits = parseAudits(auditRows);
