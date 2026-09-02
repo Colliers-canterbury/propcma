@@ -8,6 +8,7 @@
     { "src": "/(.*)",             "dest": "/public/$1" }
   ],
   "crons": [
-    { "path": "/api/deal-board/sync-rankings", "schedule": "0 20 * * *" }
+    { "path": "/api/deal-board/sync-rankings", "schedule": "0 20 * * *" },
+    { "path": "/api/manual/sync-roster", "schedule": "0 17 * * 4" }
   ]
 }
