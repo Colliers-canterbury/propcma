@@ -45,6 +45,9 @@
     syncing: false,            // "Sync now" (Roster & Compliance) in progress
     syncNote: null,            // last sync result/error message
     syncNoteType: null,        // "ok" | "bad"
+    manualSyncing: false,      // "Sync Ops Manual" (nav footer) in progress
+    manualSyncNote: null,
+    manualSyncNoteType: null,  // "ok" | "bad"
   };
 
   // ---------------------------------------------------------------
@@ -103,6 +106,45 @@
     } finally {
       state.syncing = false;
       render();
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // "Sync Ops Manual" — nav footer button. Unlike the roster sync
+  // above, the manual's TEXT content isn't wired up to any live
+  // source (it was a one-time conversion from the Word doc into
+  // api/manual/content.js) — so this doesn't call sync-roster at all.
+  // It just re-fetches GET /api/manual and re-renders, which is useful
+  // if the Team Dashboard was synced elsewhere (the Friday cron, or
+  // someone else clicking the Roster & Compliance sync button) and
+  // this tab is showing a stale snapshot.
+  // ---------------------------------------------------------------
+  async function runNavSync() {
+    if (state.manualSyncing) return;
+    state.manualSyncing = true;
+    state.manualSyncNote = null;
+    state.manualSyncNoteType = null;
+    render();
+    try {
+      const data = await loadData();
+      state.manual = data.manual;
+      state.dashboard = data.dashboard;
+      state.manualSyncNote = "Up to date.";
+      state.manualSyncNoteType = "ok";
+    } catch (e) {
+      state.manualSyncNote = e.message || "Refresh failed.";
+      state.manualSyncNoteType = "bad";
+    } finally {
+      state.manualSyncing = false;
+      render();
+      if (state.manualSyncNoteType === "ok") {
+        setTimeout(() => {
+          if (state.manualSyncNote === "Up to date.") {
+            state.manualSyncNote = null; state.manualSyncNoteType = null;
+            render();
+          }
+        }, 3500);
+      }
     }
   }
 
@@ -323,6 +365,14 @@
             ${dashNavItem("reinz", "REINZ Awards", state.dashboard.reinzAwards.categories.length)}
           </nav>
         </div>
+        <div class="sidebarFooter">
+          <button class="navSyncBtn" id="navSyncBtn" ${state.manualSyncing ? "disabled" : ""}>
+            ${state.manualSyncing
+              ? `<span class="spinner"></span>Syncing…`
+              : `<span class="syncIco">&#8635;</span>Sync Ops Manual`}
+          </button>
+          ${state.manualSyncNote ? `<div class="syncNote ${state.manualSyncNoteType}">${esc(state.manualSyncNote)}</div>` : ""}
+        </div>
       </aside>
       <main class="content" id="mainContent"></main>
     `;
@@ -395,6 +445,8 @@
       state.syncNote = null; state.syncNoteType = null;
       render(); window.scrollTo(0, 0);
     });
+    const navSyncBtn = $("navSyncBtn");
+    if (navSyncBtn) navSyncBtn.onclick = () => runNavSync();
   }
 
   // ---------------------------------------------------------------
