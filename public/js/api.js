@@ -41,7 +41,7 @@
     assignDealNumber: (id, dealNo) => call(`/${id}/assign-deal-number`, { method: "POST", body: { dealNo } }),
     markComplete: (id, comment) => call(`/${id}/complete`, { method: "POST", body: { comment } }),
     setReceipt: (id, receiptNo) => call(`/${id}/receipt`, { method: "POST", body: { receiptNo } }),
-    setTrustDeposit: (id, amount, receiptNo) => call(`/${id}/trust-deposit`, { method: "POST", body: { amount, receiptNo } }),
+    setTrustDeposit: (id, amount, receiptNo, notes) => call(`/${id}/trust-deposit`, { method: "POST", body: { amount, receiptNo, notes } }),
     setChecklistItem: (id, key, value) => call(`/${id}/checklist`, { method: "POST", body: { key, value } }),
     returnToBroker: (id, note) => call(`/${id}/return`, { method: "POST", body: { note } }),
 
@@ -238,11 +238,11 @@
       d.form = d.form || {}; d.form.deposit = { ...(d.form.deposit || {}), receiptNo };
       return delay({ ok: true, receiptNo });
     },
-    setTrustDeposit: (id, amount, receiptNo) => {
+    setTrustDeposit: (id, amount, receiptNo, notes) => {
       const d = findDeal(id);
-      d.form = d.form || {}; d.form.deposit = { ...(d.form.deposit || {}), amount, receiptNo };
+      d.form = d.form || {}; d.form.deposit = { ...(d.form.deposit || {}), amount, receiptNo, notes };
       d.deposit_to_trust = true;
-      return delay({ ok: true, amount, receiptNo });
+      return delay({ ok: true, amount, receiptNo, notes });
     },
     setChecklistItem: (id, key, value) => {
       const d = findDeal(id);
