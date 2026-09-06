@@ -356,6 +356,10 @@
               <span class="receiptEdit">
                 <input id="trustReceiptNo" value="${esc(d.form?.deposit?.receiptNo||"")}" placeholder="Enter receipt no." />
               </span></dd></div>
+            <div><dt>Deposit notes</dt><dd>
+              <span class="receiptEdit">
+                <textarea id="trustNotes" rows="2" placeholder="e.g. when it's due, or where it should be paid to…">${esc(d.form?.deposit?.notes||"")}</textarea>
+              </span></dd></div>
             <div><dt></dt><dd>
               <button id="trustSave" class="miniBtn">Save</button>
               <span id="trustStatus" class="miniStatus"></span></dd></div>
@@ -367,6 +371,8 @@
               <label class="fld"><span class="lbl">Amount (excl GST)</span><input id="trustAmount" placeholder="0.00" /></label>
               <label class="fld"><span class="lbl">Receipt no.</span><input id="trustReceiptNo" placeholder="Enter receipt no." /></label>
             </div>
+            <label class="fld" style="margin-top:8px"><span class="lbl">Deposit notes</span>
+              <textarea id="trustNotes" rows="2" placeholder="e.g. when it's due, or where it should be paid to…"></textarea></label>
             <button id="trustSave" class="miniBtn" style="margin-top:8px">Save</button>
             <span id="trustStatus" class="miniStatus"></span>
           </div>`}` : ""}
@@ -478,13 +484,14 @@
     if (trustSave) trustSave.onclick = async () => {
       const amount = ($("trustAmount").value || "").trim();
       const receiptNo = ($("trustReceiptNo").value || "").trim();
+      const notes = ($("trustNotes")?.value || "").trim();
       const tst = $("trustStatus");
       trustSave.disabled = true;
       if (tst) tst.textContent = "Saving…";
       try {
-        await api.setTrustDeposit(state.deal.id, amount, receiptNo);
+        await api.setTrustDeposit(state.deal.id, amount, receiptNo, notes);
         state.deal.form = state.deal.form || {};
-        state.deal.form.deposit = { ...(state.deal.form.deposit || {}), amount, receiptNo };
+        state.deal.form.deposit = { ...(state.deal.form.deposit || {}), amount, receiptNo, notes };
         state.deal.deposit_to_trust = true;
         if (tst) tst.textContent = "Saved ✓";
         render();
