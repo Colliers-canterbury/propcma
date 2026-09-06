@@ -79,6 +79,20 @@ main.content{padding:26px clamp(16px,3vw,44px) 80px;min-width:0;}
 .contentHead h1{margin:0;font-size:clamp(20px,2.6vw,28px);letter-spacing:-.3px;}
 .contentHead .crumb{color:var(--dim);font-size:12.5px;margin:0 0 4px;text-transform:uppercase;letter-spacing:.5px;}
 .metaRight{font-size:12px;color:var(--dim);text-align:right;}
+.metaRightTop{display:flex;align-items:center;justify-content:flex-end;gap:10px;}
+
+.syncBtn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--card);
+  color:var(--navy);font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:999px;cursor:pointer;
+  white-space:nowrap;}
+.syncBtn:hover:not(:disabled){border-color:var(--cyan);color:var(--cyan);}
+.syncBtn:disabled{cursor:default;color:var(--dim);}
+.syncBtn .syncIco{font-size:13px;line-height:1;}
+.spinner{display:inline-block;width:10px;height:10px;border:2px solid var(--line);border-top-color:var(--navy);
+  border-radius:50%;animation:syncSpin .7s linear infinite;}
+@keyframes syncSpin{to{transform:rotate(360deg);}}
+.syncNote{font-size:11.5px;margin-top:4px;}
+.syncNote.ok{color:var(--ok);}
+.syncNote.bad{color:var(--bad);}
 
 .manualBody{max-width:840px;}
 .manualBody h2{font-size:20px;margin:0 0 14px;}
