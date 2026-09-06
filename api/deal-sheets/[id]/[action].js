@@ -291,12 +291,13 @@ async function setTrustDeposit(req, res, deal) {
   if (deal.status === "draft")
     throw new HttpError(409, "Cannot record a trust deposit on a draft — the office admin is still preparing it");
 
-  const { amount, receiptNo } = req.body || {};
+  const { amount, receiptNo, notes } = req.body || {};
   const amountValue = String(amount ?? "").trim();
   const receiptValue = String(receiptNo ?? "").trim();
+  const notesValue = String(notes ?? "").trim();
 
   const form = { ...(deal.form || {}) };
-  form.deposit = { ...(form.deposit || {}), amount: amountValue, receiptNo: receiptValue };
+  form.deposit = { ...(form.deposit || {}), amount: amountValue, receiptNo: receiptValue, notes: notesValue };
   form.depositToTrust = true;
 
   const wasFlagged = !!deal.deposit_to_trust;
@@ -316,7 +317,7 @@ async function setTrustDeposit(req, res, deal) {
       : `Trust deposit added by accounts (not flagged by office admin): $${amountValue || "0"}, receipt ${receiptValue || "—"}`,
   });
 
-  return res.status(200).json({ ok: true, amount: amountValue, receiptNo: receiptValue });
+  return res.status(200).json({ ok: true, amount: amountValue, receiptNo: receiptValue, notes: notesValue });
 }
 
 /**
