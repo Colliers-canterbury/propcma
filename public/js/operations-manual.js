@@ -42,6 +42,9 @@
     sortKey: null, sortDir: 1,
     selectedAgent: null,
     collapsedChapters: {},
+    syncing: false,            // "Sync now" (Roster & Compliance) in progress
+    syncNote: null,            // last sync result/error message
+    syncNoteType: null,        // "ok" | "bad"
   };
 
   // ---------------------------------------------------------------
@@ -61,6 +64,46 @@
       throw err;
     }
     return data;
+  }
+
+  // ---------------------------------------------------------------
+  // manual roster sync — "Sync now" button on Roster & Compliance,
+  // calls the same GET /api/manual/sync-roster?force=1 endpoint the
+  // Friday cron uses (requires role accounts/manager, same as this
+  // whole page). On success, reloads /api/manual so the new snapshot
+  // date and rows show immediately without a page refresh.
+  // ---------------------------------------------------------------
+  async function runManualSync() {
+    if (state.syncing) return;
+    state.syncing = true;
+    state.syncNote = null;
+    state.syncNoteType = null;
+    render();
+    try {
+      const token = await window.DealSheetAuth.getToken();
+      const res = await fetch(`${cfg.apiBase}/api/manual/sync-roster?force=1`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      let body = null;
+      try { body = await res.json(); } catch { /* empty */ }
+      if (!res.ok) throw new Error(body?.error || `Sync failed (${res.status})`);
+
+      const data = await loadData();
+      state.manual = data.manual;
+      state.dashboard = data.dashboard;
+
+      const c = body?.counts;
+      state.syncNote = c
+        ? `Synced — ${c.roster} roster, ${c.brokerContractAudits} audit, ${c.openIssuesRegister} issue, ${c.suppliersSponsors} supplier row(s).`
+        : "Sync complete.";
+      state.syncNoteType = "ok";
+    } catch (e) {
+      state.syncNote = e.message || "Sync failed.";
+      state.syncNoteType = "bad";
+    } finally {
+      state.syncing = false;
+      render();
+    }
   }
 
   // ---------------------------------------------------------------
@@ -276,6 +319,7 @@
     });
     $("app").querySelectorAll("[data-dash]").forEach((b) => b.onclick = () => {
       state.view = "dashboard"; state.dashTab = b.dataset.dash; state.dashQuery = ""; state.selectedAgent = null;
+      state.syncNote = null; state.syncNoteType = null;
       render(); window.scrollTo(0, 0);
     });
   }
@@ -347,10 +391,21 @@
       roster: renderRosterTab, supervision: renderSupervisionTab, audits: renderAuditsTab,
       issues: renderIssuesTab, suppliers: renderSuppliersTab, reinz: renderReinzTab,
     }[state.dashTab](d);
+    const showSync = state.dashTab === "roster" && !cfg.DEMO_MODE;
     return `
       <div class="contentHead">
         <div><p class="crumb">Team Dashboard</p><h1>${esc(heads[state.dashTab])}</h1></div>
-        <div class="metaRight">Data as of ${esc(fmtDate(d.snapshotDate))}<br>from Real Estate Agent Management Dashboard.xlsx</div>
+        <div class="metaRight">
+          <div class="metaRightTop">
+            <span>Data as of ${esc(fmtDate(d.snapshotDate))}</span>
+            ${showSync ? `
+              <button class="syncBtn" id="syncRosterBtn" ${state.syncing ? "disabled" : ""} title="Pull the latest data from Real Estate Agent Management Dashboard.xlsx">
+                ${state.syncing ? `<span class="spinner"></span>Syncing…` : `<span class="syncIco">&#8635;</span>Sync now`}
+              </button>` : ""}
+          </div>
+          <div>from Real Estate Agent Management Dashboard.xlsx</div>
+          ${showSync && state.syncNote ? `<div class="syncNote ${state.syncNoteType}">${esc(state.syncNote)}</div>` : ""}
+        </div>
       </div>
       ${body}`;
   }
@@ -551,6 +606,8 @@
   }
 
   function wireDashboard() {
+    const syncBtn = $("syncRosterBtn");
+    if (syncBtn) syncBtn.onclick = () => runManualSync();
     const dashSearch = $("dashSearch");
     if (dashSearch) dashSearch.oninput = () => {
       state.dashQuery = dashSearch.value; render();
