@@ -239,6 +239,63 @@
   }
 
   // ---------------------------------------------------------------
+  // sidebar icons — small stroke-style SVGs (mirrors the icon-led
+  // nav pattern from the reference dashboard design). Chapter icons
+  // are picked by keyword match against the chapter title, since the
+  // manual's chapters/sections come from the API at runtime rather
+  // than being hardcoded here; a generic document icon is the
+  // fallback for anything that doesn't match.
+  // ---------------------------------------------------------------
+  function svgIcon(paths) {
+    return `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+  }
+  const ICON = {
+    doc: svgIcon(`<path d="M7 3h7l4 4v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v4h4"/>`),
+    shield: svgIcon(`<path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/>`),
+    people: svgIcon(`<circle cx="9" cy="8" r="3"/><path d="M2 20c0-3.3 3.1-6 7-6s7 2.7 7 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2c2.9.4 5 2.6 5 5.8"/>`),
+    briefcase: svgIcon(`<rect x="3" y="7" width="18" height="13" rx="1.5"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M3 12h18"/>`),
+    megaphone: svgIcon(`<path d="M3 10v4a1 1 0 0 0 1 1h2l4 4V5l-4 4H4a1 1 0 0 0-1 1z"/><path d="M14 8.5a4 4 0 0 1 0 7"/><path d="M17.5 6a8 8 0 0 1 0 12"/>`),
+    dollar: svgIcon(`<circle cx="12" cy="12" r="9"/><path d="M12 6.5v11M15 9.2c0-1.2-1.3-2.2-3-2.2-1.8 0-3 1-3 2.4 0 3 6 1.4 6 4.4 0 1.4-1.4 2.4-3 2.4-1.8 0-3-1-3-2.2"/>`),
+    lock: svgIcon(`<rect x="4.5" y="10.5" width="15" height="9.5" rx="1.5"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/>`),
+    book: svgIcon(`<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15.5H6.5A2.5 2.5 0 0 0 4 21z"/><path d="M4 5.5v15.5"/>`),
+    alert: svgIcon(`<path d="M12 3l10 18H2z"/><path d="M12 10v4"/><path d="M12 17.2v.1"/>`),
+    truck: svgIcon(`<rect x="2" y="7" width="13" height="10" rx="1"/><path d="M15 10h4l3 3v4h-7z"/><circle cx="7" cy="19" r="1.6"/><circle cx="18" cy="19" r="1.6"/>`),
+    trophy: svgIcon(`<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 5H5a3 3 0 0 0 3 4M16 5h3a3 3 0 0 1-3 4"/><path d="M12 13v3M9 20h6M10 16.5h4v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1z"/>`),
+    grid: svgIcon(`<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>`),
+    chevron: svgIcon(`<path d="M9 6l6 6-6 6"/>`),
+  };
+  const CHAPTER_ICON_RULES = [
+    [/govern|complian|code of conduct|conduct|policy|policies/i, "shield"],
+    [/hr|people|staff|team|culture|induction|onboard/i, "people"],
+    [/brokerage|sales|listing|deal|operation/i, "briefcase"],
+    [/marketing|brand|communicat/i, "megaphone"],
+    [/finance|account|invoice|budget|commission/i, "dollar"],
+    [/risk|it\b|technology|system|security|privacy/i, "lock"],
+    [/award|recognit/i, "trophy"],
+  ];
+  function chapterIcon(title) {
+    const t = title || "";
+    for (const [re, key] of CHAPTER_ICON_RULES) if (re.test(t)) return ICON[key];
+    return ICON.doc;
+  }
+  const DASH_ICON = {
+    roster: ICON.people, supervision: ICON.shield, audits: ICON.briefcase,
+    issues: ICON.alert, suppliers: ICON.truck, reinz: ICON.trophy,
+  };
+
+  // A chapter with no explicit entry in state.collapsedChapters starts
+  // collapsed, EXCEPT the chapter holding whatever manual section is
+  // currently open — so landing on a section always shows it in
+  // context, but the rest of the nav stays tidy (accordion / cascading
+  // dropdown behaviour) instead of dumping all ~30 sections at once.
+  function isChapterCollapsed(ch) {
+    if (Object.prototype.hasOwnProperty.call(state.collapsedChapters, ch.id)) {
+      return state.collapsedChapters[ch.id];
+    }
+    return !(state.view === "manual" && ch.sections.some((s) => s.id === state.sectionId));
+  }
+
+  // ---------------------------------------------------------------
   // render: shell
   // ---------------------------------------------------------------
   function render() {
@@ -256,7 +313,7 @@
         </div>
         ${renderToc()}
         <div class="tocDashDivider">
-          <button class="tocGroupBtn" style="padding-left:8px">Team Dashboard</button>
+          <div class="tocGroupBtn tocGroupHeading"><span class="tocIcon">${ICON.grid}</span><span class="tocLabel">Team Dashboard</span></div>
           <nav class="dashNav">
             ${dashNavItem("roster", "Roster & Compliance", state.dashboard.roster.length)}
             ${dashNavItem("supervision", "Supervision", state.dashboard.roster.length)}
@@ -275,7 +332,11 @@
 
   function dashNavItem(key, label, count) {
     const on = state.view === "dashboard" && state.dashTab === key;
-    return `<button class="dashNavBtn ${on ? "on" : ""}" data-dash="${key}">${esc(label)}<span class="cnt">${count}</span></button>`;
+    return `<button class="dashNavBtn ${on ? "on" : ""}" data-dash="${key}">
+      <span class="tocIcon">${DASH_ICON[key] || ICON.doc}</span>
+      <span class="tocLabel">${esc(label)}</span>
+      <span class="cnt">${count}</span>
+    </button>`;
   }
 
   function renderToc() {
@@ -283,14 +344,25 @@
       const results = searchManual(state.query);
       return `<div class="searchMeta">${results.length} result${results.length === 1 ? "" : "s"}</div>`;
     }
-    return `<nav class="toc">${state.manual.chapters.map((ch) => `
+    return `<nav class="toc">${state.manual.chapters.map((ch) => {
+      const open = !isChapterCollapsed(ch);
+      return `
       <div class="tocGroup">
-        <button class="tocGroupBtn" data-chapter="${ch.id}">${esc(ch.title)}</button>
-        ${!state.collapsedChapters[ch.id] ? ch.sections.map((sec) => `
-          <button class="tocSection ${state.view === "manual" && state.sectionId === sec.id ? "on" : ""}" data-section="${sec.id}">
-            <span class="num">${esc(sec.num)}</span><span>${esc(sec.title)}</span>
-          </button>`).join("") : ""}
-      </div>`).join("")}</nav>`;
+        <button class="tocGroupBtn ${open ? "open" : ""}" data-chapter="${ch.id}" aria-expanded="${open}">
+          <span class="tocIcon">${chapterIcon(ch.title)}</span>
+          <span class="tocLabel">${esc(ch.title)}</span>
+          <span class="tocChevron">${ICON.chevron}</span>
+        </button>
+        <div class="tocSubList ${open ? "open" : ""}">
+          <div class="tocSubInner">
+            ${ch.sections.map((sec) => `
+              <button class="tocSection ${state.view === "manual" && state.sectionId === sec.id ? "on" : ""}" data-section="${sec.id}">
+                <span class="num">${esc(sec.num)}</span><span>${esc(sec.title)}</span>
+              </button>`).join("")}
+          </div>
+        </div>
+      </div>`;
+    }).join("")}</nav>`;
   }
 
   function wireSidebar() {
@@ -310,7 +382,8 @@
     const clearBtn = $("clearSearch");
     if (clearBtn) clearBtn.onclick = () => { state.query = ""; render(); };
     $("app").querySelectorAll("[data-chapter]").forEach((b) => b.onclick = () => {
-      state.collapsedChapters[b.dataset.chapter] = !state.collapsedChapters[b.dataset.chapter];
+      const ch = state.manual.chapters.find((c) => c.id === b.dataset.chapter);
+      state.collapsedChapters[b.dataset.chapter] = !isChapterCollapsed(ch);
       render();
     });
     $("app").querySelectorAll("[data-section]").forEach((b) => b.onclick = () => {
