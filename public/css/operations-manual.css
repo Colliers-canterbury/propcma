@@ -95,6 +95,18 @@ mark{background:#FFEFA0;color:#1A2233;border-radius:2px;padding:0 1px;}
   border-radius:999px;padding:1px 7px;}
 .dashNavBtn.on .cnt{color:var(--sb-active-text);background:rgba(16,26,52,.1);}
 
+/* nav footer — "Sync Ops Manual" */
+.sidebarFooter{margin:18px 0 4px;padding-top:14px;border-top:1px solid var(--sb-border);}
+.navSyncBtn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
+  border:1px solid var(--sb-border);background:rgba(255,255,255,.05);color:var(--sb-text-strong);
+  font-family:inherit;font-size:13px;font-weight:600;padding:9px 12px;border-radius:8px;cursor:pointer;}
+.navSyncBtn:hover:not(:disabled){border-color:var(--sb-accent);color:var(--sb-accent);background:rgba(255,255,255,.08);}
+.navSyncBtn:disabled{cursor:default;opacity:.7;}
+.navSyncBtn .syncIco{font-size:14px;line-height:1;}
+.sidebarFooter .syncNote{text-align:center;margin-top:6px;}
+.sidebarFooter .syncNote.ok{color:#5FE3A5;}
+.sidebarFooter .syncNote.bad{color:#FF8A80;}
+
 /* main content */
 main.content{padding:26px clamp(16px,3vw,44px) 80px;min-width:0;}
 .contentHead{border-bottom:3px solid var(--navy);padding-bottom:16px;margin-bottom:20px;
