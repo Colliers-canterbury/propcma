@@ -46,6 +46,28 @@ const OUTCOMES_RETAIL={
 function outcomesFor(stage){
   return which==='retail' ? OUTCOMES_RETAIL[stage] : OUTCOMES[stage];
 }
+/* Pipeline Settings row labels — which stages get an editable weight,
+   and what to call them. Generic by default; Retail gets its own set
+   matching its Conditional / Agreed HOAs / Advanced Negotiations / WIP
+   / Unconditional structure (see claude/2026-09-07_retail_stages.sql).
+   Unconditional is never listed here — it's always fixed at 100% and
+   added separately by renderWeights(). */
+const WEIGHT_ROWS={
+  retail: [['Conditional','Conditional'],
+           ['Agreed HOAs','Agreed HOAs'],
+           ['Advanced Negotiations / WIP','Advanced Negotiations / WIP']]
+};
+const DEFAULT_WEIGHT_ROWS=[['Conditional','Conditional'],
+            ['Campaigns / sole agency','Campaign'],
+            ['Submissions','Submission']];
+function weightRowsFor(){
+  return WEIGHT_ROWS[which] || DEFAULT_WEIGHT_ROWS;
+}
+/* "Invoiced" tick box — Retail only, and only on Unconditional-stage
+   rows (once a retail deal is unconditional it's ready to invoice). */
+function showInvoiced(stage){
+  return which==='retail' && /^uncondition/i.test(stage||'');
+}
 const TODAY=()=>new Date().toISOString().slice(0,10);
 /* Form controls do not print their values — a date input shows 'dd.'
    and a select prints blank. Each control therefore carries a hidden
@@ -131,7 +153,7 @@ function fromApi(dept, payload){
       f:Number(d.fee_nzd)||0, b:d.brokers||'', st:d.status_note||'', out:d.outcome||'',
       td:d.timing_date||'', tn:d.tenant||'', lt:d.listing_type||'',
       pr:(d.probability===null||d.probability===undefined)?'':Number(d.probability),
-      aml:AML_OUT[d.aml]||''
+      aml:AML_OUT[d.aml]||'', inv:!!d.invoiced
     })),
     fines: (payload.fines||[]).map(f=>({b:f.broker_code, amt:Number(f.amount_nzd)||0})),
     options: payload.options||{},
@@ -167,6 +189,7 @@ function saveDealField(d, k){
     pr: () => ({probability: d.pr===''?null:Number(d.pr)}),
     st: () => ({status_note: d.st}),
     aml:() => ({aml: AML_IN[(d.aml||'').toUpperCase()] || 'not_started'}),
+    inv:() => ({invoiced: !!d.inv}),
     b:  () => ({brokers: d.b.split('/').map(x=>x.trim()).filter(Boolean)}),
   };
   if(!map[k]) return Promise.resolve();
@@ -241,6 +264,7 @@ function renderBoard(target){
   wrap.innerHTML='';
   M().stages.forEach(st=>{
     const rows=visibleDeals().filter(d=>d.s===st);
+    const inv=showInvoiced(st);
     const sec=document.createElement('section');
     sec.className='stage'+(current===st?' current':'');
     sec.innerHTML=`<header>
@@ -258,6 +282,7 @@ function renderBoard(target){
         ${(S().options||{}).show_probability?'<th style="width:56px" class="num">Prob</th>':''}
         ${(S().options||{}).hide_status?'':'<th style="width:96px">Status</th>'}
         <th style="width:76px">Broker</th>
+        ${inv?'<th style="width:64px" class="noprint">Invoiced</th>':''}
         <th style="width:40px" class="noprint">AML</th>
         <th style="width:92px" class="noprint"></th>
       </tr></thead><tbody></tbody></table>
@@ -271,7 +296,7 @@ function renderBoard(target){
       const tb=sec.querySelector('tbody');
       if(!rows.length){
         const cols=9+((S().options||{}).show_tenant?1:0)+((S().options||{}).show_listing_type?1:0)+
-          ((S().options||{}).show_probability?1:0)-((S().options||{}).hide_status?1:0);
+          ((S().options||{}).show_probability?1:0)-((S().options||{}).hide_status?1:0)+(inv?1:0);
         tb.innerHTML=`<tr><td colspan="${cols}" class="empty">`+
           (fromDate||toDate ? 'Nothing in this date range.' : 'Nothing here yet.')+'</td></tr>';
       }
@@ -280,7 +305,7 @@ function renderBoard(target){
         catch(err){ console.error('row failed:', d, err); }
       });
       sec.querySelector('.addrow').onclick=()=>{
-        const d={id:'tmp'+Date.now(),s:st,a:'',tn:'',lt:'',t:'',td:/^uncondition/i.test(st)?TODAY():'',f:0,pr:'',b:'',st:'',aml:'',isNew:true};
+        const d={id:'tmp'+Date.now(),s:st,a:'',tn:'',lt:'',t:'',td:/^uncondition/i.test(st)?TODAY():'',f:0,pr:'',b:'',st:'',aml:'',inv:false,isNew:true};
         S().deals.push(d);renderBoard();renderTally();
         const c=wrap.querySelector(`[data-id="${d.id}"] [contenteditable]`);if(c)c.focus();
       };
@@ -355,6 +380,7 @@ function dealRow(d){
   tr.className='row'; tr.dataset.id=d.id; tr.draggable=true;
   const stageOpts=(S().stages||[]).slice().sort((a,b)=>a.position-b.position)
     .map(x=>`<option value="${esc(x.name)}"${x.name===d.s?' selected':''}>${esc(x.name)}</option>`).join('');
+  const inv=showInvoiced(d.s);
   tr.innerHTML=`<td class="grip">⠿</td>
     <td class="stagesel"><select class="stagepick">${stageOpts}</select>${pt(d.s)}</td>
     ${(S().options||{}).show_tenant
@@ -377,6 +403,8 @@ function dealRow(d){
       ? `<td class="num prob"><div contenteditable data-k="pr" data-ph="—">${d.pr===''?'':d.pr}</div></td>` : ''}
     ${(S().options||{}).hide_status ? '' : `<td class="statuscell">${statusSelect(d.st)}${pt(d.st)}</td>`}
     <td class="brk"><div contenteditable data-k="b" data-ph="—">${esc(d.b)}</div></td>
+    ${inv?`<td class="invcell noprint"><input type="checkbox" class="invbox"
+      ${d.inv?'checked':''} title="Invoiced"></td>`:''}
     <td class="amlcell noprint"><input type="checkbox" class="amlbox"
       ${d.aml==='Y'?'checked':''} title="AML complete"></td>
     <td class="actcell noprint">${outcomeControl(d)}</td>`;
@@ -460,6 +488,19 @@ function dealRow(d){
       saveDealField(d,'aml')
         .then(()=>{tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500)})
         .catch(()=>{ d.aml=was; renderBoard(); });
+    };
+  }
+
+  // Invoiced — Retail's Unconditional stage only, same tick-to-save
+  // mechanism as AML.
+  const ib=tr.querySelector('.invbox');
+  if(ib){
+    ib.onchange=()=>{
+      const was=d.inv;
+      d.inv=ib.checked;
+      saveDealField(d,'inv')
+        .then(()=>{tr.classList.add('saved');setTimeout(()=>tr.classList.remove('saved'),1500)})
+        .catch(()=>{ d.inv=was; renderBoard(); });
     };
   }
 
@@ -872,112 +913,32 @@ async function renderRankings(){
       <td class="pc">${totBudget?totPct.toFixed(0)+'%':''}</td>
     </tr></tfoot></table></section>`;
 
-  /* The master report carries in-file IRM, so the server cannot read it
-     over Graph - see the note at the top of sync-rankings.js. Desktop
-     Excel can, which makes copy-and-paste the one route that works. */
+  /* Pulls from the master report. Until the Graph permission is granted
+     the endpoint replies that rankings are manual — the button reports
+     that plainly rather than pretending it worked. */
   const btn=$('#syncRanks');
-  if(btn) btn.onclick=()=>rankingsPastePanel().then(changed=>{
-    if(changed) renderRankings();
-  });
-}
-
-/* Paste-in for the rankings, replacing the Graph sync. Resolves true
-   if anything was written. */
-function rankingsPastePanel(){
-  return new Promise(resolve=>{
-    const ov=document.createElement('div');
-    ov.className='pasteov';
-    ov.innerHTML=`<div class="pastecard" role="dialog" aria-label="Update rankings">
-      <h2>Update rankings from the master report</h2>
-      <ol class="pastesteps">
-        <li>Open <b>FF Main Report - DO NOT AMEND.xlsx</b> in Excel on your computer.</li>
-        <li>Go to the <b>Summary</b> sheet.</li>
-        <li>Select columns <b>A to T</b> \u2014 click the A heading, then shift-click T \u2014 and copy.</li>
-        <li>Click in the box below and paste, then check it before updating.</li>
-      </ol>
-      <textarea class="pastebox" placeholder="Paste here"></textarea>
-      <div class="pasteout"></div>
-      <div class="pastebtns">
-        <button data-a="cancel">Cancel</button>
-        <button data-a="check">Check the paste</button>
-        <button class="go" data-a="commit" disabled>Update rankings</button>
-      </div>
-    </div>`;
-    document.body.appendChild(ov);
-
-    const box=ov.querySelector('.pastebox');
-    const out=ov.querySelector('.pasteout');
-    const bCheck=ov.querySelector('[data-a="check"]');
-    const bCommit=ov.querySelector('[data-a="commit"]');
-    let wrote=false;
-
-    const close=()=>{document.removeEventListener('keydown',onKey);ov.remove();resolve(wrote)};
-    const onKey=e=>{if(e.key==='Escape')close()};
-    document.addEventListener('keydown',onKey);
-    ov.onclick=e=>{if(e.target===ov)close()};
-    ov.querySelector('[data-a="cancel"]').onclick=close;
-
-    /* Any edit invalidates a previous check, so nobody can check one
-       paste and then commit a different one. */
-    box.oninput=()=>{bCommit.disabled=true;out.innerHTML=''};
-
-    const LABEL={investment:'Investment',industrial:'Industrial',
-                 leasing:'Office Leasing',retail:'Retail'};
-
-    function report(r){
-      const rows=r.results||[];
-      const lines=rows.map(x=>{
-        const name=LABEL[x.slug]||x.slug;
-        if(x.error)   return `<li class="bad">${name}: could not save</li>`;
-        if(x.skipped) return `<li class="warn">${name}: nothing found in the paste</li>`;
-        const un=(x.unmatched||[]).length;
-        return `<li>${name}: <b>${x.updated}</b> broker${x.updated===1?'':'s'}, `+
-               `${money(x.total_fees)}`+
-               (un?` <span class="warn">\u2014 ${un} name${un===1?'':'s'} not recognised</span>`:'')+
-               `</li>`;
-      });
-      /* Unrecognised names are the failure that hides: the run looks
-         clean and that broker simply never appears. Name them. */
-      const bad=rows.reduce((a,x)=>a.concat(x.unmatched||[]),[]);
-      out.innerHTML=`<ul class="pastelist">${lines.join('')}</ul>`+
-        (bad.length?`<p class="warn">Not matched to a broker code: ${bad.map(esc).join(', ')}. `+
-          `These will be left out.</p>`:'')+
-        `<p class="muted">${r.pasted_rows} rows read, ${r.pasted_width} columns wide.</p>`;
-    }
-
-    bCheck.onclick=async()=>{
-      if(!box.value.trim()){out.innerHTML='<p class="warn">Nothing pasted yet.</p>';return}
-      bCheck.disabled=true; bCheck.textContent='Checking\u2026';
-      try{
-        const r=await DealBoardApi.pasteRankings(box.value,false);
-        report(r);
-        const any=(r.results||[]).some(x=>x.updated>0);
-        bCommit.disabled=!any;
-        if(!any) out.innerHTML+='<p class="warn">Nothing to update from this paste.</p>';
-      }catch(e){
-        out.innerHTML=`<p class="bad">${esc(e.status===401||e.status===403
-          ? 'You need manager access to update the rankings'
-          : (e.message||'Could not read the paste'))}</p>`;
-      }
-      bCheck.disabled=false; bCheck.textContent='Check the paste';
-    };
-
-    bCommit.onclick=async()=>{
-      bCommit.disabled=true; bCommit.textContent='Updating\u2026';
-      try{
-        const r=await DealBoardApi.pasteRankings(box.value,true);
+  if(btn) btn.onclick=async()=>{
+    btn.disabled=true; btn.textContent='Refreshing…';
+    try{
+      const r=await DealBoardApi.syncRankings();
+      if(r && r.skipped){
+        toast('Rankings are updated by hand at the moment');
+        console.info('sync-rankings:', r.skipped);
+      }else{
         const n=(r.results||[]).reduce((a,x)=>a+(x.updated||0),0);
-        wrote=true;
-        toast(`Updated ${n} broker${n===1?'':'s'}`);
-        close();
-      }catch(e){
-        out.innerHTML=`<p class="bad">${esc(e.message||'Could not update')}</p>`;
-        bCommit.disabled=false; bCommit.textContent='Update rankings';
+        toast(n?`Updated ${n} broker${n===1?'':'s'}`:'No changes');
+        const bad=(r.results||[]).reduce((a,x)=>a.concat(x.unmatched||[]),[]);
+        if(bad.length) console.warn('names with no broker code:', bad);
       }
-    };
-
-    setTimeout(()=>box.focus(),50);
-  });
+      await renderRankings();
+      return;
+    }catch(e){
+      toast(e.status===401||e.status===403
+        ? 'You need manager access to refresh'
+        : 'Could not refresh: '+(e.message||'unknown error'));
+    }
+    btn.disabled=false; btn.textContent='Refresh rankings';
+  };
 }
 
 /* Management — a rollup across the operating units. Each unit's
@@ -1136,12 +1097,14 @@ function renderBrokerPipeline(){
   renderBoard('#brokerStages');
 }
 
-/* Pipeline Settings — the percentages behind the weighted total. */
+/* Pipeline Settings — the percentages behind the weighted total.
+   Row labels are department-aware (weightRowsFor) since a department's
+   stage names aren't the same everywhere — Retail's Conditional /
+   Agreed HOAs / Advanced Negotiations / WIP structure vs. the generic
+   default used elsewhere. */
 function renderWeights(){
   const box=$('#weightRows'); if(!box) return;
-  const rows=[['Conditional','Conditional'],
-              ['Campaigns / sole agency','Campaign'],
-              ['Submissions','Submission']];
+  const rows=weightRowsFor();
   box.innerHTML=rows.map(r=>{
     const v=(S().weights||{})[r[0]];
     return `<div class="wrow">
@@ -1172,7 +1135,7 @@ function renderWeights(){
 function renderWeightExample(){
   const el=$('#weightExample'); if(!el) return;
   const parts=[];
-  ['Unconditional','Conditional','Campaigns / sole agency','Submissions'].forEach(st=>{
+  ['Unconditional', ...weightRowsFor().map(r=>r[0])].forEach(st=>{
     const raw=visibleDeals().filter(d=>d.s===st).reduce((a,d)=>a+(+d.f||0),0);
     if(!raw) return;
     const w=weightFor(st);
@@ -1390,12 +1353,13 @@ async function saveMeetingSnapshot(){
   const stageBlock=st=>{
     const rows=visibleDeals().filter(x=>x.s===st.name);
     if(!rows.length) return '';
+    const inv=showInvoiced(st.name);
     return `<section><h2>${esc(st.name)}<span>${rows.length} · ${money(stageTotal(st.name))}</span></h2>
       <table><thead><tr><th>Address</th><th>Timing</th><th class="n">Fee</th>
-        <th>Status</th><th>Broker</th><th>AML</th></tr></thead><tbody>${
+        <th>Status</th><th>Broker</th>${inv?'<th>Invoiced</th>':''}<th>AML</th></tr></thead><tbody>${
       rows.map(r=>`<tr><td>${r.tn?esc(r.tn)+' — ':''}${esc(r.a)}</td><td>${r.td?new Date(r.td+'T00:00:00').toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'}):(esc(r.t)||'—')}</td>
         <td class="n">${r.f?money(r.f):'—'}</td><td>${esc(r.st)||'—'}</td>
-        <td class="m">${esc(r.b)||'—'}</td><td class="m">${esc(r.aml)||'—'}</td></tr>`).join('')
+        <td class="m">${esc(r.b)||'—'}</td>${inv?`<td class="m">${r.inv?'Y':'—'}</td>`:''}<td class="m">${esc(r.aml)||'—'}</td></tr>`).join('')
     }</tbody></table></section>`;
   };
   const noteBlock=ns=>{
@@ -1611,7 +1575,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-09-02a';
+const BOARD_VERSION='2026-09-07a';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
