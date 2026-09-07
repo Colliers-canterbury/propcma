@@ -99,3 +99,57 @@ export async function notifyAccounts(deal, ccEmails = []) {
   }
   return true;
 }
+
+// Sent when accounts clicks "Invoiced Client" (submitted -> invoiced),
+// telling marketing the property is off the market so they can pull the
+// live listing off ReNet. Same client-credentials sender as
+// notifyAccounts — no separate Entra/Graph setup needed. Non-fatal like
+// every other notification here: a mail hiccup must never block the
+// accounts workflow, so the caller logs the outcome to the deal's event
+// history instead of surfacing an error to the user.
+export async function notifyMarketingListingSold(deal) {
+  const address = deal.property_address || "This property";
+  const isLease = deal.deal_type === "lease";
+  // The requested wording says "sold" — correct that to "leased" for a
+  // lease deal sheet so the email stays accurate; everything else in the
+  // message is exactly as specified.
+  const verb = isLease ? "leased" : "sold";
+
+  const html = `
+    <div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1A2233">
+      <p>Hi marketing team.</p>
+      <p>"${address}" has now been ${verb}. Please remove the listing from ReNet.</p>
+      <p>Thank you<br />- Nishu</p>
+    </div>`;
+
+  const token = await graphToken();
+  const res = await fetch(
+    `https://graph.microsoft.com/v1.0/users/${process.env.GRAPH_SENDER_UPN}/sendMail`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message: {
+          subject: `Remove from ReNet — ${address}`,
+          body: { contentType: "HTML", content: html },
+          toRecipients: [
+            {
+              emailAddress: {
+                address: process.env.MARKETING_MAILBOX || "marketing@collierscanterbury.com",
+              },
+            },
+          ],
+        },
+        saveToSentItems: true,
+      }),
+    }
+  );
+  if (!res.ok) {
+    console.error("Graph sendMail (marketing ReNet notice) failed", res.status, await res.text());
+    return false;
+  }
+  return true;
+}
