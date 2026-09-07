@@ -24,7 +24,7 @@ const ROLES_ADMIN = ["manager"];
 
 const EDITABLE = [
   "address", "tenant", "listing_type", "timing", "timing_date", "fee_nzd", "probability",
-  "status_note", "method_of_sale", "vendor_contact", "aml",
+  "status_note", "method_of_sale", "vendor_contact", "aml", "invoiced",
 ];
 
 export default async function handler(req, res) {
@@ -187,6 +187,7 @@ async function editDeal(req, res, id) {
     throw new HttpError(400, "An address is required");
   if ("fee_nzd" in patch) patch.fee_nzd = Number(patch.fee_nzd) || 0;
   if ("timing_date" in patch) patch.timing_date = patch.timing_date || null;
+  if ("invoiced" in patch) patch.invoiced = !!patch.invoiced;
   if ("probability" in patch) {
     const p = patch.probability;
     patch.probability = (p === "" || p === null || p === undefined)
