@@ -22,7 +22,7 @@ import { requireUser, sendError, HttpError } from "../../_lib/auth.js";
 import { supabase } from "../../_lib/supabase.js";
 import { computeDerived, validateForSubmit } from "../../_lib/deals.js";
 import { computeLeaseDerived, validateLeaseForSubmit } from "../../_lib/leases.js";
-import { notifyAccounts } from "../../_lib/graph.js";
+import { notifyAccounts, notifyMarketingListingSold } from "../../_lib/graph.js";
 import { pushToPropCMA } from "../../_lib/propcma.js";
 import { appendToExcel } from "../../_lib/excel.js";
 
@@ -122,8 +122,24 @@ async function invoiceClient(req, res, deal) {
   if (deal.status !== "submitted")
     throw new HttpError(409, `Cannot invoice from status '${deal.status}'`);
 
-  await transition(deal, { status: "invoiced" }, user.oid, "Invoiced client");
-  return res.status(200).json({ ok: true, status: "invoiced" });
+  const updated = await transition(deal, { status: "invoiced" }, user.oid, "Invoiced client");
+
+  // Tell marketing the property is off the market so they can pull the
+  // listing from ReNet. Non-fatal — a mail hiccup must not block the
+  // invoice step; the outcome is recorded in the audit trail either way,
+  // same pattern as the PropCMA/Excel writes in complete() below.
+  const marketingNotified = await notifyMarketingListingSold(updated);
+  await supabase.from("deal_sheet_events").insert({
+    deal_id: deal.id,
+    actor: user.oid,
+    from_status: "invoiced",
+    to_status: "invoiced",
+    note: marketingNotified
+      ? "Marketing notified to remove listing from ReNet"
+      : "Marketing ReNet notification FAILED — remove listing manually",
+  });
+
+  return res.status(200).json({ ok: true, status: "invoiced", marketingNotified });
 }
 
 // ---------- accounts step 2: Assign Deal Number ----------
