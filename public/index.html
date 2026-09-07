@@ -553,19 +553,22 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
             <div class="settings-card-icon"><i class="ti ti-camera" aria-hidden="true"></i></div>
             <div class="settings-title">Street View thumbnails</div>
           </div>
-          <div class="settings-desc">Shows a small Street View photo next to each address. Requires a Google Maps API key with the Street View Static API enabled. Stored locally in your browser only.</div>
-          <div class="field">
-            <label>Google Maps API Key</label>
-            <div class="key-wrap">
-              <input type="password" id="cfg-gmaps-key" placeholder="AIza…">
-              <button class="key-toggle" onclick="toggleKeyVis('cfg-gmaps-key',this)" aria-label="Toggle visibility"><i class="ti ti-eye" aria-hidden="true"></i></button>
+          <div class="settings-desc">Shows a small Street View photo next to each address. The API key is configured server-side — no setup needed. If thumbnails aren't appearing, contact your administrator.</div>
+          <div id="gmaps-status" class="status-pill idle" style="display:none;margin-top:8px;"></div>
+          <details style="margin-top:12px;">
+            <summary style="cursor:pointer;font-size:13px;color:var(--ink3);">Manual key override (advanced)</summary>
+            <div class="field" style="margin-top:8px;">
+              <label>Google Maps API Key</label>
+              <div class="key-wrap">
+                <input type="password" id="cfg-gmaps-key" placeholder="AIza…">
+                <button class="key-toggle" onclick="toggleKeyVis('cfg-gmaps-key',this)" aria-label="Toggle visibility"><i class="ti ti-eye" aria-hidden="true"></i></button>
+              </div>
             </div>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:4px;">
-            <button class="btn btn-primary" onclick="saveGmapsKey()"><i class="ti ti-check" aria-hidden="true"></i> Save key</button>
-            <button class="btn btn-danger" onclick="clearGmapsKey()"><i class="ti ti-trash" aria-hidden="true"></i> Remove</button>
-          </div>
-          <div id="gmaps-status" class="status-pill idle" style="display:none;"></div>
+            <div style="display:flex;gap:8px;margin-top:4px;">
+              <button class="btn btn-primary" onclick="saveGmapsKey()"><i class="ti ti-check" aria-hidden="true"></i> Save key</button>
+              <button class="btn btn-danger" onclick="clearGmapsKey()"><i class="ti ti-trash" aria-hidden="true"></i> Remove</button>
+            </div>
+          </details>
         </div>
 
         <!-- Excel sync -->
@@ -1016,7 +1019,7 @@ async function init(){
   }
   setLoading('Loading settings…');
   await loadCfg();
-  loadGmapsKey();
+  await loadGmapsKey();
   setLoading('Loading properties…');
   await loadProperties();
   hideLoading();
@@ -1708,11 +1711,29 @@ async function resetAndRemap(){
   await syncFromExcel();
 }
 
-// ── Street View key (stored locally per-browser) ───────────────
-function loadGmapsKey(){
+// ── Street View key ────────────────────────────────────────────
+// Loaded from /api/config (Vercel env var) so users never need to paste it.
+// Falls back to localStorage for any key saved before this change.
+async function loadGmapsKey(){
+  const st=document.getElementById('gmaps-status');
+  try{
+    const res=await fetch('/api/config');
+    if(res.ok){
+      const data=await res.json();
+      if(data.googleMapsKey){
+        gmapsKey=data.googleMapsKey;
+        // Clear any stale localStorage copy — server key takes precedence
+        try{localStorage.removeItem('propcma_gmaps_key');}catch(e){}
+        document.getElementById('cfg-gmaps-key').value='';
+        st.style.display='inline-flex';st.className='status-pill ok';
+        st.innerHTML='<i class="ti ti-check" aria-hidden="true"></i> Thumbnails enabled (server key)';
+        return;
+      }
+    }
+  }catch(e){console.warn('Could not load server Maps key:',e.message);}
+  // Fall back to any locally saved key
   try{gmapsKey=localStorage.getItem('propcma_gmaps_key')||'';}catch(e){gmapsKey='';}
   document.getElementById('cfg-gmaps-key').value=gmapsKey;
-  const st=document.getElementById('gmaps-status');
   if(gmapsKey){st.style.display='inline-flex';st.className='status-pill ok';st.innerHTML='<i class="ti ti-check" aria-hidden="true"></i> Thumbnails enabled';}
 }
 function saveGmapsKey(){
