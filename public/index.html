@@ -1515,24 +1515,24 @@ async function writePropertyToExcel(prop){
     const writeCols=excelWriteCols(prop);
     let needed=writeCols.map(([c])=>c).filter(c=>!headers.includes(c));
     if(needed.length){
+      // Always do a live header fetch before appending — the cache may be stale
+      // (another session added columns) or empty (cold-start / fresh page load).
+      // Throw on failure rather than warn-and-continue: proceeding with an empty
+      // cache would write new headers at col 0 and corrupt the sheet.
       step='refresh headers';
-      // The header cache may be stale (e.g. a column added in an earlier session or
-      // by another user) — refresh the live header row before appending anything,
-      // otherwise we'd rewrite the header row from outdated data and misalign cells
-      try{
-        const hdrData=await graphRetry(()=>graphGet(
-          `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}/usedRange(valuesOnly=true)`
-        ));
-        const allRows=hdrData.values||[];
-        let hrow=(allRows[0]||[]).map(v=>String(v??''));
-        while(hrow.length&&hrow[hrow.length-1]==='')hrow.pop();
-        if(hrow.length){headers=hrow;cfg._headers=headers;}
-      }catch(e){console.warn('Header refresh failed, using cache:',e.message);}
+      const hdrData=await graphRetry(()=>graphGet(
+        `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}/usedRange(valuesOnly=true)`
+      ));
+      const allRows=hdrData.values||[];
+      let hrow=(allRows[0]||[]).map(v=>String(v??''));
+      while(hrow.length&&hrow[hrow.length-1]==='')hrow.pop();
+      if(!hrow.length)throw new Error('header row came back empty from the workbook');
+      headers=hrow;cfg._headers=headers;
       needed=writeCols.map(([c])=>c).filter(c=>!headers.includes(c));
     }
     if(needed.length){
       step='append header columns ('+needed.join(', ')+')';
-      if(!headers.length)throw new Error('header cache is empty — cannot safely append columns');
+      // headers is guaranteed non-empty here — the refresh above throws if empty
       // Write each new header cell individually using cell(row,column) —
       // a range PATCH like A1:O1 fails with 404/doesn't-exist if the sheet's
       // used range doesn't already extend that far (e.g. adding col N when
