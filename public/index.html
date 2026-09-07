@@ -1523,18 +1523,22 @@ async function writePropertyToExcel(prop){
       }catch(e){console.warn('Header refresh failed, using cache:',e.message);}
       needed=writeCols.map(([c])=>c).filter(c=>!headers.includes(c));
     }
-    if(needed.length){
+       if(needed.length){
       step='append header columns ('+needed.join(', ')+')';
-      const newHeaders=[...headers,...needed];
-      // IMPORTANT: must patch an explicit range address — never usedRange.
-      // usedRange spans all rows, so writing a 1-row array causes a 400 dimension mismatch.
-      const lastCol=colNumToLetter(newHeaders.length);
-      await graphRetry(()=>graphPatch(
-        `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}/range(address='A1:${lastCol}1')`,
-        {values:[newHeaders]}
-      ));
-      cfg._headers=newHeaders;
-      headers=newHeaders;
+      // Write each new header cell individually using cell(row,column) —
+      // a range PATCH like A1:O1 fails with 404/doesn't-exist if the sheet's
+      // used range doesn't already extend that far (e.g. adding col N when
+      // the sheet only has A–M). Writing one cell at a time sidesteps this.
+      for(const colName of needed){
+        const ci=headers.length; // 0-based index of the new column
+        step='append header "'+colName+'" at col '+ci;
+        await graphRetry(()=>graphPatch(
+          `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}/cell(row=0,column=${ci})`,
+          {values:[[colName]]}
+        ));
+        headers.push(colName);
+        cfg._headers=headers;
+      }
     }
 
     // Locate the spreadsheet row for this record.
