@@ -48,7 +48,16 @@
     manualSyncing: false,      // "Sync Ops Manual" (nav footer) in progress
     manualSyncNote: null,
     manualSyncNoteType: null,  // "ok" | "bad"
+    editingSectionId: null,    // "Edit this page" — id of the section currently being edited, else null
+    editDraft: null,           // { num, title, html } — last-known-good copy of what's in the editor
+    saving: false,             // Save in progress
+    saveError: null,
   };
+
+  // A save is in flight or an edit is open — used to lock sidebar
+  // navigation (see .navLocked in the CSS) so a click elsewhere can't
+  // silently discard an in-progress edit.
+  function isEditLocked() { return !!state.editingSectionId; }
 
   // ---------------------------------------------------------------
   // data loading
@@ -341,16 +350,18 @@
   // render: shell
   // ---------------------------------------------------------------
   function render() {
+    const locked = isEditLocked();
     $("app").innerHTML = `
-      <aside class="sidebar">
+      <aside class="sidebar ${locked ? "navLocked" : ""}">
         <a class="backLink" href="accounts.html">&larr; Back to Deal Sheets</a>
         <div class="sideBrand">
           <img src="img/colliers-logo.png" alt="" onerror="this.style.display='none'">
           <div class="t"><strong>Operations Manual</strong><span>Colliers Canterbury</span></div>
         </div>
+        ${locked ? `<div class="navLockedNote">Finish or cancel your edit to navigate away</div>` : ""}
         <div class="searchBox">
           <span class="ico">&#128269;</span>
-          <input id="manualSearch" type="search" placeholder="Search the manual…" value="${esc(state.query)}" autocomplete="off" />
+          <input id="manualSearch" type="search" placeholder="Search the manual…" value="${esc(state.query)}" autocomplete="off" ${locked ? "disabled" : ""} />
           ${state.query ? `<button class="clearBtn" id="clearSearch" title="Clear">&times;</button>` : ""}
         </div>
         ${renderToc()}
@@ -458,6 +469,7 @@
     if (state.view === "dashboard") { el.innerHTML = renderDashboard(); wireDashboard(); return; }
     el.innerHTML = renderManualSection();
     if (state.sectionId === "1-4") renderOrgDirectory();
+    wireManualSection();
   }
 
   function renderSearchResults() {
@@ -490,16 +502,261 @@
     return { chapter: ch, sec: ch.sections[0] };
   }
 
+  // Sections the in-page editor can't safely handle yet:
+  //  - anything containing a <table> (Document Control's version table,
+  //    4.8's PI insurance staff table) — Quill 1.x has no table support.
+  //  - "1-4" (Org Directory) — its stored html contains the
+  //    <div id="orgDirectory"> placeholder that renderOrgDirectory()
+  //    fills in live from the roster; editing it in Quill risks
+  //    deleting that placeholder and silently breaking the directory.
+  // Both are v1 limitations, not permanent — flagged in the build log.
+  function sectionEditLimitation(sec) {
+    if (sec.id === "1-4") return "This page shows the live team directory and can't be edited here yet.";
+    if (/<table[\s>]/i.test(sec.html)) return "This page contains a table, which the in-page editor can't handle yet — edit the Word doc backup and ask your developer to update it, or contact support.";
+    return null;
+  }
+
   function renderManualSection() {
     const { chapter, sec } = currentSection();
     if (!state.sectionId) state.sectionId = sec.id;
+    const editing = state.editingSectionId === sec.id;
+
+    if (editing) {
+      const d = state.editDraft || { num: sec.num || "", title: sec.title, html: sec.html };
+      return `
+        <div class="contentHead">
+          <div>
+            <p class="crumb">${esc(chapter.title)}</p>
+            <div class="editTitleRow">
+              <input class="editNumInput" id="editNumInput" value="${esc(d.num)}" placeholder="No." aria-label="Section number" ${state.saving ? "disabled" : ""} />
+              <input class="editTitleInput" id="editTitleInput" value="${esc(d.title)}" placeholder="Section title" aria-label="Section title" ${state.saving ? "disabled" : ""} />
+            </div>
+          </div>
+          <div class="metaRight editActions">
+            <button class="editCancelBtn" id="editCancelBtn" ${state.saving ? "disabled" : ""}>Cancel</button>
+            <button class="editSaveBtn" id="editSaveBtn" ${state.saving ? "disabled" : ""}>${state.saving ? `<span class="spinner"></span>Saving…` : "Save"}</button>
+          </div>
+        </div>
+        <div class="manualBody editingBody">
+          <div id="quillToolbar">
+            <span class="ql-formats">
+              <select class="ql-header">
+                <option value="4">Sub-heading</option>
+                <option selected>Normal</option>
+              </select>
+            </span>
+            <span class="ql-formats">
+              <button class="ql-bold" title="Bold"></button>
+              <button class="ql-italic" title="Italic"></button>
+              <button class="ql-underline" title="Underline"></button>
+              <button class="ql-code" title="Inline code"></button>
+            </span>
+            <span class="ql-formats">
+              <button class="ql-list" value="ordered" title="Numbered list"></button>
+              <button class="ql-list" value="bullet" title="Bullet list"></button>
+            </span>
+            <span class="ql-formats">
+              <button class="ql-link" title="Link"></button>
+            </span>
+            <span class="ql-formats">
+              <button type="button" class="ql-noteBox manualFmtBtn" title="Highlighted note box">Note box</button>
+              <button type="button" class="ql-warnBoxInline manualFmtBtn" title="Inline warning highlight">Warning text</button>
+            </span>
+            <span class="ql-formats">
+              <button class="ql-clean" title="Clear formatting"></button>
+            </span>
+          </div>
+          <div id="quillEditor"></div>
+        </div>
+      `;
+    }
+
+    const limitation = sectionEditLimitation(sec);
     return `
       <div class="contentHead">
         <div><p class="crumb">${esc(chapter.title)}</p><h1>${esc(sec.num ? `${sec.num} ` : "")}${esc(sec.title)}</h1></div>
-        <div class="metaRight">Manual v${esc(state.manual.version)} &middot; updated ${esc(state.manual.updated)}</div>
+        <div class="metaRight">
+          <div class="metaRightTop">
+            <span>Last updated ${esc(state.manual.updated)}</span>
+            <button class="editBtn" id="editSectionBtn" ${limitation ? `disabled title="${esc(limitation)}"` : ""}>
+              <span class="editIco">&#9998;</span>Edit this page
+            </button>
+          </div>
+        </div>
       </div>
       <div class="manualBody">${sec.html}</div>
     `;
+  }
+
+  // ---------------------------------------------------------------
+  // in-place editing — "Edit this page" / Save / Cancel. The web page
+  // is the source of truth for manual content (2026-09-07 on); saves
+  // go to POST /api/manual/save-section, which records the previous
+  // version to manual_section_history before overwriting. The Word
+  // doc backup is kept for reference only and is no longer wired to
+  // anything.
+  // ---------------------------------------------------------------
+  let quillInstance = null;
+
+  function registerQuillFormats() {
+    if (window.__manualFormatsRegistered || !window.Quill) return;
+    try {
+      const Parchment = window.Quill.import("parchment");
+      class BoolClassAttributor extends Parchment.Attributor.Class {
+        add(node, value) {
+          if (value) { node.classList.add(this.keyName); return true; }
+          this.remove(node);
+          return true;
+        }
+        remove(node) { node.classList.remove(this.keyName); }
+        value(node) { return node.classList.contains(this.keyName) ? true : undefined; }
+      }
+      const scope = Parchment.Scope;
+      const formats = [
+        new BoolClassAttributor("noteBox", "noteBox", { scope: scope.BLOCK }),
+        new BoolClassAttributor("stub", "stub", { scope: scope.BLOCK }),
+        new BoolClassAttributor("warnBoxInline", "warnBoxInline", { scope: scope.INLINE }),
+        new BoolClassAttributor("youAreHere", "youAreHere", { scope: scope.INLINE }),
+      ];
+      formats.forEach((f) => window.Quill.register(f, true));
+      window.__manualFormatsRegistered = true;
+    } catch (e) {
+      console.error("Operations Manual: custom Quill formats failed to register — noteBox/warnBox styling may not round-trip.", e);
+    }
+  }
+
+  function initQuill() {
+    const el = $("quillEditor");
+    if (!el || !window.Quill) return;
+    registerQuillFormats();
+    try {
+      quillInstance = new window.Quill(el, {
+        theme: "snow",
+        modules: { toolbar: "#quillToolbar" },
+      });
+      try {
+        quillInstance.clipboard.addMatcher("p.noteBox", (node, delta) => applyBoolFormat(delta, "noteBox"));
+        quillInstance.clipboard.addMatcher("p.stub", (node, delta) => applyBoolFormat(delta, "stub"));
+        quillInstance.clipboard.addMatcher("span.warnBoxInline", (node, delta) => applyBoolFormat(delta, "warnBoxInline"));
+        quillInstance.clipboard.addMatcher("span.youAreHere", (node, delta) => applyBoolFormat(delta, "youAreHere"));
+      } catch (e) { console.error("Operations Manual: Quill clipboard matchers failed to register.", e); }
+
+      const html = (state.editDraft && state.editDraft.html) || "";
+      quillInstance.setContents(quillInstance.clipboard.convert(html));
+      quillInstance.history.clear();
+    } catch (e) {
+      console.error("Operations Manual: Quill failed to initialise.", e);
+      el.innerHTML = `<p class="dimText">The editor couldn't load. Try Cancel and Edit this page again, or reload the page.</p>`;
+    }
+  }
+
+  function applyBoolFormat(delta, name) {
+    const Delta = window.Quill.import("delta");
+    return delta.compose(new Delta().retain(delta.length(), { [name]: true }));
+  }
+
+  function destroyQuill() { quillInstance = null; }
+
+  function showEditError(msg) {
+    const head = document.querySelector(".editActions");
+    if (!head) return;
+    let box = $("editErrorBox");
+    if (!box) {
+      box = document.createElement("div");
+      box.id = "editErrorBox";
+      box.className = "syncNote bad editErrorBox";
+      head.prepend(box);
+    }
+    box.textContent = msg;
+  }
+  function clearEditError() {
+    const box = $("editErrorBox");
+    if (box) box.remove();
+  }
+
+  function wireManualSection() {
+    const editBtn = $("editSectionBtn");
+    if (editBtn && !editBtn.disabled) {
+      editBtn.onclick = () => {
+        const { sec } = currentSection();
+        state.editingSectionId = sec.id;
+        state.editDraft = { num: sec.num || "", title: sec.title, html: sec.html };
+        state.saveError = null;
+        render();
+      };
+    }
+
+    const cancelBtn = $("editCancelBtn");
+    if (cancelBtn) cancelBtn.onclick = () => {
+      if (state.saving) return;
+      state.editingSectionId = null;
+      state.editDraft = null;
+      state.saveError = null;
+      destroyQuill();
+      render();
+    };
+
+    const saveBtn = $("editSaveBtn");
+    if (saveBtn) saveBtn.onclick = () => saveManualSection();
+
+    if (state.editingSectionId) initQuill();
+  }
+
+  async function saveManualSection() {
+    if (state.saving || !quillInstance) return;
+    const { sec } = currentSection();
+    const numInput = $("editNumInput");
+    const titleInput = $("editTitleInput");
+    const saveBtn = $("editSaveBtn");
+    const cancelBtn = $("editCancelBtn");
+
+    const num = (numInput ? numInput.value : "").trim();
+    const title = (titleInput ? titleInput.value : "").trim();
+    if (!title) { showEditError("Title can't be empty."); return; }
+    if (!quillInstance.getText().trim()) { showEditError("Content can't be empty."); return; }
+    const html = quillInstance.root.innerHTML;
+
+    clearEditError();
+    state.saving = true;
+    state.editDraft = { num, title, html };
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = `<span class="spinner"></span>Saving…`; }
+    if (cancelBtn) cancelBtn.disabled = true;
+    if (numInput) numInput.disabled = true;
+    if (titleInput) titleInput.disabled = true;
+
+    try {
+      if (cfg.DEMO_MODE) throw new Error("Editing is disabled in demo mode.");
+      const token = await window.DealSheetAuth.getToken();
+      const res = await fetch(`${cfg.apiBase}/api/manual/save-section`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id: sec.id, num, title, html }),
+      });
+      let respBody = null;
+      try { respBody = await res.json(); } catch { /* empty */ }
+      if (!res.ok) throw new Error(respBody?.error || `Save failed (${res.status})`);
+
+      const saved = respBody?.section || {};
+      sec.num = saved.num ?? num;
+      sec.title = saved.title ?? title;
+      sec.html = saved.html ?? html;
+      sec.text = saved.text ?? sec.text;
+      if (saved.updated_at) state.manual.updated = String(saved.updated_at).slice(0, 10);
+
+      state.saving = false;
+      state.editingSectionId = null;
+      state.editDraft = null;
+      destroyQuill();
+      render();
+      window.scrollTo(0, 0);
+    } catch (e) {
+      state.saving = false;
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = "Save"; }
+      if (cancelBtn) cancelBtn.disabled = false;
+      if (numInput) numInput.disabled = false;
+      if (titleInput) titleInput.disabled = false;
+      showEditError(e.message || "Save failed.");
+    }
   }
 
   // ---------------------------------------------------------------
@@ -751,6 +1008,12 @@
       render();
     });
   }
+
+  // Warn before an accidental tab close/refresh drops an open edit —
+  // there's no autosave/draft-recovery in v1.
+  window.addEventListener("beforeunload", (e) => {
+    if (isEditLocked() && !state.saving) { e.preventDefault(); e.returnValue = ""; }
+  });
 
   // ---------------------------------------------------------------
   // boot
