@@ -1482,14 +1482,17 @@ async function writePropertyToExcel(prop){
         cfg._sheetName=(sheetsData.value||[])[0]?.name||'Sheet1';
       }
       if(!cfg._headers){
-        // Fetch ONLY the header row — a usedRange call here pulls the entire
-        // sheet (thousands of rows) and can time out, which made the first
-        // save of every session fail while the second succeeded
+        // usedRange(valuesOnly=true) returns only cells with data, so the values
+        // array is never padded with nulls. Row 0 of the result is the header row.
+        // A1:ZZ1 was returning 702 cells many of which were null/empty, causing
+        // the header cache to come back empty and col index to reset to 0.
         const hdrData=await graphRetry(()=>graphGet(
-          `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(cfg._sheetName)}/range(address='A1:ZZ1')`
+          `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(cfg._sheetName)}/usedRange(valuesOnly=true)`
         ));
-        let hrow=(hdrData.values||[[]])[0].map(v=>String(v??''));
+        const allRows=hdrData.values||[];
+        let hrow=(allRows[0]||[]).map(v=>String(v??''));
         while(hrow.length&&hrow[hrow.length-1]==='')hrow.pop();
+        if(!hrow.length)throw new Error('Header row came back empty — check the sheet has data in row 1');
         cfg._headers=hrow;
       }
     }catch(e){
@@ -1515,16 +1518,18 @@ async function writePropertyToExcel(prop){
       // otherwise we'd rewrite the header row from outdated data and misalign cells
       try{
         const hdrData=await graphRetry(()=>graphGet(
-          `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}/range(address='A1:ZZ1')`
+          `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}/usedRange(valuesOnly=true)`
         ));
-        let hrow=(hdrData.values||[[]])[0].map(v=>String(v??''));
+        const allRows=hdrData.values||[];
+        let hrow=(allRows[0]||[]).map(v=>String(v??''));
         while(hrow.length&&hrow[hrow.length-1]==='')hrow.pop();
         if(hrow.length){headers=hrow;cfg._headers=headers;}
       }catch(e){console.warn('Header refresh failed, using cache:',e.message);}
       needed=writeCols.map(([c])=>c).filter(c=>!headers.includes(c));
     }
-       if(needed.length){
+    if(needed.length){
       step='append header columns ('+needed.join(', ')+')';
+      if(!headers.length)throw new Error('header cache is empty — cannot safely append columns');
       // Write each new header cell individually using cell(row,column) —
       // a range PATCH like A1:O1 fails with 404/doesn't-exist if the sheet's
       // used range doesn't already extend that far (e.g. adding col N when
