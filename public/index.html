@@ -764,8 +764,13 @@ function combineBrokers(p){
 // ── Maps helper ───────────────────────────────────────────────
 function mapsUrl(address){if(!address)return null;return'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(address);}
 function streetViewUrl(address){
+  // Route through /api/streetview (same-origin proxy) to avoid ERR_BLOCKED_BY_ORB —
+  // Chrome blocks cross-origin image responses that lack CORS headers, which the
+  // Google Street View Static API doesn't provide. The proxy also keeps the API
+  // key server-side. gmapsKey check retained so the placeholder shows when the
+  // server key isn't configured.
   if(!address||!gmapsKey)return null;
-  return'https://maps.googleapis.com/maps/api/streetview?size=120x80&fov=80&location='+encodeURIComponent(address)+'&key='+gmapsKey;
+  return'/api/streetview?size=120x80&fov=80&location='+encodeURIComponent(address);
 }
 function svThumb(address){
   const url=streetViewUrl(address);
