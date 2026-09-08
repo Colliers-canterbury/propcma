@@ -15,6 +15,18 @@
     return isNaN(v) ? "0.00" : v.toLocaleString("en-NZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
   const fmtSize = (b) => { b = Number(b||0); return b < 1024 ? b+" B" : b < 1048576 ? (b/1024).toFixed(0)+" KB" : (b/1048576).toFixed(1)+" MB"; };
+  const yn = (b) => b ? "Yes" : "No";
+  const dash = (v) => (v === null || v === undefined || v === "") ? "—" : esc(v);
+  const nzDate = (v) => {
+    if (!v) return "—";
+    const dt = new Date(v);
+    if (isNaN(dt.getTime())) return esc(String(v));
+    return dt.toLocaleDateString("en-NZ", { day: "2-digit", month: "short", year: "numeric" });
+  };
+  // Comma-safe number parsing — commission/rental fields are live-formatted
+  // with thousands separators as the user types, so this strips that
+  // before parsing (mirrors public/js/form.js and api/deal-sheets/[id]/print.js).
+  const num = (v) => { const x = parseFloat(String(v ?? "").replace(/[$,\s]/g, "")); return isNaN(x) ? 0 : x; };
 
   const META = {
     submitted:        { label: "Submitted",         cls: "sub" },
@@ -317,6 +329,28 @@
     // rather than always having to bounce the deal back to the broker
     // — available for as long as she's actively working the deal.
     const canEditChecklist = ["submitted", "invoiced", "deposit_received"].includes(d.status);
+    const f = d.form || {};
+    const comm = f.comm || {};
+
+    // Tiered commission (sale only) — mirrors public/js/form.js and
+    // api/deal-sheets/[id]/print.js: each tier's base is whatever's left
+    // of the sale price after the tiers above it, unless a tier has an
+    // explicit typed amount.
+    const salePriceVal = num(d.sale_price_ex_gst ?? f.sale?.salePrice);
+    const tierBases = [];
+    let tierRemaining = salePriceVal;
+    (comm.tiers || []).forEach((t, i) => {
+      const typed = t.base !== "" && t.base != null;
+      const base = typed ? num(t.base) : Math.max(tierRemaining, 0);
+      tierBases[i] = base;
+      tierRemaining -= base;
+    });
+    const tierFees = (comm.tiers || []).map((t, i) => (num(t.pct) / 100) * tierBases[i]);
+
+    // Rights of renewal (lease only)
+    const rorText = f.lease?.rorTimes
+      ? `${esc(f.lease.rorTimes)} × ${dash(f.lease.rorYears)} year${num(f.lease.rorYears) === 1 ? "" : "s"}`
+      : "—";
     el.innerHTML = `
       <div class="detailHead">
         <div><h2>${esc(d.property_address||"—")}</h2>
@@ -346,6 +380,31 @@
             `}
             <div class="hl"><dt>Total to invoice (excl GST)</dt><dd>$${fmt(d.total_invoice_ex_gst)}</dd></div>
           </dl>
+          ${d.deal_type === "lease" ? `
+          <h3>Lease details</h3>
+          <dl>
+            <div><dt>Date of agreement</dt><dd>${nzDate(f.lease?.dateOfAgreement)}</dd></div>
+            <div><dt>Occupancy date</dt><dd>${nzDate(f.lease?.occupancyDate)}</dd></div>
+            <div><dt>Expiry date</dt><dd>${nzDate(f.lease?.expiryDate)}</dd></div>
+            <div><dt>Rights of renewal</dt><dd>${rorText}</dd></div>
+            <div><dt>Rent review period</dt><dd>${dash(f.lease?.rentReviewPeriod)}</dd></div>
+            <div><dt>Deal type</dt><dd>${dash(f.lease?.dealType)}</dd></div>
+            <div><dt>Lease basis</dt><dd>${dash(f.lease?.leaseBasis)}</dd></div>
+            <div><dt>Incentives</dt><dd>${dash(f.lease?.incentives)}</dd></div>
+          </dl>` : `
+          <h3>Sale details</h3>
+          <dl>
+            <div><dt>Date of agreement</dt><dd>${nzDate(f.sale?.dateOfAgreement)}</dd></div>
+            <div><dt>${esc(f.sale?.rentalBasis || "Net")} rental income</dt><dd>${f.sale?.rentalIncome ? "$" + fmt(f.sale.rentalIncome) : "—"}</dd></div>
+            <div><dt>Yield</dt><dd>${f.sale?.yieldManual ? esc(f.sale.yieldManual) + " %" : "—"}</dd></div>
+            <div><dt>Title</dt><dd>${dash(f.sale?.titleType)}</dd></div>
+            <div><dt>Land area (sqm)</dt><dd>${dash(f.sale?.landArea)}</dd></div>
+            <div><dt>Occupied by area (sqm)</dt><dd>${dash(f.sale?.occupiedArea)}</dd></div>
+            <div><dt>WALE (years)</dt><dd>${dash(f.sale?.wale)}</dd></div>
+            <div><dt>No. of tenancies</dt><dd>${dash(f.sale?.tenancies)}</dd></div>
+            <div><dt>Sold at auction</dt><dd>${yn(f.sale?.auction)}</dd></div>
+            <div><dt>Tenancy schedule attached</dt><dd>${yn(f.sale?.tenancySchedule)}</dd></div>
+          </dl>`}
           ${!isDraft ? `<h3>Trust deposit</h3>
           ${d.deposit_to_trust ? `<dl>
             <div><dt>Amount</dt><dd>
@@ -378,9 +437,40 @@
           </div>`}` : ""}
           ${d.form?.specialClauses && d.form?.specialClausesText ? `<h3>Special Clauses</h3>
           <p>${esc(d.form.specialClausesText)}</p>` : ""}
-          <h3>Commission split</h3>
-          <table class="tbl"><tbody>${splits.map((s) =>
+          <h3>Commission calculation</h3>
+          ${d.deal_type === "lease" ? `
+          <table class="tbl">
+            <thead><tr><th>Item</th><th>Description</th><th class="r">Amount</th></tr></thead>
+            <tbody>
+              ${comm.fee ? `<tr><td>Commission (per scale of fees)</td><td>${dash(comm.feeDesc)}</td><td class="r mono">$${fmt(comm.fee)}</td></tr>` : ""}
+              ${comm.deductMarketing ? `<tr><td>Deduct marketing costs</td><td>${dash(comm.deductMarketingDesc)}</td><td class="r mono">-$${fmt(comm.deductMarketing)}</td></tr>` : ""}
+              ${comm.otherFee ? `<tr><td>Other / consultancy</td><td>${dash(comm.otherDesc)}</td><td class="r mono">$${fmt(comm.otherFee)}</td></tr>` : ""}
+              ${comm.adminFee ? `<tr><td>Administration fee</td><td></td><td class="r mono">$${fmt(500)}</td></tr>` : ""}
+              ${comm.recoverMarketing ? `<tr><td>Recover marketing costs</td><td></td><td class="r mono">$${fmt(comm.recoverMarketing)}</td></tr>` : ""}
+              ${comm.recoverOther ? `<tr><td>Recover other costs</td><td>${dash(comm.recoverOtherDesc)}</td><td class="r mono">$${fmt(comm.recoverOther)}</td></tr>` : ""}
+              <tr style="font-weight:700"><td colspan="2">Total to invoice (excl GST)</td><td class="r mono">$${fmt(d.total_invoice_ex_gst)}</td></tr>
+            </tbody>
+          </table>` : `
+          <table class="tbl">
+            <thead><tr><th>Item</th><th class="r">%</th><th class="r">Amount</th></tr></thead>
+            <tbody>
+              ${comm.flatFee
+                ? `<tr><td>Commission (flat fee)</td><td class="r"></td><td class="r mono">$${fmt(comm.flatFeeAmount)}</td></tr>`
+                : (comm.tiers || []).map((t, i) => t.pct ? `<tr><td>${["Commission","Second tier","Third tier"][i] || ("Tier " + (i+1))}</td><td class="r">${esc(t.pct)}%</td><td class="r mono">$${fmt(tierFees[i])}</td></tr>` : "").join("")}
+              ${comm.deductMarketing ? `<tr><td>Deduct marketing costs${comm.deductMarketingDesc ? " — " + dash(comm.deductMarketingDesc) : ""}</td><td class="r"></td><td class="r mono">-$${fmt(comm.deductMarketing)}</td></tr>` : ""}
+              ${comm.otherFee ? `<tr><td>Other — ${dash(comm.otherDesc)}</td><td class="r"></td><td class="r mono">$${fmt(comm.otherFee)}</td></tr>` : ""}
+              ${comm.adminFee ? `<tr><td>Administration fee</td><td class="r"></td><td class="r mono">$${fmt(500)}</td></tr>` : ""}
+              ${comm.recoverMarketing ? `<tr><td>Recover marketing costs</td><td class="r"></td><td class="r mono">$${fmt(comm.recoverMarketing)}</td></tr>` : ""}
+              ${comm.recoverOther ? `<tr><td>Recover other — ${dash(comm.recoverOtherDesc)}</td><td class="r"></td><td class="r mono">$${fmt(comm.recoverOther)}</td></tr>` : ""}
+              <tr style="font-weight:700"><td>Total to invoice (excl GST)</td><td></td><td class="r mono">$${fmt(d.total_invoice_ex_gst)}</td></tr>
+            </tbody>
+          </table>`}
+          <h3>Commission split — Salespeople</h3>
+          <table class="tbl"><tbody>${splits.filter((s) => s.party_type !== "third_party").map((s) =>
             `<tr><td>${esc(s.party_name)}</td><td class="r">${s.split_pct}%</td><td class="r mono">$${fmt(s.split_amount)}</td></tr>`).join("")||`<tr><td class="dim">No splits recorded</td></tr>`}</tbody></table>
+          <h3>Commission split — Third parties</h3>
+          <table class="tbl"><tbody>${splits.filter((s) => s.party_type === "third_party").map((s) =>
+            `<tr><td>${esc(s.party_name)}</td><td class="r">${s.split_pct}%</td><td class="r mono">$${fmt(s.split_amount)}</td></tr>`).join("")||`<tr><td class="dim">None</td></tr>`}</tbody></table>
           <h3>Mandatory checklist</h3>
           ${canEditChecklist ? `
           <ul class="checks editable">${checks.map((c) => `<li class="${c.ok?"":"bad"}">
