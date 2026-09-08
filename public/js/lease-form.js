@@ -149,7 +149,7 @@
     // Deducted from the commission itself (not a pass-through cost
     // recovery like recoverMarketing/recoverOther above), so it comes off
     // before commissionBase is worked out below — third parties and
-    // salespeople are paid on the reduced amount.
+    // salespeople are paid on the reduced amount. Mirrors api/_lib/leases.js.
     const deductMarketing = num(f.comm.deductMarketing);
     const totalInvoice = num(f.comm.fee) + num(f.comm.otherFee) + adminFee
       + recoverMarketing + recoverOther - deductMarketing;
