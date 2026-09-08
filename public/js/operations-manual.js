@@ -145,6 +145,32 @@
   }
   function today() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
 
+  // dd/mm/yyyy — used for Work Anniversary specifically, where (unlike
+  // DOB/license expiry elsewhere on this tab) the year is the point: it's
+  // shown alongside the completed-years count, e.g. "04/10/1996 (29)".
+  function fmtDDMMYYYY(s) {
+    const d = parseISO(s);
+    if (!d) return "—";
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}/${d.getFullYear()}`;
+  }
+
+  // Full years completed as of today — counts down until the date's
+  // month+day has actually occurred this year (so someone whose
+  // anniversary hasn't happened yet this calendar year still shows last
+  // year's completed count, not this year's not-yet-reached one).
+  function yearsCompleted(dateStr) {
+    const d = parseISO(dateStr);
+    if (!d) return null;
+    const t = today();
+    let years = t.getFullYear() - d.getFullYear();
+    const hadAnniversaryThisYear =
+      t.getMonth() > d.getMonth() || (t.getMonth() === d.getMonth() && t.getDate() >= d.getDate());
+    if (!hadAnniversaryThisYear) years--;
+    return years;
+  }
+
   function licenseExpiryStatus(dateStr) {
     if (!dateStr) return { cls: "dim", label: "—" };
     const d = parseISO(dateStr), t = today();
@@ -155,6 +181,17 @@
     // green with just the plain date.
     if (thisMonth) return { cls: "bad", label: `Due ${fmtDDMM(dateStr)}` };
     return { cls: "ok", label: fmtDDMM(dateStr) };
+  }
+
+  // Work Anniversary column (Roster & Compliance) — red when the
+  // anniversary falls in the current calendar month (any year), green
+  // otherwise; always shows the date plus the completed-years count,
+  // e.g. "04/10/1996 (29)".
+  function workAnniversaryStatus(dateStr) {
+    if (!dateStr) return { cls: "dim", label: "—" };
+    const years = yearsCompleted(dateStr);
+    const label = `${fmtDDMMYYYY(dateStr)}${years != null ? ` (${years})` : ""}`;
+    return { cls: isThisMonth(dateStr) ? "bad" : "ok", label };
   }
   function hoursStatus(hrs) {
     if (hrs == null || hrs === "") return { cls: "dim", label: "—" };
@@ -762,6 +799,10 @@
     const birthdays = birthdayAgents.length;
     const birthdayTitle = birthdayAgents
       .map((a) => `${a.firstName} ${a.surname} — ${fmtDayMonth(a.dob)}`).join("\n");
+    const anniversaryAgents = d.roster.filter((a) => isThisMonth(a.workAnniversary));
+    const anniversaries = anniversaryAgents.length;
+    const anniversaryTitle = anniversaryAgents
+      .map((a) => `${a.firstName} ${a.surname} — ${fmtDayMonth(a.workAnniversary)} (${yearsCompleted(a.workAnniversary)} yrs)`).join("\n");
     const suspended = d.roster.filter(isSuspended).length;
 
     const selected = state.selectedAgent ? d.roster.find((a) => `${a.firstName}|${a.surname}` === state.selectedAgent) : null;
@@ -773,13 +814,15 @@
         <div class="statCard ${trainingBehind ? "warn" : "ok"}"><div class="n">${trainingBehind}</div><div class="l">Behind on verifiable training</div></div>
         <div class="statCard ${suspended ? "bad" : "ok"}"><div class="n">${suspended}</div><div class="l">Suspended licenses</div></div>
         <div class="statCard"${birthdays ? ` title="${esc(birthdayTitle)}"` : ""}><div class="n">${birthdays}</div><div class="l">Birthdays this month</div></div>
+        <div class="statCard"${anniversaries ? ` title="${esc(anniversaryTitle)}"` : ""}><div class="n">${anniversaries}</div><div class="l">Work anniversaries this month</div></div>
       </div>
       <div class="dashHead">
         <input class="dashSearch" id="dashSearch" placeholder="Search name, role, email…" value="${esc(state.dashQuery)}" />
       </div>
       <div class="dashTableWrap"><table class="dashTable">
         <thead><tr>
-          <th data-sort="firstName">Name</th><th data-sort="jobTitle">Role</th><th>Licence #</th>
+          <th data-sort="firstName">Name</th><th data-sort="jobTitle">Role</th>
+          <th data-sort="workAnniversary">Work Anniversary</th><th>Licence #</th>
           <th data-sort="licenseExpiry">Licence Expiry</th><th>Verifiable</th><th>Non-Verifiable</th>
           <th data-sort="supervisionLevel">Supervision</th><th>Mobile</th>
         </tr></thead>
@@ -788,16 +831,17 @@
             <tr class="agentRow" data-agent="${esc(a.firstName)}|${esc(a.surname)}">
               <td><strong>${esc(a.firstName)} ${esc(a.surname)}</strong>${isThisMonth(a.dob) ? ` <span class="pill ok" title="Birthday: ${esc(fmtDayMonth(a.dob))}">🎂 this month</span>` : ""}</td>
               <td>${esc(a.jobTitle || "—")}</td>
+              <td>${pill(workAnniversaryStatus(a.workAnniversary))}</td>
               <td class="mono">${esc(a.licenceNumber || "—")}${isSuspended(a) ? ' <span class="pill warn">Suspended</span>' : ""}</td>
               <td>${a.licenceNumber ? pill(licenseExpiryStatus(a.licenseExpiry)) : '<span class="dimText">—</span>'}</td>
               <td>${a.licenceNumber ? pill(hoursStatus(a.verifiableHours)) : '<span class="dimText">—</span>'}</td>
               <td>${a.licenceNumber ? pill(hoursStatus(a.nonVerifiableHours)) : '<span class="dimText">—</span>'}</td>
               <td>${esc(a.supervisionLevel || "—")}${a.supervisionFrequency ? ` <span class="dimText">(${esc(a.supervisionFrequency)})</span>` : ""}</td>
               <td class="mono">${esc(a.mobile || "—")}</td>
-            </tr>`).join("") || `<tr><td colspan="8"><div class="emptyState">No matches.</div></td></tr>`}
+            </tr>`).join("") || `<tr><td colspan="9"><div class="emptyState">No matches.</div></td></tr>`}
         </tbody>
       </table></div>
-      <p class="smallNote">Red = license renewal due this calendar month. Verifiable/non-verifiable training hours are green at 10+ hours, red below — each broker needs 10 verifiable CPD hours completed by 31 December.</p>
+      <p class="smallNote">Red = license renewal or work anniversary falling this calendar month; work anniversary shows the completed years in brackets. Verifiable/non-verifiable training hours are green at 10+ hours, red below — each broker needs 10 verifiable CPD hours completed by 31 December.</p>
       ${selected ? renderAgentDetail(selected) : ""}
     `;
   }
