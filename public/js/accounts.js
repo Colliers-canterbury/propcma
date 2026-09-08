@@ -443,11 +443,11 @@
             <thead><tr><th>Item</th><th>Description</th><th class="r">Amount</th></tr></thead>
             <tbody>
               ${comm.fee ? `<tr><td>Commission (per scale of fees)</td><td>${dash(comm.feeDesc)}</td><td class="r mono">$${fmt(comm.fee)}</td></tr>` : ""}
-              ${comm.deductMarketing ? `<tr><td>Deduct marketing costs</td><td>${dash(comm.deductMarketingDesc)}</td><td class="r mono">-$${fmt(comm.deductMarketing)}</td></tr>` : ""}
               ${comm.otherFee ? `<tr><td>Other / consultancy</td><td>${dash(comm.otherDesc)}</td><td class="r mono">$${fmt(comm.otherFee)}</td></tr>` : ""}
               ${comm.adminFee ? `<tr><td>Administration fee</td><td></td><td class="r mono">$${fmt(500)}</td></tr>` : ""}
               ${comm.recoverMarketing ? `<tr><td>Recover marketing costs</td><td></td><td class="r mono">$${fmt(comm.recoverMarketing)}</td></tr>` : ""}
               ${comm.recoverOther ? `<tr><td>Recover other costs</td><td>${dash(comm.recoverOtherDesc)}</td><td class="r mono">$${fmt(comm.recoverOther)}</td></tr>` : ""}
+              ${comm.deductMarketing ? `<tr><td>Deduct marketing costs</td><td>${dash(comm.deductMarketingDesc)}</td><td class="r mono">−$${fmt(comm.deductMarketing)}</td></tr>` : ""}
               <tr style="font-weight:700"><td colspan="2">Total to invoice (excl GST)</td><td class="r mono">$${fmt(d.total_invoice_ex_gst)}</td></tr>
             </tbody>
           </table>` : `
@@ -457,11 +457,11 @@
               ${comm.flatFee
                 ? `<tr><td>Commission (flat fee)</td><td class="r"></td><td class="r mono">$${fmt(comm.flatFeeAmount)}</td></tr>`
                 : (comm.tiers || []).map((t, i) => t.pct ? `<tr><td>${["Commission","Second tier","Third tier"][i] || ("Tier " + (i+1))}</td><td class="r">${esc(t.pct)}%</td><td class="r mono">$${fmt(tierFees[i])}</td></tr>` : "").join("")}
-              ${comm.deductMarketing ? `<tr><td>Deduct marketing costs${comm.deductMarketingDesc ? " — " + dash(comm.deductMarketingDesc) : ""}</td><td class="r"></td><td class="r mono">-$${fmt(comm.deductMarketing)}</td></tr>` : ""}
               ${comm.otherFee ? `<tr><td>Other — ${dash(comm.otherDesc)}</td><td class="r"></td><td class="r mono">$${fmt(comm.otherFee)}</td></tr>` : ""}
               ${comm.adminFee ? `<tr><td>Administration fee</td><td class="r"></td><td class="r mono">$${fmt(500)}</td></tr>` : ""}
               ${comm.recoverMarketing ? `<tr><td>Recover marketing costs</td><td class="r"></td><td class="r mono">$${fmt(comm.recoverMarketing)}</td></tr>` : ""}
               ${comm.recoverOther ? `<tr><td>Recover other — ${dash(comm.recoverOtherDesc)}</td><td class="r"></td><td class="r mono">$${fmt(comm.recoverOther)}</td></tr>` : ""}
+              ${comm.deductMarketing ? `<tr><td>Deduct marketing costs${comm.deductMarketingDesc ? " — " + dash(comm.deductMarketingDesc) : ""}</td><td class="r"></td><td class="r mono">−$${fmt(comm.deductMarketing)}</td></tr>` : ""}
               <tr style="font-weight:700"><td>Total to invoice (excl GST)</td><td></td><td class="r mono">$${fmt(d.total_invoice_ex_gst)}</td></tr>
             </tbody>
           </table>`}
