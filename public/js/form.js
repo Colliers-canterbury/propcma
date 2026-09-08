@@ -1,12 +1,13 @@
-// /public/js/lease-form.js — Deal Sheet: Leasing Record
+// /public/js/form.js — Broker Deal Sheet (vanilla)
 (function () {
   const cfg = window.DealSheetConfig;
   const api = window.DealSheetApi;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const num = (v) => { const n = parseFloat(String(v ?? "").replace(/[$,\s%]/g, "")); return isNaN(n) ? 0 : n; };
-  const fmt = (n) => Number(n || 0).toLocaleString("en-NZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const num = (v) => { const n = parseFloat(String(v ?? "").replace(/[$,\s]/g, "")); return isNaN(n) ? 0 : n; };
+  const fmt = (n) => n.toLocaleString("en-NZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   // Live comma-formatting for $ fields, as the user types. Preserves the
   // caret position by digit-count rather than raw character offset, so
@@ -42,116 +43,85 @@
   }
 
   const DIVISIONS = ["Industrial","Office","Retail","Investment Sales","Land","Rural & Agribusiness","Other"];
-  const DEAL_TYPES = ["Standard Lease","Relocation","Expansion","Assignment","Renegotiation"];
+  // Brokers are reference data loaded from the database (Settings tab
+  // manages them). Populated during boot before the first render.
   let BROKERS = [];
-
-  // Rental schedule lines — mirrors api/_lib/leases.js RENTAL_LINES.
-  const RENTAL_LINES = [
-    { key:"retail",    label:"Retail",        unit:"sqm",  rateLabel:"$ psqm" },
-    { key:"office",    label:"Office",        unit:"sqm",  rateLabel:"$ psqm" },
-    { key:"warehouse", label:"Warehouse",     unit:"sqm",  rateLabel:"$ psqm" },
-    { key:"industrial",label:"Industrial",    unit:"sqm",  rateLabel:"$ psqm" },
-    { key:"yard",      label:"Yard",          unit:"sqm",  rateLabel:"$ psqm" },
-    { key:"canopy",    label:"Canopy / Deck", unit:"sqm",  rateLabel:"$ psqm" },
-    { key:"naming",    label:"Naming Rights", unit:null,   rateLabel:"" },
-    { key:"carparks",  label:"Carparks",      unit:"cpks", rateLabel:"$ ppkpw" },
-    { key:"other1",    label:"Other",         unit:null,   rateLabel:"" },
-    { key:"other2",    label:"Other",         unit:null,   rateLabel:"" },
-  ];
-
-  const emptyRental = () => {
-    const r = {};
-    RENTAL_LINES.forEach(l => { r[l.key] = { qty:"", rate:"", total:"", desc:"" }; });
-    r.opex = "";
-    return r;
-  };
+  const TITLES = ["Freehold","Strata","Leasehold"];
+  const BUYER = ["Advert","Sign","Website","Relationship","Target mailing","Referral","Canvassing","Other"];
+  const LISTING = ["Referral","Canvassing","Relationship","Other"];
 
   const state = {
     currentId: null,
     saveTimer: null,
     userName: "",
-    triedSubmit: false,
-    resumed: false,
-    returnNote: "",
     dealStatus: "draft", // a brand-new, never-saved sheet is implicitly a draft
     f: {
       ownership: { salespeople: [], division: "Industrial", office: "Christchurch" },
-      property: { address:"", buildingName:"", propertyType:"", level:"", unit:"", city:"Christchurch" },
-      lessor:   { name:"", phone:"", contactName:"", email:"", postalAddress:"", city:"", country:"New Zealand", postcode:"", solicitorName:"", solicitorFirm:"", solicitorEmail:"", parentCompany:"" },
-      lessee:   { name:"", phone:"", contactName:"", email:"", postalAddress:"", city:"", country:"New Zealand", postcode:"", solicitorName:"", solicitorFirm:"", solicitorEmail:"" },
-      invoiceToLessee: false,
+      property: { address:"", buildingName:"", propertyType:"", level:"", city:"Christchurch" },
+      vendor: { name:"", phone:"", contactName:"", email:"", postalAddress:"", postcode:"", city:"", country:"NZ", fax:"", solicitorName:"", solicitorFirm:"", solicitorPhone:"", vendorGroup:"" },
       billingDifferent: false,
-      billing:  { name:"", phone:"", contactName:"", email:"", postalAddress:"", city:"", country:"New Zealand", postcode:"" },
-      lease: {
-        dateOfAgreement:"", unconditionalDate:"", occupancyDate:"",
-        termYears:"", rorYears:"", rorTimes:"",
-        commencementDate:"", expiryDate:"", rentReviewPeriod:"",
-        dealType:"", leaseBasis:"Net", incentives:"",
-      },
-      rental: emptyRental(),
-      // Manual overrides for the schedule totals (blank = use calculated).
-      rentalOverride: { net:"", gross:"" },
+      billing: { name:"", phone:"", contactName:"", email:"", postalAddress:"", postcode:"", city:"", country:"NZ", fax:"" },
+      invoicePurchaser: false,
+      purchaser: { name:"", phone:"", contactName:"", email:"", postalAddress:"", postcode:"", city:"", country:"NZ", fax:"", solicitorName:"", solicitorFirm:"", solicitorPhone:"" },
+      sale: { dateOfAgreement:"", unconditionalDate:"", salePrice:"", rentalBasis:"Net", rentalIncome:"", yieldManual:"", titleType:"Freehold", landArea:"", wale:"", tenancies:"", occupiedArea:"", auction:false, tenancySchedule:false },
       depositToTrust: false,
-      deposit: { amount:"", dateReceived:"", receiptNo:"", earlyRelease:false,
-                 lessorAuthSent:false, lessorAuthReceived:false, lesseeAuthSent:false, lesseeAuthReceived:false },
-      // Commission amounts are entered manually for leases.
-      comm: { feeDesc:"", fee:"", otherDesc:"", otherFee:"", adminFee:true,
-              recoverMarketingDesc:"", recoverMarketing:"", recoverOtherDesc:"", recoverOther:"",
-              deductMarketingDesc:"", deductMarketing:"" },
-      splits: [ {person:"",pct:"",fixed:""},{person:"",pct:"",fixed:""},{person:"",pct:"",fixed:""},{person:"",pct:"",fixed:""},{person:"",pct:"",fixed:""} ],
-      thirdParty: [ {name:"",pct:"",fixed:""},{name:"",pct:"",fixed:""},{name:"",pct:"",fixed:""} ],
-      tenantSource: "", tenantSourceOther: "", tenantReferralWho: "",
-      confidential: false,
-      checklist: { agencyAgreement:false, unconditionalConfirmation:false, leaseValueConfirmation:false,
-                   marketingReport:false, amlComplete:false, leaseDeed:false, appraisals:false,
-                   executedAgreement:false },
-      attachments: {},
+      deposit: { amount:"", dateReceived:"", receiptNo:"", earlyRelease:false, vendorAuthSent:false, vendorAuthReceived:false, purchaserAuthSent:false, purchaserAuthReceived:false },
+      comm: { flatFee:false, flatFeeAmount:"", tiers:[{pct:"",base:""},{pct:"",base:""},{pct:"",base:""}], otherDesc:"", otherFee:"", adminFee:true, recoverMarketing:"", recoverOtherDesc:"", recoverOther:"", deductMarketingDesc:"", deductMarketing:"" },
+      splits: [ {person:"",pct:""},{person:"",pct:""},{person:"",pct:""},{person:"",pct:""},{person:"",pct:""} ],
+      thirdParty: [ {name:"",pct:""},{name:"",pct:""},{name:"",pct:""} ],
+      buyerSource:"", buyerSourceOther:"",
+      listingSource:"", listingReferralWho:"", listingReferralInternal:"Yes", listingOther:"",
+      checklist: { agencyAgreement:false, unconditionalConfirmation:false, salePriceConfirmation:false, marketingReport:false, amlComplete:false, spAgreement:false, executedAgreement:false },
+      attachments: {},  // { slotKey: { name, path, size } } populated after upload
       extraAttachments: [], // "Other Documents" — free-form, description required, draft-only
     },
   };
 
-  // ---------- path get/set ----------
-  const get = (path) => path.split(".").reduce((o,k) => (o||{})[k], state.f);
+  const get = (path) => path.split(".").reduce((o, k) => o?.[k], state.f);
   const set = (path, val) => {
-    const keys = path.split("."); const last = keys.pop();
-    let o = state.f; keys.forEach(k => { o = o[k] = o[k] ?? {}; });
-    o[last] = val;
+    const keys = path.split("."); let o = state.f;
+    for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]];
+    o[keys[keys.length - 1]] = val;
+    scheduleAutosave();
+    render();
   };
 
-  // ---------- derived (mirrors api/_lib/leases.js) ----------
+  // ---------- derived ----------
+  // Commission model (Option B), mirrored server-side in api/_lib/deals.js:
+  //  - Third parties take their % of the COMMISSION (excl. admin fee)
+  //  - Salespeople split the REMAINDER (total invoiced less third-party $)
   function derive() {
-    const f = state.f, r = f.rental;
+    const f = state.f;
+    const salePrice = num(f.sale.salePrice);
+    const yieldCalc = salePrice > 0 && num(f.sale.rentalIncome) > 0 ? (num(f.sale.rentalIncome)/salePrice)*100 : 0;
+    const yieldPct = f.sale.yieldManual !== "" ? num(f.sale.yieldManual) : yieldCalc;
 
-    const lineTotals = {};
-    RENTAL_LINES.forEach(({ key, unit }) => {
-      const line = r[key] || {};
-      let t;
-      if (key === "carparks") t = num(line.qty) * num(line.rate) * 52;
-      else if (unit === "sqm") t = num(line.qty) * num(line.rate);
-      else t = num(line.total);
-      // An explicitly entered total wins over the calculated one.
-      if (unit && line.total !== "" && line.total != null) t = num(line.total);
-      lineTotals[key] = t;
+    // Tiered commission: each tier's base auto-fills with whatever's
+    // left of the sale price after the tiers above it, unless the user
+    // has typed an explicit amount (which always wins). tierBases holds
+    // the effective base shown/used per tier. Skipped entirely in Flat
+    // Fee mode — the tiers aren't used, so nothing to compute.
+    const tierBases = [];
+    let remaining = salePrice;
+    f.comm.tiers.forEach((t, i) => {
+      const typed = t.base !== "" && t.base != null;
+      const base = typed ? num(t.base) : Math.max(remaining, 0);
+      tierBases[i] = base;
+      remaining -= base;
     });
-
-    const calcNet = Object.values(lineTotals).reduce((a,b) => a+b, 0);
-    const opex = num(r.opex);
-    // Manual overrides win over the calculated figures when present.
-    const netRental = f.rentalOverride.net !== "" ? num(f.rentalOverride.net) : calcNet;
-    const calcGross = netRental + opex;
-    const grossRental = f.rentalOverride.gross !== "" ? num(f.rentalOverride.gross) : calcGross;
-    const totalArea = RENTAL_LINES.filter(l => l.unit === "sqm")
-      .reduce((a,l) => a + num((r[l.key]||{}).qty), 0);
-
+    const tierFees = f.comm.tiers.map((t,i) => (num(t.pct)/100) * tierBases[i]);
+    // Flat Fee mode: a single typed dollar figure replaces the whole
+    // tiered %-of-sale-price calculation.
+    const commissionFee = f.comm.flatFee ? num(f.comm.flatFeeAmount) : tierFees.reduce((a,b)=>a+b,0);
     const adminFee = f.comm.adminFee ? 500 : 0;
     const recoverMarketing = num(f.comm.recoverMarketing);
     const recoverOther = num(f.comm.recoverOther);
     // Deducted from the commission itself (not a pass-through cost
     // recovery like recoverMarketing/recoverOther above), so it comes off
     // before commissionBase is worked out below — third parties and
-    // salespeople are paid on the reduced amount. Mirrors api/_lib/leases.js.
+    // salespeople are paid on the reduced amount. Mirrors api/_lib/deals.js.
     const deductMarketing = num(f.comm.deductMarketing);
-    const totalInvoice = num(f.comm.fee) + num(f.comm.otherFee) + adminFee
+    const totalInvoice = commissionFee + num(f.comm.otherFee) + adminFee
       + recoverMarketing + recoverOther - deductMarketing;
 
     // commissionBase is the actual commission-earning amount — the admin
@@ -160,61 +130,57 @@
     // marketing deduction, by contrast, reduces the commission itself, so
     // it stays baked into totalInvoice here rather than being added back.
     const commissionBase = totalInvoice - adminFee - recoverMarketing - recoverOther;
-
-    // A split can be a fixed $ amount OR a percentage. Fixed wins when set.
-    const tpAmount = (s, base) => num(s.fixed) > 0 ? num(s.fixed) : (num(s.pct)/100)*base;
-    const thirdPartyPctTotal = f.thirdParty.reduce((a,s) => a + num(s.pct), 0);
-    const thirdPartyTotal = f.thirdParty.reduce((a,s) => a + tpAmount(s, commissionBase), 0);
+    const thirdPartyPctTotal = f.thirdParty.reduce((a,s)=>a+num(s.pct),0);
+    const thirdPartyTotal = f.thirdParty.reduce((a,s)=>a + (num(s.pct)/100)*commissionBase, 0);
     // Salespeople DO split the admin fee between them (third parties
     // still don't) — added back in here, after the third-party share
     // is taken out of the pure commission.
     const internalPool = (commissionBase - thirdPartyTotal) + adminFee;
-    const internalPctTotal = f.splits.reduce((a,s) => a + num(s.pct), 0);
-    const internalFixedTotal = f.splits.reduce((a,s) => a + (num(s.fixed) > 0 ? num(s.fixed) : 0), 0);
-    // With fixed amounts in the mix, "100%" no longer strictly applies —
-    // consider it balanced if the paid-out internal total matches the pool.
-    const internalPaid = f.splits.reduce((a,s) => a + (num(s.fixed) > 0 ? num(s.fixed) : (num(s.pct)/100)*internalPool), 0);
-    const internalOk = Math.abs(internalPaid - internalPool) < 1
-      || internalPctTotal === 0 && internalFixedTotal === 0;
+    const internalPctTotal = f.splits.reduce((a,s)=>a+num(s.pct),0);
+    const internalOk = internalPctTotal === 0 || Math.abs(internalPctTotal-100) < 0.01;
 
-    // #12 — deposit shortfall against the total to invoice.
-    const depositAmount = num(f.deposit.amount);
-    const depositShort = f.depositToTrust && depositAmount > 0 && depositAmount < totalInvoice;
-    const depositGap = depositShort ? totalInvoice - depositAmount : 0;
-
-    return { lineTotals, netRental, calcNet, opex, grossRental, calcGross, totalArea,
-             adminFee, totalInvoice, commissionBase, thirdPartyPctTotal,
-             thirdPartyTotal, internalPool, internalPctTotal, internalPaid, internalOk,
-             tpAmount, depositAmount, depositShort, depositGap };
-  }
-
-  function splitStatusText(d) {
-    if (d.internalPctTotal === 0 && d.internalPaid === 0) return "No salesperson split entered";
-    const paid = "$" + fmt(d.internalPaid) + " of $" + fmt(d.internalPool);
-    return d.internalOk ? `Salesperson split balances (${paid}) ✓`
-                        : `Salesperson split ${paid} — doesn't balance`;
+    return { salePrice, yieldCalc, yieldPct, tierFees, tierBases, commissionFee, adminFee, totalInvoice,
+             commissionBase, thirdPartyPctTotal, thirdPartyTotal, internalPool,
+             internalPctTotal, internalOk };
   }
 
   function validate(d) {
     const f = state.f, m = [];
     if (!f.ownership.salespeople.length) m.push("Salesperson");
-    if (!f.property.address.trim()) m.push("Property address");
-    if (!f.lessor.name) m.push("Lessor name");
-    if (!f.lessee.name) m.push("Lessee name");
-    if (!f.lease.dateOfAgreement) m.push("Date of agreement");
-    if (!f.lease.commencementDate) m.push("Commencement date");
-    if (!f.lease.termYears) m.push("Lease term");
-    if (!d.grossRental) m.push("Rental schedule");
-    if (!d.totalInvoice) m.push("Commission amount");
-    if (d.internalPaid === 0) m.push("Commission split");
-    else if (!d.internalOk) m.push("Salesperson split must balance to the pool");
-    if (d.thirdPartyTotal >= d.totalInvoice) m.push("Third-party share can't exceed the commission");
-    if (!f.tenantSource) m.push("Tenant source");
-    const c = f.checklist;
-    if (!c.agencyAgreement) m.push("Checklist — signed agency agreement");
-    if (!c.unconditionalConfirmation) m.push("Checklist — confirmation of unconditional");
-    if (!c.executedAgreement) m.push("Checklist — executed lease agreement");
-    if (!c.amlComplete) m.push("Checklist — AML complete");
+    if (!f.property.address || !f.property.address.trim()) m.push("Property address");
+    if (!f.vendor.name) m.push("Vendor name");
+    if (!f.sale.dateOfAgreement) m.push("Date of agreement");
+    if (!f.sale.unconditionalDate) m.push("Unconditional date");
+    if (!d.salePrice) m.push("Sale price");
+    if (!d.totalInvoice) m.push("Commission calculation");
+    // A tier with an amount typed but no percentage computes to $0 —
+    // easy to do by mistake (typing the flat fee into the threshold
+    // "base" box instead of setting a %), and the $500 admin fee alone
+    // can make totalInvoice look non-zero even though the real
+    // commission is $0. Only relevant when NOT using Flat Fee mode.
+    if (f.comm.flatFee) {
+      if (!num(f.comm.flatFeeAmount)) m.push("Flat fee amount");
+    } else {
+      f.comm.tiers.forEach((t, i) => {
+        if (t.base !== "" && t.base != null && !num(t.pct)) {
+          m.push(`Commission tier ${i+1} has an amount but no % — it will charge $0`);
+        }
+      });
+    }
+    if (d.salePrice > 0 && d.commissionBase <= 0) {
+      m.push(f.comm.flatFee ? "Commission works out to $0 — check the flat fee amount"
+                             : "Commission works out to $0 — check the tier percentages");
+    }
+    if (d.internalPctTotal === 0) m.push("Commission split");
+    else if (!d.internalOk) m.push("Salesperson split must total 100%");
+    if (d.thirdPartyPctTotal >= 100) m.push("Third-party share must be under 100%");
+    if (!f.buyerSource) m.push("Buyer source");
+    if (!f.listingSource) m.push("Listing source");
+    if (!f.checklist.agencyAgreement) m.push("Checklist — signed agency agreement");
+    if (!f.checklist.unconditionalConfirmation) m.push("Checklist — confirmation of unconditional");
+    if (!f.checklist.executedAgreement) m.push("Checklist — executed sale & purchase agreement");
+    if (!f.checklist.amlComplete) m.push("Checklist — AML complete");
+    if (f.depositToTrust && !f.checklist.spAgreement) m.push("Checklist — S&P agreement (trust deal)");
     return m;
   }
 
@@ -225,7 +191,7 @@
     saveState = "Saving…"; updateSaveState();
     state.saveTimer = setTimeout(async () => {
       try {
-        const r = await api.saveDraft(state.f, state.currentId, "lease");
+        const r = await api.saveDraft(state.f, state.currentId);
         state.currentId = r.id;
         saveState = "Draft saved";
       } catch (e) { saveState = "Save failed — will retry"; }
@@ -234,7 +200,7 @@
   }
   function updateSaveState() { const el = $("saveState"); if (el) el.textContent = saveState; }
 
-  // ---------- builders ----------
+  // ---------- small builders ----------
   const txt = (path, label, opts = {}) => {
     const { ph = "", type = "text", span = 1, req = false, money = false } = opts;
     return `<label class="fld span${span}"><span class="lbl">${label}${req ? '<em class="req">*</em>' : ''}</span>
@@ -247,16 +213,22 @@
       </select></label>`;
   const chk = (path, label) =>
     `<label class="chk"><input type="checkbox" data-path="${path}" ${get(path)?"checked":""} /><span>${label}</span></label>`;
-  const party = (base, solicitor, req) => `<div class="grid">
-    ${txt(base+".name","Name",{span:2,req})}${txt(base+".phone","Phone")}
+  const party = (base, solicitor) => `<div class="grid">
+    ${txt(base+".name","Name",{span:2,req:base==="vendor"})}${txt(base+".phone","Phone")}
     ${txt(base+".contactName","Contact name",{span:2})}${txt(base+".email","Email",{type:"email"})}
     ${txt(base+".postalAddress","Postal address",{span:2})}${txt(base+".postcode","Postcode")}
     ${txt(base+".city","City")}${txt(base+".country","Country")}
-    ${solicitor ? txt(base+".solicitorName","Solicitor")+txt(base+".solicitorFirm","Firm")+txt(base+".solicitorEmail","Solicitor email",{type:"email"}) : ""}
+    ${solicitor ? txt(base+".solicitorName","Solicitor")+txt(base+".solicitorFirm","Firm")+txt(base+".solicitorPhone","Solicitor phone") : ""}
   </div>`;
   const section = (n, title, note, inner) => `<section class="card"><header class="cardHead">
     <span class="secNo">${n}</span><div><h2>${title}</h2>${note?`<p class="note">${note}</p>`:""}</div></header>${inner}</section>`;
 
+  // When yield isn't manually set, show the live calc as the input's placeholder.
+  function yieldCalcPlaceholder(d) {
+    return d.yieldCalc ? `auto: ${d.yieldCalc.toFixed(2)}` : "auto-calculated";
+  }
+
+  // File attachment slot: shows attach button, or the attached file with a remove option.
   function uploadSlot(slotKey, label) {
     const a = state.f.attachments[slotKey];
     if (a) {
@@ -286,180 +258,150 @@
     const missing = validate(d);
     const f = state.f;
 
-    const brokerChips = BROKERS.map((b) => `<label class="brokerChip ${f.ownership.salespeople.includes(b.code)?"on":""}">
-      <input type="checkbox" class="brokerBox" value="${b.code}" ${f.ownership.salespeople.includes(b.code)?"checked":""} />
-      <span>${esc(b.name)}</span></label>`).join("");
-
-    // Rental schedule rows
-    const rentalRows = RENTAL_LINES.map(l => {
-      const line = f.rental[l.key] || {};
-      const calc = d.lineTotals[l.key];
-      const showCalc = calc ? fmt(calc) : "";
-      const isOther = l.key === "other1" || l.key === "other2";
-      if (isOther) {
-        // "Other" lines: a description spanning the area+rate columns,
-        // then a manual total.
-        return `<tr>
-          <td>${l.label}</td>
-          <td colspan="2"><input class="cell" data-path="rental.${l.key}.desc" value="${esc(line.desc)}" placeholder="Description (e.g. signage, storage)" /></td>
-          <td class="r"><input class="cell r" data-money data-recalc data-path="rental.${l.key}.total" value="${esc(line.total)}" placeholder="0.00" /></td>
-        </tr>`;
-      }
+    const commRows = f.comm.flatFee
+      ? `<tr><td>Commission (flat fee)</td><td colspan="2"></td>
+          <td class="r"><input class="cell r" data-money data-recalc data-path="comm.flatFeeAmount" value="${esc(f.comm.flatFeeAmount)}" placeholder="0.00" /></td></tr>`
+      : ["Commission","Second tier","Third tier"].map((label,i) => {
+      const t = f.comm.tiers[i];
+      const typed = t.base !== "" && t.base != null;
+      // Show the typed amount, or the auto-calculated remainder for this
+      // tier (only when there's something left to allocate).
+      const shownBase = typed ? t.base
+        : (d.tierBases[i] > 0 ? fmt(d.tierBases[i]) : "");
       return `<tr>
-        <td>${l.label}</td>
-        <td>${l.unit ? `<input class="cell" data-recalc data-path="rental.${l.key}.qty" value="${esc(line.qty)}" placeholder="${l.unit}" />` : ""}</td>
-        <td>${l.rateLabel ? `<input class="cell" data-money data-recalc data-path="rental.${l.key}.rate" value="${esc(line.rate)}" placeholder="${l.rateLabel}" />` : ""}</td>
-        <td class="r"><input class="cell r" data-money data-recalc data-path="rental.${l.key}.total" value="${esc(line.total)}" placeholder="${showCalc || "0.00"}" /></td>
-      </tr>`;
+      <td>${label}</td>
+      <td><input class="cell" data-recalc data-path="comm.tiers.${i}.pct" value="${esc(t.pct)}" placeholder="%" /></td>
+      <td><input class="cell" data-money data-recalc data-path="comm.tiers.${i}.base" value="${esc(shownBase)}" placeholder="${i===0?"Sale price":"Remainder"}" /></td>
+      <td class="r mono">${d.tierFees[i]?fmt(d.tierFees[i]):"—"}</td></tr>`;
     }).join("");
 
-    // Split dropdowns offer only the brokers chosen in section 1.
+    // Section 9 split dropdowns offer only the brokers chosen in section 1
     const dealBrokers = BROKERS.filter((b) => f.ownership.salespeople.includes(b.code));
     const splitRows = f.splits.map((s,i) => `<tr>
       <td><select class="cell" data-path="splits.${i}.person">
         <option value="">${dealBrokers.length?"Select…":"Add salespeople in section 1"}</option>
         ${dealBrokers.map((b) => `<option value="${esc(b.name)}" ${s.person===b.name?"selected":""}>${esc(b.name)}</option>`).join("")}
         </select></td>
-      <td><input class="cell" data-recalc data-path="splits.${i}.pct" value="${esc(s.pct)}" placeholder="%" ${num(s.fixed)>0?"disabled":""} /></td>
-      <td><input class="cell r" data-money data-recalc data-path="splits.${i}.fixed" value="${esc(s.fixed)}" placeholder="fixed $" /></td>
-      <td class="r mono" id="splitAmt${i}">${(num(s.fixed)||num(s.pct))?fmt(d.tpAmount(s,d.internalPool)):"—"}</td></tr>`).join("");
-
+      <td><input class="cell" data-recalc data-path="splits.${i}.pct" value="${esc(s.pct)}" placeholder="%" /></td>
+      <td class="r mono">${num(s.pct)?fmt((num(s.pct)/100)*d.internalPool):"—"}</td></tr>`).join("");
     const tpRows = f.thirdParty.map((s,i) => `<tr>
-      <td><input class="cell" data-path="thirdParty.${i}.name" value="${esc(s.name)}" placeholder="Company / office" /></td>
-      <td><input class="cell" data-recalc data-path="thirdParty.${i}.pct" value="${esc(s.pct)}" placeholder="%" ${num(s.fixed)>0?"disabled":""} /></td>
-      <td><input class="cell r" data-money data-recalc data-path="thirdParty.${i}.fixed" value="${esc(s.fixed)}" placeholder="fixed $" /></td>
-      <td class="r mono" id="tpAmt${i}">${(num(s.fixed)||num(s.pct))?fmt(d.tpAmount(s,d.commissionBase)):"—"}</td></tr>`).join("");
+      <td><input class="cell" data-path="thirdParty.${i}.name" value="${esc(s.name)}" placeholder="Office / party" /></td>
+      <td><input class="cell" data-recalc data-path="thirdParty.${i}.pct" value="${esc(s.pct)}" placeholder="%" /></td>
+      <td class="r mono">${num(s.pct)?fmt((num(s.pct)/100)*d.commissionBase):"—"}</td></tr>`).join("");
 
     $("app").innerHTML = `
       <header class="top">
         <div class="brand"><span class="brandMark">SIC</span>
-          <div><h1>Deal Sheet — Leasing Record</h1><p>South Island Commercial (2004) Limited · Colliers</p></div></div>
+          <div><h1>Deal Sheet — Sales Record</h1><p>South Island Commercial (2004) Limited · Colliers</p></div></div>
         <div style="text-align:right">
           <a href="admin.html" class="linkBtn" style="display:inline-block;margin-bottom:8px">← All deal sheets</a>
           <div class="accountsBox"><span class="tag">Completed by accounts</span>
           <div class="acctFields"><label><span>Deal No.</span><input disabled placeholder="—" /></label></div></div>
         </div>
       </header>
-      <p class="mandate">Complete <strong>all</strong> categories for commission to be paid promptly.</p>
+      <p class="mandate">Complete <strong>all</strong> categories for commission to be paid promptly.
+        Fields marked <em class="req">*</em> and the mandatory checklist must be complete before sending to accounts.</p>
       ${state.returnNote ? `<div class="warnBanner"><strong>Returned by accounts.</strong> ${esc(state.returnNote.replace(/^Returned to broker:\s*/, ""))}</div>` : ""}
       ${state.triedSubmit && missing.length ? `<div class="warnBanner"><strong>Not ready to send.</strong> Outstanding: ${missing.map(esc).join(" · ")}</div>` : ""}
 
       <div class="layout">
-        <div class="col">
-          ${section("1","Deal ownership","Select every broker on this deal.",`
+        <main>
+          ${section("1","Deal ownership","Select every salesperson working this deal. Commission splits (section 9) can only be assigned to these people.",`
+            <div class="grid">
+              ${sel("ownership.division","Division",DIVISIONS)}${txt("ownership.office","Office")}
+            </div>
             <div class="brokerPick">
               <span class="lbl">Salesperson<em class="req">*</em>
                 <span class="dim">${f.ownership.salespeople.length} selected</span></span>
-              <div class="brokerGrid">${brokerChips}</div>
-            </div>
-            <div class="grid" style="margin-top:12px">
-              ${sel("ownership.division","Division",DIVISIONS)}
-              ${txt("ownership.office","Office")}</div>`)}
+              <div class="brokerGrid">
+                ${BROKERS.map((b) => `<label class="brokerChip ${f.ownership.salespeople.includes(b.code)?"on":""}">
+                  <input type="checkbox" class="brokerBox" value="${b.code}" ${f.ownership.salespeople.includes(b.code)?"checked":""} />
+                  <span>${esc(b.name)}</span></label>`).join("")}
+              </div>
+            </div>`)}
 
           ${section("2","Property details","",`
             <div class="grid">
-              ${txt("property.address","Address",{span:3,req:true,ph:"e.g. Unit 2, 14 Leeds Street, Hornby"})}
-              ${txt("property.buildingName","Building name",{span:2})}${txt("property.level","Level")}
-              ${txt("property.unit","Unit")}${txt("property.city","City")}
-              ${txt("property.propertyType","Property type",{ph:"e.g. Warehouse"})}</div>`)}
+              ${txt("property.address","Address",{span:3,req:true,ph:"e.g. 76 Columbia Ave, Hornby"})}
+              ${txt("property.buildingName","Building name",{span:2})}${txt("property.propertyType","Property type")}
+              ${txt("property.level","Level")}${txt("property.city","City",{span:2})}</div>`)}
 
-          ${section("3","Landlord","",party("lessor",true,true) +
-            `<div class="grid" style="margin-top:10px">${txt("lessor.parentCompany","Landlord parent company",{span:3})}</div>`)}
+          ${section("3","Vendor","",party("vendor",true)+`<div class="grid" style="margin-top:10px">${txt("vendor.vendorGroup","Vendor group",{ph:"Parent company / common name",span:3})}</div>`)}
 
-          ${section("4","Tenant","",party("lessee",true,true) +
-            `<div style="margin-top:10px">${chk("invoiceToLessee","Raise the invoice to the Tenant")}</div>`)}
+          ${section("4","Billing entity","Legal entity for invoicing. Leave off if the same as the vendor.",
+            chk("billingDifferent","Invoice a different legal entity to the vendor") + (f.billingDifferent?`<div style="margin-top:12px">${party("billing",false)}</div>`:""))}
 
-          ${section("5","Billing entity","Legal entity for invoicing. Leave unticked if the same as the Landlord.",`
-            ${chk("billingDifferent","Billing entity differs from the Landlord")}
-            ${f.billingDifferent ? party("billing",false,false) : ""}`)}
+          ${section("5","Purchaser","",
+            chk("invoicePurchaser","Tick if the invoice needs to be raised to the purchaser") + `<div style="margin-top:12px">${party("purchaser",true)}</div>`)}
 
-          ${section("6","Lease details","",`
-            <div class="grid">
-              ${txt("lease.dateOfAgreement","Date of agreement",{type:"date",req:true})}
-              ${txt("lease.unconditionalDate","Unconditional date",{type:"date"})}
-              ${txt("lease.occupancyDate","Occupancy date",{type:"date"})}
-              ${txt("lease.termYears","Lease term (years)",{req:true,ph:"e.g. 6"})}
-              ${txt("lease.rorTimes","Rights of renewal (number)",{ph:"e.g. 2"})}
-              ${txt("lease.rorYears","ROR term each (years)",{ph:"e.g. 3"})}
-              ${txt("lease.commencementDate","Commencement date",{req:true,ph:"e.g. 1 August 2026"})}
-              ${txt("lease.expiryDate","Expiry date",{ph:"e.g. 31 July 2032"})}
-              ${txt("lease.rentReviewPeriod","Rent review period",{ph:"e.g. 2 yearly"})}
-              ${sel("lease.dealType","Deal type",DEAL_TYPES)}
-              ${sel("lease.leaseBasis","Lease basis",["Net","Gross","Vacant"])}
-              ${txt("lease.incentives","Incentives",{span:3,ph:"e.g. 3 months rent free"})}</div>`)}
+          ${section("6","Sale details","",`<div class="grid">
+            ${txt("sale.dateOfAgreement","Date of agreement",{type:"date",req:true})}
+            ${txt("sale.unconditionalDate","Unconditional date",{type:"date",req:true})}
+            ${txt("sale.salePrice","Sale price (excl GST) $",{ph:"0.00",req:true,money:true})}
+            ${sel("sale.rentalBasis","Rental basis",["Net","Gross","Vacant"])}
+            ${f.sale.rentalBasis!=="Vacant" ? `${txt("sale.rentalIncome",(f.sale.rentalBasis)+" rental income $ p.a.",{money:true})}
+            <label class="fld"><span class="lbl">${f.sale.rentalBasis} yield %</span>
+              <input data-path="sale.yieldManual" value="${esc(f.sale.yieldManual)}" placeholder="${yieldCalcPlaceholder(d)}" /></label>` : ""}
+            ${sel("sale.titleType","Title",TITLES)}${txt("sale.landArea","Land area (sqm)")}
+            ${txt("sale.wale","WALE (Years)")}
+            ${txt("sale.tenancies","No. of tenancies (incl. sub-tenancies)")}${txt("sale.occupiedArea","Occupied by area (sqm)")}</div>
+            <div style="margin-top:10px">${chk("sale.auction","Sold at auction")}</div>
+            <div style="margin-top:10px">${chk("sale.tenancySchedule","Tenancy schedule attached (if available)")}
+              ${uploadSlot("tenancySchedule","optional — PDF or Excel")}</div>`)}
 
-          ${section("7","Trust deposit","Complete only if a deposit is paid into the Colliers trust account.",`
-            ${chk("depositToTrust","A deposit will be paid into the trust account")}
-            ${f.depositToTrust ? `<div class="grid" style="margin-top:10px">
-                ${txt("deposit.amount","Deposit amount (inc GST)",{ph:"e.g. $5,000 inc GST",money:true})}${txt("deposit.dateReceived","Date received",{type:"date"})}
+          ${section("7","Deposit — trust account","Complete if a deposit will be paid into the Colliers trust account.",
+            chk("depositToTrust","Deposit paid into the trust account") + (f.depositToTrust?`
+              <div class="grid" style="margin-top:12px">
+                ${txt("deposit.amount","Deposit amount $",{money:true})}${txt("deposit.dateReceived","Date received",{type:"date"})}
                 ${txt("deposit.receiptNo","Trust receipt no.")}</div>
-                <div class="authRow" style="margin-top:8px">${chk("deposit.earlyRelease","Early release required")}
-                ${f.deposit.earlyRelease?`<div class="authGrid"><span class="authLbl">Authorisation forms</span>
-                  ${chk("deposit.lessorAuthSent","Landlord — sent")}${chk("deposit.lessorAuthReceived","Landlord — received")}
-                  ${chk("deposit.lesseeAuthSent","Tenant — sent")}${chk("deposit.lesseeAuthReceived","Tenant — received")}</div>`:""}</div>` : ""}`)}
+              <div class="authRow">${chk("deposit.earlyRelease","Early release required")}
+              ${f.deposit.earlyRelease?`<div class="authGrid"><span class="authLbl">Authorisation forms</span>
+                ${chk("deposit.vendorAuthSent","Vendor — sent")}${chk("deposit.vendorAuthReceived","Vendor — received")}
+                ${chk("deposit.purchaserAuthSent","Purchaser — sent")}${chk("deposit.purchaserAuthReceived","Purchaser — received")}</div>`:""}</div>`:""))}
 
-          ${section("8","Rental schedule","Line totals calculate from area × rate — overtype any total to set it manually. The Net and Gross totals are also editable. Carpark rate is per park per week.",`
-            <table class="tbl rentalTbl">
-              <thead><tr><th></th><th>Area / Number</th><th>Net rental rate</th><th class="r">Total rental $</th></tr></thead>
-              <tbody>${rentalRows}</tbody>
-              <tfoot>
-                <tr class="sub"><td colspan="3">Total Net Rental (excl GST)</td>
-                  <td class="r"><input class="cell r mono" data-money data-recalc data-path="rentalOverride.net" value="${f.rentalOverride.net!==""?esc(f.rentalOverride.net):fmt(d.calcNet)}" placeholder="0.00" id="netRentalCell" /></td></tr>
-                <tr><td colspan="3">Plus Opex</td><td class="r"><input class="cell r" data-money data-recalc data-path="rental.opex" value="${esc(f.rental.opex)}" placeholder="0.00" /></td></tr>
-                <tr class="total"><td colspan="3">Total Gross Rental (excl GST) p.a.</td>
-                  <td class="r"><input class="cell r mono" data-money data-recalc data-path="rentalOverride.gross" value="${f.rentalOverride.gross!==""?esc(f.rentalOverride.gross):fmt(d.calcGross)}" placeholder="0.00" id="grossRentalCell" /></td></tr>
-              </tfoot></table>
-              ${f.rentalOverride.net!==""||f.rentalOverride.gross!==""?`<p class="note" style="margin-top:6px">Manual total in use. Calculated: net $${fmt(d.calcNet)}, gross $${fmt(d.calcGross)}. Clear the field to revert.</p>`:""}`)}
+          ${section("8","Commission calculation",f.comm.flatFee?"A single flat commission amount — the tiered % fields are hidden while this is on.":"Fees calculate automatically from the percentages you enter.",`
+            <label class="chk flatFeeToggle"><input type="checkbox" id="flatFeeToggle" ${f.comm.flatFee?"checked":""} /><span>Flat Fee</span></label>
+            <table class="tbl"><thead><tr><th>Tier</th><th>%</th><th>Of amount $</th><th class="r">Fee $</th></tr></thead>
+            <tbody>${commRows}
+              <tr><td>Other</td><td colspan="2"><input class="cell" data-path="comm.otherDesc" value="${esc(f.comm.otherDesc)}" placeholder="Please specify" /></td>
+                <td class="r"><input class="cell r" data-money data-recalc data-path="comm.otherFee" value="${esc(f.comm.otherFee)}" placeholder="0.00" /></td></tr>
+              <tr><td colspan="3"><div class="feeChoice">
+                <label class="chk"><input type="checkbox" id="feeAdmin" ${f.comm.adminFee?"checked":""} /><span>Administration fee ($500)</span></label>
+              </div></td><td class="r mono">${fmt(d.adminFee)}</td></tr>
+              <tr><td>Recover marketing costs</td><td colspan="2"></td>
+                <td class="r"><input class="cell r" data-money data-recalc data-path="comm.recoverMarketing" value="${esc(f.comm.recoverMarketing)}" placeholder="0.00" /></td></tr>
+              <tr><td>Recover other costs</td><td colspan="2"><input class="cell" data-path="comm.recoverOtherDesc" value="${esc(f.comm.recoverOtherDesc)}" placeholder="Please specify" /></td>
+                <td class="r"><input class="cell r" data-money data-recalc data-path="comm.recoverOther" value="${esc(f.comm.recoverOther)}" placeholder="0.00" /></td></tr>
+              <tr><td>Deduct marketing costs</td><td colspan="2"><input class="cell" data-path="comm.deductMarketingDesc" value="${esc(f.comm.deductMarketingDesc)}" placeholder="Please specify (optional)" /></td>
+                <td class="r"><input class="cell r" data-money data-recalc data-path="comm.deductMarketing" value="${esc(f.comm.deductMarketing)}" placeholder="0.00" /></td></tr>
+            </tbody>
+            <tfoot><tr><td colspan="3">Total amount to be invoiced (excl GST)</td><td class="r mono total">$${fmt(d.totalInvoice)}</td></tr></tfoot></table>`)}
 
-          ${section("9","Commission calculation","Enter the commission amounts directly.",`
-            <table class="tbl"><thead><tr><th>Item</th><th>Description</th><th class="r">Amount $</th></tr></thead>
-              <tbody>
-                <tr><td>Commission (per scale of fees)</td>
-                  <td><input class="cell" data-path="comm.feeDesc" value="${esc(f.comm.feeDesc)}" placeholder="Description (optional)" /></td>
-                  <td class="r"><input class="cell r" data-money data-recalc data-path="comm.fee" value="${esc(f.comm.fee)}" placeholder="0.00" /></td></tr>
-                <tr><td>Other / consultancy</td>
-                  <td><input class="cell" data-path="comm.otherDesc" value="${esc(f.comm.otherDesc)}" placeholder="Please specify" /></td>
-                  <td class="r"><input class="cell r" data-money data-recalc data-path="comm.otherFee" value="${esc(f.comm.otherFee)}" placeholder="0.00" /></td></tr>
-                <tr><td colspan="2"><div class="feeRow">
-                  <label class="chk"><input type="checkbox" id="feeAdmin" ${f.comm.adminFee?"checked":""} /><span>Administration fee ($500)</span></label>
-                  </div></td><td class="r mono" id="adminFeeCell">${fmt(d.adminFee)}</td></tr>
-                <tr><td>Recover marketing costs</td>
-                  <td><input class="cell" data-path="comm.recoverMarketingDesc" value="${esc(f.comm.recoverMarketingDesc)}" placeholder="Description (optional)" /></td>
-                  <td class="r"><input class="cell r" data-money data-recalc data-path="comm.recoverMarketing" value="${esc(f.comm.recoverMarketing)}" placeholder="0.00" /></td></tr>
-                <tr><td>Recover other costs</td>
-                  <td><input class="cell" data-path="comm.recoverOtherDesc" value="${esc(f.comm.recoverOtherDesc)}" placeholder="Please specify" /></td>
-                  <td class="r"><input class="cell r" data-money data-recalc data-path="comm.recoverOther" value="${esc(f.comm.recoverOther)}" placeholder="0.00" /></td></tr>
-                <tr><td>Deduct marketing costs</td>
-                  <td><input class="cell" data-path="comm.deductMarketingDesc" value="${esc(f.comm.deductMarketingDesc)}" placeholder="Description (optional)" /></td>
-                  <td class="r"><input class="cell r" data-money data-recalc data-path="comm.deductMarketing" value="${esc(f.comm.deductMarketing)}" placeholder="0.00" /></td></tr>
-                <tr class="total"><td colspan="2">Total amount to be invoiced (excl GST)</td><td class="r mono" id="totalInvoiceCell">${fmt(d.totalInvoice)}</td></tr>
-              </tbody></table>`)}
+          ${section("9","Commission split","Third parties take a percentage of the commission (excluding the administration fee). Salespeople then split what remains, which must total 100%.",`
+            <h3 class="subHead">Third party / other office <span class="dim">(conjunctional / referral — % of commission)</span></h3>
+            <table class="tbl"><tbody>${tpRows}</tbody></table>
+            ${d.thirdPartyTotal ? `<div class="poolNote">Third party share: <b>$${fmt(d.thirdPartyTotal)}</b> of $${fmt(d.commissionBase)} commission</div>` : ""}
+            <h3 class="subHead">Salespeople <span class="dim">(split the remaining $${fmt(d.internalPool)})</span></h3>
+            <table class="tbl"><thead><tr><th>Salesperson</th><th>%</th><th class="r">Amount $</th></tr></thead><tbody>${splitRows}</tbody></table>
+            <div class="splitStatus ${d.internalPctTotal===0?"":d.internalOk?"ok":"bad"}">Salesperson split: ${d.internalPctTotal.toFixed(2)}%${d.internalPctTotal!==0?(d.internalOk?" ✓":" — must equal 100%"):""}</div>`)}
 
-          ${section("10","Commission split","Third parties take a percentage of the commission (excluding the administration fee), or a fixed dollar amount. Salespeople then split what remains.",`
-            <h3 class="subHead">Third party / other office <span class="dim">(conjunctional / referral — % of commission, or a fixed $)</span></h3>
-            <table class="tbl"><thead><tr><th>Company / office</th><th>%</th><th class="r">Fixed $</th><th class="r">Amount $</th></tr></thead><tbody>${tpRows}</tbody></table>
-            <div class="poolNote" id="poolNote" ${d.thirdPartyTotal?"":'style="display:none"'}>${d.thirdPartyTotal?`Third party share: <b>$${fmt(d.thirdPartyTotal)}</b> of $${fmt(d.commissionBase)} commission`:""}</div>
-            <h3 class="subHead">Salespeople <span class="dim">(split the remaining $<span id="internalPoolLbl">${fmt(d.internalPool)}</span>)</span></h3>
-            <table class="tbl"><thead><tr><th>Salesperson</th><th>%</th><th class="r">Fixed $</th><th class="r">Amount $</th></tr></thead><tbody>${splitRows}</tbody></table>
-            <div class="splitStatus ${d.internalOk?"ok":"bad"}" id="splitStatus">${splitStatusText(d)}</div>`)}
 
-          ${section("11","Tenant source","",`
-            <div class="grid">
-              ${sel("tenantSource","Tenant source",["Advert","Sign","Website","Relationship","Moving Times","Canvassing","Referral","Other"],2)}
-              ${f.tenantSource==="Referral" ? txt("tenantReferralWho","Referral from") : ""}
-              ${f.tenantSource==="Other" ? txt("tenantSourceOther","Please specify") : ""}</div>`)}
+          ${section("10","Buyer & listing source","",`<div class="grid">
+            ${sel("buyerSource","Buyer source",BUYER)}${f.buyerSource==="Other"?txt("buyerSourceOther","Other — specify",{span:2}):""}</div>
+            <div class="grid" style="margin-top:8px">${sel("listingSource","Listing source",LISTING)}
+            ${f.listingSource==="Referral"?txt("listingReferralWho","Referral — who")+sel("listingReferralInternal","Internal referral",["Yes","No"]):""}
+            ${f.listingSource==="Other"?txt("listingOther","Other — specify",{span:2}):""}</div>`)}
 
-          ${section("12","Mandatory checklist","The invoice will not be raised until every relevant box is ticked.",`
+          ${section("11","Mandatory checklist","Tick each item. You may optionally attach the document — accounts can download it.",`<div class="checkStack">
             <div class="checkRow">${chk("checklist.agencyAgreement","Signed agency agreement attached")}${uploadSlot("agencyAgreement","")}</div>
-            <div class="checkRow">${chk("checklist.unconditionalConfirmation","Confirmation of unconditional attached")}${uploadSlot("unconditionalConfirmation","")}</div>
-            <div class="checkRow">${chk("checklist.executedAgreement","Executed lease agreement attached")}${uploadSlot("executedAgreement","")}</div>
-            <div class="checkRow">${chk("checklist.amlComplete","AML complete")}${uploadSlot("amlComplete","")}</div>`)}
+            <div class="checkRow">${chk("checklist.unconditionalConfirmation","Confirmation of unconditional attached (from vendor or vendor's solicitor)")}${uploadSlot("unconditionalConfirmation","")}</div>
+            <div class="checkRow">${chk("checklist.executedAgreement","Executed sale &amp; purchase agreement attached")}${uploadSlot("executedAgreement","")}</div>
+            <div class="checkRow">${chk("checklist.amlComplete","AML complete")}${uploadSlot("amlComplete","")}</div>
+            ${f.depositToTrust?`<div class="checkRow">${chk("checklist.spAgreement","Trust deal — sale and purchase agreement attached")}${uploadSlot("spAgreement","")}</div>`:""}</div>`)}
 
-          ${section("13","Other Documents","Not mandatory — attach anything else useful for the file. Available while this deal sheet is still a draft.",`
+          ${section("12","Other Documents","Not mandatory — attach anything else useful for the file. Available while this deal sheet is still a draft.",`
             <div class="checkRow">${chk("checklist.marketingReport","Marketing campaign report attached (optional)")}${uploadSlot("marketingReport","")}</div>
-            <div class="checkRow">${chk("checklist.leaseValueConfirmation","Confirmation of lease value (optional)")}${uploadSlot("leaseValueConfirmation","e.g. schedule from the lease agreement")}</div>
-            <div class="checkRow">${chk("checklist.leaseDeed","Lease deed attached (optional)")}${uploadSlot("leaseDeed","")}</div>
-            ${f.depositToTrust ? `<div class="checkRow">${chk("checklist.appraisals","Appraisals (trust deals) (optional)")}${uploadSlot("appraisals","")}</div>` : ""}
+            <div class="checkRow">${chk("checklist.salePriceConfirmation","Confirmation of sale price attached (e.g. first page of the S&amp;P agreement) (optional)")}${uploadSlot("salePriceConfirmation","")}</div>
             <h3 class="subHead" style="margin-top:14px">Any other document</h3>
             ${extraAttachmentsList()}
             ${state.dealStatus === "draft" ? `<div class="extraUpload" id="extraDropZone">
@@ -471,69 +413,85 @@
               <span class="dropHint">or drag &amp; drop a file anywhere in this box</span>
             </div>` : `<p class="note">Other documents can only be added while this deal sheet is a draft.</p>`}`)}
 
-          ${section("14","Sign-off","",`<div class="grid">
+          ${section("13","Sign-off","",`<div class="grid">
             <label class="fld span2"><span class="lbl">Prepared by</span>
               <input disabled value="${esc(state.userName || "")}" /></label>
             <label class="fld"><span class="lbl">Date</span><input disabled value="${new Date().toLocaleDateString("en-NZ")}" /></label></div>
-            <div class="confidentialRow" style="margin-top:12px">
-              ${chk("confidential","Confidential / Private Sale (exclude from PropCMA)")}
-              <p class="note" style="margin-top:4px">When ticked, this deal will <strong>not</strong> be written to PropCMA comparables or the Excel sheet when invoiced.</p></div>
             <p class="note" style="margin-top:8px">Manager approval to pay commission is completed by accounts / management after submission.</p>`)}
-        </div>
+        </main>
 
-        <aside class="rail">
-          <div class="railCard">
-            <h3>Summary</h3>
-            <dl class="railList">
-              <div><dt>Net rental p.a.</dt><dd>$${fmt(d.netRental)}</dd></div>
-              <div><dt>Gross rental p.a.</dt><dd>$${fmt(d.grossRental)}</dd></div>
-              <div><dt>Total area</dt><dd>${d.totalArea ? fmt(d.totalArea)+" m²" : "—"}</dd></div>
-              <div><dt>To invoice</dt><dd>$${fmt(d.totalInvoice)}</dd></div>
-              ${f.depositToTrust ? `<div><dt>Deposit</dt><dd>$${fmt(d.depositAmount)}</dd></div>` : ""}
-              <div><dt>Salesperson split</dt><dd class="${!d.internalOk?"bad":""}">${d.internalPaid?"$"+fmt(d.internalPaid):"—"}</dd></div>
-            </dl>
-            <div class="depositWarn ${d.depositShort?"":"hidden"}" id="depositWarn">Deposit is <b>$${fmt(d.depositGap)}</b> short of the $${fmt(d.totalInvoice)} to invoice</div>
-            <div class="railStatus ${missing.length?"":"ok"}">${missing.length?`${missing.length} item${missing.length===1?"":"s"} outstanding`:"Ready to send"}</div>
-            <button class="primary" id="sendBtn">Send to accounts</button>
-            <button class="ghostLight" id="printBtn">Print / Save as PDF</button>
-            <div class="saveState" id="saveState">${esc(saveState)}</div>
-          </div>
-        </aside>
-      </div>`;
+        <aside class="rail"><div class="railCard">
+          <h3>Deal summary</h3>
+          <dl>
+            <div><dt>Property</dt><dd>${f.property.address?esc(f.property.address):"—"}</dd></div>
+            <div><dt>Vendor</dt><dd>${esc(f.vendor.name||"—")}</dd></div>
+            <div><dt>Sale price</dt><dd>${d.salePrice?"$"+fmt(d.salePrice):"—"}</dd></div>
+            <div><dt>${f.sale.rentalBasis==="Vacant"?"Yield":f.sale.rentalBasis+" yield"}</dt><dd>${d.yieldPct?d.yieldPct.toFixed(2)+"%":"—"}</dd></div>
+            <div class="hl"><dt>Total to invoice</dt><dd>$${fmt(d.totalInvoice)}</dd></div>
+            <div><dt>Salesperson split</dt><dd class="${d.internalPctTotal&&!d.internalOk?"bad":""}">${d.internalPctTotal.toFixed(0)}%</dd></div>
+          </dl>
+          <div class="readiness">${missing.length===0?'<span class="ok">✓ Ready to send</span>':`${missing.length} item${missing.length===1?"":"s"} outstanding`}</div>
+          <button class="primary" id="sendBtn">Send to accounts</button>
+          <button class="ghostLight" id="printBtn">Print / Save as PDF</button>
+          <div class="saveState" id="saveState">${saveState}</div>
+          <p class="tiny">Sends the completed deal sheet to accounts for Deal No. assignment, invoicing and commission processing.</p>
+        </div></aside>
+      </div>
+
+      <div class="overlay hidden" id="confirmModal"><div class="modal">
+        <h3>Confirm and send to accounts</h3>
+        <dl>
+          <div><dt>Property</dt><dd>${esc(f.property.address||"—")}</dd></div>
+          <div><dt>Vendor</dt><dd>${esc(f.vendor.name)}</dd></div>
+          <div><dt>Sale price (excl GST)</dt><dd>$${fmt(d.salePrice)}</dd></div>
+          <div><dt>Total to invoice (excl GST)</dt><dd>$${fmt(d.totalInvoice)}</dd></div>
+          <div><dt>Prepared by</dt><dd>${esc(state.userName || "")}</dd></div>
+        </dl>
+        <p class="tiny">Once sent, changes must go through accounts. Check the figures above carefully.</p>
+        <div class="modalBtns"><button class="ghost" id="cancelSend">Back to editing</button>
+        <button class="primary" id="confirmSend">Confirm — send to accounts</button></div>
+      </div></div>`;
 
     wire();
   }
 
-  // ---------- events ----------
+  // ---------- event wiring (delegated where possible) ----------
   function wire() {
     $("app").querySelectorAll("[data-path]").forEach((el) => {
       const path = el.dataset.path;
       if (el.type === "checkbox") {
-        el.onchange = () => { set(path, el.checked); scheduleAutosave(); render(); };
-      } else if (el.tagName === "SELECT") {
-        el.onchange = () => { set(path, el.value); scheduleAutosave(); render(); };
-      } else if (el.hasAttribute("data-recalc")) {
-        el.oninput = () => {
-          if (el.hasAttribute("data-money")) formatMoneyLive(el);
-          set(path, el.value); scheduleAutosave(); refreshDerived();
+        el.onchange = () => set(path, el.checked);
+      } else if (el.tagName === "SELECT" || el.type === "date") {
+        // no typing caret to preserve — safe to re-render
+        el.onchange = () => {
+          if (path === "sale.rentalBasis" && el.value === "Vacant") {
+            // Don't leave a stale rental figure sitting in the data once
+            // the fields showing it are hidden.
+            state.f.sale.rentalIncome = "";
+            state.f.sale.yieldManual = "";
+          }
+          set(path, el.value);
         };
-        // Money fields (right-aligned) reformat with thousands separators
-        // when the user leaves the field — not while typing, to avoid
-        // cursor jumps. Net/gross override fields are handled separately.
-        if (el.classList.contains("r") && !["netRentalCell","grossRentalCell"].includes(el.id)) {
-          el.onblur = () => {
-            const v = num(el.value);
-            if (v) { el.value = fmt(v); }
-          };
-        }
       } else {
+        // text / textarea: update state + summary only, NEVER re-render
+        // the form while typing (that was reversing text as the caret
+        // jumped back to the start on each keystroke)
         el.oninput = () => {
           if (el.hasAttribute("data-money")) formatMoneyLive(el);
-          set(path, el.value); scheduleAutosave();
+          setNoRender(path, el.value);
         };
+        // numeric fields that drive table amounts recalc on blur
+        if (el.hasAttribute("data-recalc")) el.onchange = () => set(path, el.value);
       }
     });
 
+    const feeAdmin = $("feeAdmin");
+    if (feeAdmin) feeAdmin.onchange = () => { state.f.comm.adminFee = feeAdmin.checked; scheduleAutosave(); render(); };
+
+    const flatFeeToggle = $("flatFeeToggle");
+    if (flatFeeToggle) flatFeeToggle.onchange = () => { state.f.comm.flatFee = flatFeeToggle.checked; scheduleAutosave(); render(); };
+
+    // Broker multi-select
     $("app").querySelectorAll(".brokerBox").forEach((box) => {
       box.onchange = () => {
         const code = box.value;
@@ -542,126 +500,66 @@
           if (!list.includes(code)) list.push(code);
         } else {
           state.f.ownership.salespeople = list.filter((c) => c !== code);
-          // Clear any split row assigned to a broker no longer on the deal.
+          // clear any split row assigned to a broker no longer on the deal
           const name = (BROKERS.find((b) => b.code === code) || {}).name;
-          state.f.splits.forEach((s) => { if (s.person === name) s.person = ""; });
+          state.f.splits.forEach((s) => { if (s.person === name) { s.person = ""; } });
         }
         scheduleAutosave();
         render();
       };
     });
 
-    const feeAdmin = $("feeAdmin");
-    if (feeAdmin) feeAdmin.onchange = () => { state.f.comm.adminFee = feeAdmin.checked; scheduleAutosave(); render(); };
+    setupUploads();
 
     $("sendBtn").onclick = onSend;
-    const pb = $("printBtn");
-    if (pb) pb.onclick = doPrint;
-
-    wireUploads();
+    const pb2 = $("printBtn");
+    if (pb2) pb2.onclick = doPrint;
+    const cm = $("confirmModal");
+    $("cancelSend").onclick = () => cm.classList.add("hidden");
+    $("confirmSend").onclick = doSubmit;
+    cm.onclick = (e) => { if (e.target === cm) cm.classList.add("hidden"); };
   }
 
-  // Re-render just the calculated figures, so typing isn't interrupted.
-  // This must update BOTH the summary rail and the totals sitting inside
-  // the rental / commission tables — those are where the user is looking.
-  function refreshDerived() {
+  // Update value without touching the form DOM, so the caret stays put.
+  // Only the summary rail's derived numbers refresh.
+  function setNoRender(path, val) {
+    const keys = path.split("."); let o = state.f;
+    for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]];
+    o[keys[keys.length - 1]] = val;
+    scheduleAutosave();
+    updateSummary();
+  }
+
+  // Recompute and patch just the summary rail + readiness, in place.
+  function updateSummary() {
     const d = derive();
-
-    // --- rental table: per-line totals (shown as the input's placeholder
-    //     when the user hasn't typed an explicit total) ---
-    RENTAL_LINES.forEach((l) => {
-      const el = $("app").querySelector(`[data-path="rental.${l.key}.total"]`);
-      if (el && document.activeElement !== el) {
-        el.placeholder = d.lineTotals[l.key] ? fmt(d.lineTotals[l.key]) : "0.00";
-      }
-    });
-    // Net/gross show the calculated figure (comma-formatted) unless the
-    // user has typed a manual override or is currently editing the field.
-    const netEl = $("netRentalCell"), grossEl = $("grossRentalCell");
-    if (netEl && document.activeElement !== netEl && state.f.rentalOverride.net === "")
-      netEl.value = fmt(d.calcNet);
-    if (grossEl && document.activeElement !== grossEl && state.f.rentalOverride.gross === "")
-      grossEl.value = fmt(d.calcGross);
-
-    const setText = (sel, val) => {
-      const el = $("app").querySelector(sel);
-      if (el) el.textContent = val;
-    };
-    setText("#adminFeeCell", fmt(d.adminFee));
-    setText("#totalInvoiceCell", fmt(d.totalInvoice));
-
-    // --- split tables: per-row amounts, disable % when fixed is set ---
-    state.f.splits.forEach((s, i) => {
-      setText(`#splitAmt${i}`, (num(s.fixed) || num(s.pct)) ? fmt(d.tpAmount(s, d.internalPool)) : "—");
-      const pctEl = $("app").querySelector(`[data-path="splits.${i}.pct"]`);
-      if (pctEl) pctEl.disabled = num(s.fixed) > 0;
-    });
-    state.f.thirdParty.forEach((s, i) => {
-      setText(`#tpAmt${i}`, (num(s.fixed) || num(s.pct)) ? fmt(d.tpAmount(s, d.commissionBase)) : "—");
-      const pctEl = $("app").querySelector(`[data-path="thirdParty.${i}.pct"]`);
-      if (pctEl) pctEl.disabled = num(s.fixed) > 0;
-    });
-    setText("#internalPoolLbl", fmt(d.internalPool));
-    const poolNote = $("app").querySelector("#poolNote");
-    if (poolNote) {
-      poolNote.innerHTML = d.thirdPartyTotal
-        ? `Third party share: <b>$${fmt(d.thirdPartyTotal)}</b> of $${fmt(d.commissionBase)} commission`
-        : "";
-      poolNote.style.display = d.thirdPartyTotal ? "" : "none";
-    }
-    const ss = $("app").querySelector("#splitStatus");
-    if (ss) { ss.textContent = splitStatusText(d); ss.className = "splitStatus " + (d.internalOk ? "ok" : "bad"); }
-
-    // #12 deposit shortfall warning
-    const dw = $("app").querySelector("#depositWarn");
-    if (dw) {
-      dw.classList.toggle("hidden", !d.depositShort);
-      if (d.depositShort) dw.innerHTML = `Deposit is <b>$${fmt(d.depositGap)}</b> short of the $${fmt(d.totalInvoice)} to invoice`;
-    }
-
-    // --- summary rail ---
-    const dds = $("app").querySelectorAll(".railList dd");
-    if (dds[0]) dds[0].textContent = "$" + fmt(d.netRental);
-    if (dds[1]) dds[1].textContent = "$" + fmt(d.grossRental);
-    if (dds[2]) dds[2].textContent = d.totalArea ? fmt(d.totalArea) + " m²" : "—";
-    if (dds[3]) dds[3].textContent = "$" + fmt(d.totalInvoice);
-    // Deposit + split rows shift depending on whether the deposit row shows.
-    const splitDd = $("app").querySelector(".railList div:last-child dd");
-    if (splitDd) { splitDd.textContent = d.internalPaid ? "$" + fmt(d.internalPaid) : "—"; splitDd.className = !d.internalOk ? "bad" : ""; }
-    if (state.f.depositToTrust && dds.length >= 6) dds[4].textContent = "$" + fmt(d.depositAmount);
-
     const missing = validate(d);
-    const st = $("app").querySelector(".railStatus");
-    if (st) {
-      st.textContent = missing.length ? `${missing.length} item${missing.length === 1 ? "" : "s"} outstanding` : "Ready to send";
-      st.className = "railStatus" + (missing.length ? "" : " ok");
-    }
+    const f = state.f;
+    const rail = $("app").querySelector(".railCard");
+    if (!rail) return;
+    const dds = rail.querySelectorAll("dl dd");
+    // order matches the summary dl below: property, vendor, sale price, yield, total, split
+    if (dds[0]) dds[0].textContent = f.property.address || "—";
+    if (dds[1]) dds[1].textContent = f.vendor.name || "—";
+    if (dds[2]) dds[2].textContent = d.salePrice ? "$" + fmt(d.salePrice) : "—";
+    if (dds[3]) dds[3].textContent = d.yieldPct ? d.yieldPct.toFixed(2) + "%" : "—";
+    if (dds[4]) dds[4].textContent = "$" + fmt(d.totalInvoice);
+    if (dds[5]) { dds[5].textContent = d.internalPctTotal.toFixed(0) + "%"; dds[5].className = d.internalPctTotal && !d.internalOk ? "bad" : ""; }
+    const readiness = rail.querySelector(".readiness");
+    if (readiness) readiness.innerHTML = missing.length === 0
+      ? '<span class="ok">✓ Ready to send</span>'
+      : `${missing.length} item${missing.length===1?"":"s"} outstanding`;
   }
 
-  function wireUploads() {
-    // Shared by both the file-input's onchange AND drag-and-drop, so
-    // there's exactly one upload path to keep correct — not two that
-    // could quietly drift apart.
-    async function uploadToSlot(slot, file) {
-      if (!file) return;
-      if (!state.currentId) {
-        try { const r = await api.saveDraft(state.f, null, "lease"); state.currentId = r.id; }
-        catch (e) { alert("Couldn't start a draft to attach to: " + e.message); return; }
-      }
-      const prog = $("app").querySelector(`.upProgress[data-slot="${slot}"]`);
-      if (prog) prog.classList.remove("hidden");
-      try {
-        const r = await api.uploadAttachment(state.currentId, slot, file);
-        state.f.attachments[slot] = { name: r.file_name, path: r.storage_path, size: r.size_bytes };
-        scheduleAutosave(); render();
-      } catch (e) {
-        alert("Upload failed: " + e.message);
-        if (prog) prog.classList.add("hidden");
-      }
-    }
-
-    $("app").querySelectorAll(".upInput").forEach((input) => {
-      input.onchange = () => uploadToSlot(input.dataset.slot, input.files[0]);
+  // ---------- file uploads ----------
+  function setupUploads() {
+    $("app").querySelectorAll(".upInput").forEach((inp) => {
+      inp.onchange = async () => {
+        const file = inp.files && inp.files[0];
+        if (!file) return;
+        const slot = inp.dataset.slot;
+        await uploadFile(slot, file);
+      };
     });
     // Drag-and-drop onto an empty checklist slot — only slots still
     // showing "Attach file" have anywhere to receive a drop; an
@@ -674,7 +572,8 @@
       zone.ondrop = (e) => {
         e.preventDefault();
         zone.classList.remove("dragover");
-        uploadToSlot(slot, e.dataTransfer.files[0]);
+        const file = e.dataTransfer.files && e.dataTransfer.files[0];
+        if (file) uploadFile(slot, file);
       };
     });
     $("app").querySelectorAll(".upRemove").forEach((btn) => {
@@ -682,7 +581,8 @@
         const slot = btn.dataset.slot;
         try { await api.removeAttachment(state.currentId, slot); } catch (e) { /* ignore */ }
         delete state.f.attachments[slot];
-        scheduleAutosave(); render();
+        scheduleAutosave();
+        render();
       };
     });
 
@@ -714,7 +614,7 @@
       const description = descEl.value.trim();
       if (!description || !pendingExtraFile) return;
       if (!state.currentId) {
-        try { const r = await api.saveDraft(state.f, null, "lease"); state.currentId = r.id; }
+        try { const r = await api.saveDraft(state.f, null); state.currentId = r.id; }
         catch (e) { alert("Couldn't start a draft to attach to: " + e.message); return; }
       }
       uploadBtn.disabled = true;
@@ -723,7 +623,8 @@
         const r = await api.uploadExtraAttachment(state.currentId, description, pendingExtraFile);
         state.f.extraAttachments = state.f.extraAttachments || [];
         state.f.extraAttachments.push({ slot: r.slot, description, name: r.name, size: r.size });
-        scheduleAutosave(); render();
+        scheduleAutosave();
+        render();
       } catch (e) {
         if (statusEl) statusEl.textContent = "Upload failed";
         uploadBtn.disabled = false;
@@ -738,7 +639,8 @@
         try {
           await api.removeAttachment(state.currentId, slot);
           state.f.extraAttachments = (state.f.extraAttachments || []).filter((a) => a.slot !== slot);
-          scheduleAutosave(); render();
+          scheduleAutosave();
+          render();
         } catch (e) {
           alert("Could not remove: " + e.message);
           btn.disabled = false; btn.textContent = "Remove";
@@ -747,32 +649,73 @@
     });
   }
 
+  async function uploadFile(slot, file) {
+    // ensure the deal has an id to attach to
+    if (!state.currentId) {
+      try { const r = await api.saveDraft(state.f, null); state.currentId = r.id; }
+      catch (e) { alert("Couldn't start a draft to attach to: " + e.message); return; }
+    }
+    const prog = $("app").querySelector(`.upProgress[data-slot="${slot}"]`);
+    if (prog) prog.classList.remove("hidden");
+    try {
+      const meta = await api.uploadAttachment(state.currentId, slot, file);
+      state.f.attachments[slot] = { name: meta.name, path: meta.path, size: meta.size };
+      scheduleAutosave();
+      render();
+    } catch (e) {
+      if (prog) prog.classList.add("hidden");
+      alert("Upload failed: " + e.message);
+    }
+  }
+
+  function refreshDerivedOnly() {
+    // lightweight: re-render fully but preserve focus
+    const active = document.activeElement;
+    const path = active?.dataset?.path;
+    const selStart = active?.selectionStart, selEnd = active?.selectionEnd;
+    render();
+    if (path) {
+      const again = $("app").querySelector(`[data-path="${CSS.escape(path)}"]`);
+      if (again) { again.focus(); try { again.setSelectionRange(selStart, selEnd); } catch {} }
+    }
+  }
+
   // ---------- print ----------
+  // Opens the server-rendered printable page, which calls window.print()
+  // on load — the browser's own dialog produces the PDF.
   async function doPrint() {
     if (!state.currentId) {
-      try { const r = await api.saveDraft(state.f, null, "lease"); state.currentId = r.id; }
+      try { const r = await api.saveDraft(state.f, null); state.currentId = r.id; }
       catch (e) { alert("Save the deal sheet before printing: " + e.message); return; }
     } else {
-      try { await api.saveDraft(state.f, state.currentId, "lease"); } catch (e) { /* print anyway */ }
+      // flush any pending edits so the print reflects what's on screen
+      try { await api.saveDraft(state.f, state.currentId); } catch (e) { /* print anyway */ }
     }
     api.openPrint(state.currentId);
   }
 
   // ---------- submit ----------
-  async function onSend() {
-    state.triedSubmit = true;
+  function onSend() {
     const d = derive();
     const missing = validate(d);
-    if (missing.length) { render(); window.scrollTo({top:0,behavior:"smooth"}); return; }
-    if (!confirm("Send this leasing deal sheet to accounts?")) return;
+    state.triedSubmit = true;
+    if (missing.length) { window.scrollTo({ top: 0, behavior: "smooth" }); render(); return; }
+    $("confirmModal").classList.remove("hidden");
+  }
+
+  async function doSubmit() {
+    $("confirmSend").disabled = true;
     try {
-      clearTimeout(state.saveTimer);
-      const r = await api.saveDraft(state.f, state.currentId, "lease");
-      state.currentId = r.id;
+      await api.saveDraft(state.f, state.currentId).then((r) => (state.currentId = r.id));
       await api.submit(state.currentId);
       showDone();
     } catch (e) {
-      alert("Could not send: " + e.message);
+      $("confirmModal").classList.add("hidden");
+      state.triedSubmit = true;
+      if (e.missing) { render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+      else alert("Could not send: " + e.message);
+    } finally {
+      const b = $("confirmSend"); if (b) b.disabled = false;
     }
   }
 
@@ -780,14 +723,14 @@
     const d = derive(), f = state.f;
     $("app").innerHTML = `<div class="done">
       <div class="doneMark">✓</div>
-      <h1>Leasing deal sheet sent to accounts</h1>
-      <p><strong>${esc(f.property.address||"—")}</strong> — gross rental $${fmt(d.grossRental)} p.a., total to invoice $${fmt(d.totalInvoice)} excl GST.</p>
+      <h1>Deal sheet sent to accounts</h1>
+      <p><strong>${esc(f.property.address||"—")}</strong> — sale price $${fmt(d.salePrice)}, total to invoice $${fmt(d.totalInvoice)} excl GST.</p>
       <p class="dim">Accounts will invoice the client, assign the Deal No., and process commission. You'll be copied on the confirmation.</p>
       <div class="doneBtns">
         <button class="primary" id="adminBtn">Return to deal sheets</button>
         <button class="ghost" id="againBtn">Start a new deal sheet</button>
       </div></div>`;
-    $("againBtn").onclick = () => { location.href = "admin.html"; };
+    $("againBtn").onclick = () => { location.href = "deal-sheet.html"; };
     $("adminBtn").onclick = () => { location.href = "admin.html"; };
   }
 
@@ -796,7 +739,7 @@
     if (cfg.DEMO_MODE) $("demoBadge").classList.remove("hidden");
     try {
       const account = await window.DealSheetAuth.init();
-      if (!account) return;
+      if (!account) return; // redirecting to sign in
     } catch (e) {
       $("gate").innerHTML = `<div class="inner">Sign-in failed: ${esc(e.message)}</div>`;
       return;
@@ -804,6 +747,8 @@
     state.userName = window.DealSheetAuth.account?.name
       || window.DealSheetAuth.account?.username || "";
 
+    // Confirm the signed-in user is provisioned, and load the broker
+    // reference list, before the first render.
     if (!cfg.DEMO_MODE) {
       try {
         await api.listMine();
@@ -813,26 +758,28 @@
           $("gate").innerHTML = `<div class="inner gateMsg">
             <h2>Access not set up yet</h2>
             <p>${esc(e.message)}</p>
-            <p class="dim">Send the Object ID above to your administrator.</p></div>`;
+            <p class="dim">Send the Object ID above to your administrator — they'll add you to the Deal Sheet app.</p></div>`;
           return;
         }
+        // other errors: let the form load; the action itself will report
       }
     }
-
+    // Resume an existing draft / returned deal if ?id= is present
     const urlId = new URLSearchParams(location.search).get("id");
     if (urlId && !cfg.DEMO_MODE) {
       try {
         const deal = await api.get(urlId);
-        if (!["draft","rejected"].includes(deal.status)) {
+        if (!["draft", "rejected"].includes(deal.status)) {
           $("gate").innerHTML = `<div class="inner gateMsg"><h2>This deal sheet can't be edited</h2>
-            <p>It's already with accounts (status: ${esc(deal.status)}).</p>
+            <p>It's already with accounts (status: ${esc(deal.status)}). Contact accounts if it needs changing.</p>
             <p class="dim"><a href="admin.html">Back to my deal sheets</a></p></div>`;
           return;
         }
         state.currentId = deal.id;
         state.dealStatus = deal.status;
         state.f = Object.assign(state.f, deal.form || {});
-        state.returnNote = (deal.events || []).filter((e) => (e.note||"").startsWith("Returned to broker:")).pop()?.note || "";
+        state.resumed = deal.status === "rejected";
+        state.returnNote = (deal.events || []).filter((e) => (e.note || "").startsWith("Returned to broker:")).pop()?.note || "";
       } catch (e) {
         $("gate").innerHTML = `<div class="inner gateMsg"><h2>Couldn't open that deal sheet</h2>
           <p>${esc(e.message)}</p><p class="dim"><a href="admin.html">Back to my deal sheets</a></p></div>`;
@@ -844,7 +791,6 @@
       BROKERS = (await api.listBrokers()).map((b) => ({ code: b.code, name: b.first_name }));
       state.userName = "Demo Admin";
     }
-
     $("gate").classList.add("hidden");
     $("app").classList.remove("hidden");
     render();
