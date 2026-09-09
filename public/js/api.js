@@ -135,6 +135,45 @@
     // returns { url } — a short-lived signed download link
     attachmentUrl: (id, slot, opts = {}) =>
       call(`/${id}/attachments?slot=${encodeURIComponent(slot)}${opts.view ? "&mode=view" : ""}`),
+
+    // ---- letters ----
+    // Downloads a merged, editable .docx letter (Early Release — Vendor/
+    // Purchaser, or the Disbursement letter — see api/_lib/letters.js).
+    // Same new-tab-then-fetch trick as openPrint, since the auth token
+    // can't ride in a header for a plain window.open/navigation.
+    async openLetter(id, type, label) {
+      const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+      const token = await window.DealSheetAuth.getToken();
+      const w = window.open("", "_blank");
+      if (!w) { alert("Please allow pop-ups to open the letter."); return; }
+      w.document.write(`<p style="font-family:Segoe UI,Arial,sans-serif;padding:20px">Preparing ${esc(label || "letter")}…</p>`);
+      let res;
+      try {
+        res = await fetch(`${cfg.apiBase}/api/deal-sheets/${id}/letter?type=${encodeURIComponent(type)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch (e) {
+        w.document.body.innerHTML = `<p style="font-family:Segoe UI,Arial,sans-serif;padding:20px">Could not reach the server: ${esc(e.message)}</p>`;
+        return;
+      }
+      if (!res.ok) {
+        let msg = "Could not generate the letter.";
+        try { const data = await res.json(); if (data?.error) msg = data.error; } catch { /* empty */ }
+        w.document.body.innerHTML = `<p style="font-family:Segoe UI,Arial,sans-serif;padding:20px">${esc(msg)}</p>`;
+        return;
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get("Content-Disposition") || "";
+      const match = /filename="?([^";]+)"?/i.exec(cd);
+      const filename = match ? match[1] : "letter.docx";
+      const url = URL.createObjectURL(blob);
+      w.document.open();
+      w.document.write(`<p style="font-family:Segoe UI,Arial,sans-serif;padding:20px">Your letter is ready — <a href="${url}" download="${esc(filename)}" id="dl">click here to download</a> if it doesn't start automatically.</p>`);
+      w.document.close();
+      const a = w.document.getElementById("dl");
+      if (a) a.click();
+    },
   };
 
   // ───────────────────────── demo backend ────────────────────
@@ -321,6 +360,7 @@
       return delay({ ok: true });
     },
     openPrint: () => alert("Print preview isn't available in demo mode."),
+    openLetter: () => alert("Letters aren't available in demo mode."),
   };
 
   window.DealSheetApi = cfg.DEMO_MODE ? demo : live;

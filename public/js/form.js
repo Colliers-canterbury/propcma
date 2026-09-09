@@ -58,11 +58,11 @@
     f: {
       ownership: { salespeople: [], division: "Industrial", office: "Christchurch" },
       property: { address:"", buildingName:"", propertyType:"", level:"", city:"Christchurch" },
-      vendor: { name:"", phone:"", contactName:"", email:"", postalAddress:"", postcode:"", city:"", country:"NZ", fax:"", solicitorName:"", solicitorFirm:"", solicitorPhone:"", vendorGroup:"" },
+      vendor: { name:"", phone:"", contactName:"", email:"", postalAddress:"", postcode:"", city:"", country:"NZ", fax:"", solicitorName:"", solicitorFirm:"", solicitorPhone:"", solicitorEmail:"", vendorGroup:"" },
       billingDifferent: false,
       billing: { name:"", phone:"", contactName:"", email:"", postalAddress:"", postcode:"", city:"", country:"NZ", fax:"" },
       invoicePurchaser: false,
-      purchaser: { name:"", phone:"", contactName:"", email:"", postalAddress:"", postcode:"", city:"", country:"NZ", fax:"", solicitorName:"", solicitorFirm:"", solicitorPhone:"" },
+      purchaser: { name:"", phone:"", contactName:"", email:"", postalAddress:"", postcode:"", city:"", country:"NZ", fax:"", solicitorName:"", solicitorFirm:"", solicitorPhone:"", solicitorEmail:"" },
       sale: { dateOfAgreement:"", unconditionalDate:"", salePrice:"", rentalBasis:"Net", rentalIncome:"", yieldManual:"", titleType:"Freehold", landArea:"", wale:"", tenancies:"", occupiedArea:"", auction:false, tenancySchedule:false },
       depositToTrust: false,
       deposit: { amount:"", dateReceived:"", receiptNo:"", earlyRelease:false, vendorAuthSent:false, vendorAuthReceived:false, purchaserAuthSent:false, purchaserAuthReceived:false },
@@ -218,7 +218,7 @@
     ${txt(base+".contactName","Contact name",{span:2})}${txt(base+".email","Email",{type:"email"})}
     ${txt(base+".postalAddress","Postal address",{span:2})}${txt(base+".postcode","Postcode")}
     ${txt(base+".city","City")}${txt(base+".country","Country")}
-    ${solicitor ? txt(base+".solicitorName","Solicitor")+txt(base+".solicitorFirm","Firm")+txt(base+".solicitorPhone","Solicitor phone") : ""}
+    ${solicitor ? txt(base+".solicitorName","Solicitor")+txt(base+".solicitorFirm","Firm")+txt(base+".solicitorPhone","Solicitor phone")+txt(base+".solicitorEmail","Solicitor email",{type:"email"}) : ""}
   </div>`;
   const section = (n, title, note, inner) => `<section class="card"><header class="cardHead">
     <span class="secNo">${n}</span><div><h2>${title}</h2>${note?`<p class="note">${note}</p>`:""}</div></header>${inner}</section>`;
