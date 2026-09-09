@@ -5,8 +5,15 @@
 // merging deal-sheet data into the letterhead templates in
 // letter-templates.js. Finance opens the result in Word and edits it —
 // filling in anything that isn't sourced from the deal sheet (the file
-// REF number, the lawyer's postal address, the trust account number)
-// — before sending, exactly as they do today typing these by hand.
+// REF number and the lawyer's postal address) — before sending, exactly
+// as they do today typing these by hand.
+//
+// The Disbursement letter's "paid to" firm and Trust A/C No. merge from
+// the trust deposit fields accounts records on accounts.html
+// (form.deposit.balancePaidTo / .trustAccountNo) once Nishu has filled
+// them in there — see buildContext() below. Until then they fall back
+// to the vendor/landlord solicitor's own firm and a blank, same as
+// before that feature existed.
 //
 // The two Early Release letters use Vendor/Purchaser wording and only
 // make sense for sale deals. The Disbursement letter supports both
@@ -86,7 +93,14 @@ function buildContext(deal, type) {
     const gstAmount = commissionAmount * GST_RATE;
     const commissionInclGst = commissionAmount + gstAmount;
     const depositAmount = num(deposit.amount);
-    const balanceDue = depositAmount - commissionInclGst;
+    const balanceDueComputed = depositAmount - commissionInclGst;
+    // Once accounts has recorded her own Balance Due $ against the trust
+    // deposit (accounts.html, after the bank transfer's actually gone
+    // through), that recorded figure is the source of truth for the
+    // letter — it can differ slightly from the computed figure (bank
+    // fees, rounding, a partial deposit). Falls back to the computed
+    // figure until she's filled it in.
+    const balanceDue = deposit.balanceDue ? num(deposit.balanceDue) : balanceDueComputed;
 
     return {
       letterDate: today,
@@ -105,6 +119,12 @@ function buildContext(deal, type) {
       gstAmount: money(gstAmount),
       commissionInclGst: money(commissionInclGst),
       balanceDue: money(balanceDue),
+      // Deliberately blank until accounts fills them in on accounts.html
+      // (form.deposit.balancePaidTo / .trustAccountNo) — falls back to
+      // the vendor/landlord solicitor's own firm for "paid to" so the
+      // letter still reads sensibly before that happens.
+      balancePaidTo: deposit.balancePaidTo || vendorParty.solicitorFirm || "",
+      trustAccountNo: deposit.trustAccountNo || "",
     };
   }
 
