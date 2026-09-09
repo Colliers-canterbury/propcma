@@ -453,9 +453,9 @@
               <span class="receiptEdit">
                 <input id="trustBalancePaidTo" value="${esc(d.form?.deposit?.balancePaidTo||"")}" placeholder="Firm name" />
               </span></dd></div>
-            <div><dt>Trust A/C No:</dt><dd>
+            <div><dt>Bank A/C No:</dt><dd>
               <span class="receiptEdit">
-                <input id="trustAccountNo" value="${esc(d.form?.deposit?.trustAccountNo||"")}" placeholder="Trust account number" />
+                <input id="trustAccountNo" value="${esc(d.form?.deposit?.trustAccountNo||"")}" placeholder="Bank account number" />
               </span></dd></div>
             <div><dt>Balance Due $:</dt><dd>
               <span class="receiptEdit">
@@ -476,7 +476,7 @@
               <textarea id="trustNotes" rows="2" placeholder="e.g. when it's due, or where it should be paid to…"></textarea></label>
             <div class="grid" style="margin-top:8px">
               <label class="fld"><span class="lbl">Balance Due - Paid to:</span><input id="trustBalancePaidTo" placeholder="Firm name" /></label>
-              <label class="fld"><span class="lbl">Trust A/C No:</span><input id="trustAccountNo" placeholder="Trust account number" /></label>
+              <label class="fld"><span class="lbl">Bank A/C No:</span><input id="trustAccountNo" placeholder="Bank account number" /></label>
               <label class="fld"><span class="lbl">Balance Due $:</span><input id="trustBalanceDue" placeholder="0.00" /></label>
             </div>
             <button id="trustSave" class="miniBtn" style="margin-top:8px">Save</button>
