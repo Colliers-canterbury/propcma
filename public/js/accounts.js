@@ -36,6 +36,33 @@
     rejected:         { label: "Returned",           cls: "rej" },
   };
 
+  // Merged-letter downloads (see api/deal-sheets/[id]/letter.js). The two
+  // Early Release letters use Vendor/Purchaser wording and only apply to
+  // sale deals; the Disbursement letter works for both (it swaps in
+  // Sale/Lease and Purchaser/Tenant wording server-side).
+  const LETTER_ITEMS = [
+    { type: "vendor",       label: "Early Release (Vendor)",    saleOnly: true },
+    { type: "purchaser",    label: "Early Release (Purchaser)", saleOnly: true },
+    { type: "disbursement", label: "Disbursement letter",       saleOnly: false },
+  ];
+  function lettersMenuHtml(d) {
+    const items = LETTER_ITEMS.filter((li) => !li.saleOnly || d.deal_type !== "lease");
+    return `<details class="lettersMenu" style="display:inline-block;position:relative;margin-top:8px">
+      <summary class="linkBtn" style="cursor:pointer">Letters</summary>
+      <div style="position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #DCE2EC;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.14);padding:4px;min-width:210px;z-index:20;text-align:left">
+        ${items.map((li) => `<button type="button" class="letterItem" data-letter="${li.type}" data-label="${esc(li.label)}"
+          style="display:block;width:100%;text-align:left;background:none;border:0;padding:8px 10px;font:inherit;font-size:13px;cursor:pointer;border-radius:4px;color:inherit">${esc(li.label)}</button>`).join("")}
+      </div>
+    </details>`;
+  }
+  // Close any open Letters menu on an outside click — added once, not
+  // per-render, since renderDetail() rebuilds this markup on every change.
+  document.addEventListener("click", (e) => {
+    document.querySelectorAll("details.lettersMenu[open]").forEach((d) => {
+      if (!d.contains(e.target)) d.open = false;
+    });
+  });
+
   const state = { tab: "queue", queue: [], completed: [], drafts: [], selectedId: null, deal: null,
     completedViewId: null,
     filter: "all", note: "", completeComment: "", pendingNums: {},
@@ -357,7 +384,10 @@
           <p class="dim">${isDraft ? "Draft — not yet submitted" : `Submitted ${d.submitted_at?new Date(d.submitted_at).toLocaleString("en-NZ"):"—"}`} · Broker ${esc(d.salesperson||"")} · ${esc(d.division||"")}</p></div>
         <div style="text-align:right">
           <span class="pill big ${meta.cls}">${meta.label}</span>
-          <div><button class="linkBtn" id="printDeal" style="margin-top:8px">Print / Save as PDF</button></div>
+          <div style="display:flex;gap:10px;justify-content:flex-end;align-items:flex-start">
+            <button class="linkBtn" id="printDeal" style="margin-top:8px">Print / Save as PDF</button>
+            ${isDraft ? "" : lettersMenuHtml(d)}
+          </div>
         </div>
       </div>
       ${isDraft ? `<div class="draftBanner">View only — this draft is still being prepared by the office admin. It will appear in the queue once submitted.</div>` : ""}
@@ -558,6 +588,14 @@
 
     const prb = $("printDeal");
     if (prb) prb.onclick = () => api.openPrint(state.deal.id);
+
+    el.querySelectorAll(".letterItem").forEach((btn) => {
+      btn.onclick = () => {
+        const menu = btn.closest("details.lettersMenu");
+        if (menu) menu.open = false;
+        api.openLetter(state.deal.id, btn.dataset.letter, btn.dataset.label);
+      };
+    });
 
     const icb = $("invoiceClientBtn"); if (icb) icb.onclick = doInvoiceClient;
     const ab = $("assignDealNoBtn"); if (ab) { ab.disabled = !state.pendingNums.dealNo.trim(); ab.onclick = doAssignDealNumber; }
