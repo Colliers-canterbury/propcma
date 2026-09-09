@@ -301,19 +301,33 @@ async function setReceiptNo(req, res, deal) {
  * form (still showing the box unticked) would silently overwrite the
  * column back to false on the next save. Updating both keeps the
  * correction in place regardless of what happens afterward.
+ *
+ * Also captures the three fields the Disbursement letter otherwise
+ * leaves blank for finance to type in by hand: who the balance was
+ * paid to, the trust account number, and the balance due amount (see
+ * api/_lib/letters.js / letter-templates.js). Recorded here purely as
+ * a record for finance — nothing currently feeds them back into the
+ * letter merge.
  */
 async function setTrustDeposit(req, res, deal) {
   const user = await requireUser(req, ["accounts", "manager"]);
   if (deal.status === "draft")
     throw new HttpError(409, "Cannot record a trust deposit on a draft — the office admin is still preparing it");
 
-  const { amount, receiptNo, notes } = req.body || {};
+  const { amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue } = req.body || {};
   const amountValue = String(amount ?? "").trim();
   const receiptValue = String(receiptNo ?? "").trim();
   const notesValue = String(notes ?? "").trim();
+  const balancePaidToValue = String(balancePaidTo ?? "").trim();
+  const trustAccountNoValue = String(trustAccountNo ?? "").trim();
+  const balanceDueValue = String(balanceDue ?? "").trim();
 
   const form = { ...(deal.form || {}) };
-  form.deposit = { ...(form.deposit || {}), amount: amountValue, receiptNo: receiptValue, notes: notesValue };
+  form.deposit = {
+    ...(form.deposit || {}),
+    amount: amountValue, receiptNo: receiptValue, notes: notesValue,
+    balancePaidTo: balancePaidToValue, trustAccountNo: trustAccountNoValue, balanceDue: balanceDueValue,
+  };
   form.depositToTrust = true;
 
   const wasFlagged = !!deal.deposit_to_trust;
@@ -333,7 +347,10 @@ async function setTrustDeposit(req, res, deal) {
       : `Trust deposit added by accounts (not flagged by office admin): $${amountValue || "0"}, receipt ${receiptValue || "—"}`,
   });
 
-  return res.status(200).json({ ok: true, amount: amountValue, receiptNo: receiptValue, notes: notesValue });
+  return res.status(200).json({
+    ok: true, amount: amountValue, receiptNo: receiptValue, notes: notesValue,
+    balancePaidTo: balancePaidToValue, trustAccountNo: trustAccountNoValue, balanceDue: balanceDueValue,
+  });
 }
 
 /**
