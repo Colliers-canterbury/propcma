@@ -667,7 +667,19 @@ async function rankings(req, res) {
     .select("broker_code, fees_nzd, budget_nzd, synced_at")
     .eq("department_id", id).eq("financial_year", year)
     .order("fees_nzd", { ascending: false });
-  if (error) throw new HttpError(500, "Could not load the rankings");
+  if (error) {
+    // The cause was being discarded here, which is why this endpoint
+    // could only ever report a bare 500. Codes worth knowing:
+    //   PGRST204  a selected column is not on db_broker_rankings
+    //   42501     RLS is on and this connection is not the service role
+    //   42P01     the table is missing entirely
+    console.error("rankings query failed", {
+      dept: req.query.dept, department_id: id, year,
+      code: error.code, message: error.message,
+      details: error.details, hint: error.hint,
+    });
+    throw new HttpError(500, "Could not load the rankings");
+  }
 
   const { data: dept } = await supabase.from("db_departments")
     .select("rankings_url").eq("id", id).single();
