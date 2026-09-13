@@ -396,6 +396,22 @@ button.src:hover:not(:disabled){border-color:var(--navy);background:var(--navy-s
 button.src:disabled{opacity:.55;cursor:default}
 @media print{button.src{display:none}}
 
+/* ---- projector mode: widen the data columns on the right of the row
+   so the bigger projector font (--fs above) doesn't wrap or truncate
+   values mid-meeting. Uses !important on the th because table-layout:
+   fixed takes a column's width from its header cell, and these header
+   cells already carry an inline width style from renderBoard() in
+   deal-board.js — only !important is guaranteed to win over that. ---- */
+body.proj th.th-stage{width:230px!important}
+body.proj th.th-timing{width:190px!important}
+body.proj th.th-fee{width:145px!important}
+body.proj th.th-prob{width:85px!important}
+body.proj th.th-status{width:175px!important}
+body.proj th.th-broker{width:115px!important}
+body.proj th.th-inv{width:95px!important}
+body.proj th.th-aml{width:62px!important}
+body.proj th.th-act{width:165px!important}
+body.proj td.actcell{width:165px!important}
 
 /* ===================== print =====================
    The screen shows form controls; paper needs their values. Each
