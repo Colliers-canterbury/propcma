@@ -272,19 +272,19 @@ function renderBoard(target){
         <h2>${esc(st)}</h2><span class="pill">${rows.length}</span>
         <span class="tot">${money(stageTotal(st))}</span></header>
       ${collapsed[st]?'':`<table><thead><tr>
-        <th style="width:16px"></th><th style="width:172px">Stage</th>
+        <th style="width:16px"></th><th class="th-stage" style="width:172px">Stage</th>
         ${(S().options||{}).show_tenant?'<th style="width:22%">Tenant</th>':''}
         <th${(S().options||{}).show_tenant?' style="width:22%"':''}>Address</th>
         ${(S().options||{}).show_listing_type?'<th style="width:96px">Sale / Lease</th>':''}
-        <th style="width:${(S().options||{}).timing_label?'160px':'120px'}">${
+        <th class="th-timing" style="width:${(S().options||{}).timing_label?'160px':'120px'}">${
           esc((S().options||{}).timing_label || 'Timing')}</th>
-        <th style="width:92px" class="num">Fee</th>
-        ${(S().options||{}).show_probability?'<th style="width:56px" class="num">Prob</th>':''}
-        ${(S().options||{}).hide_status?'':'<th style="width:96px">Status</th>'}
-        <th style="width:76px">Broker</th>
-        ${inv?'<th style="width:64px" class="noprint">Invoiced</th>':''}
-        <th style="width:40px" class="noprint">AML</th>
-        <th style="width:92px" class="noprint"></th>
+        <th class="th-fee num" style="width:92px">Fee</th>
+        ${(S().options||{}).show_probability?'<th class="th-prob num" style="width:56px">Prob</th>':''}
+        ${(S().options||{}).hide_status?'':'<th class="th-status" style="width:112px">Status</th>'}
+        <th class="th-broker" style="width:76px">Broker</th>
+        ${inv?'<th class="th-inv noprint" style="width:64px">Invoiced</th>':''}
+        <th class="th-aml noprint" style="width:40px">AML</th>
+        <th class="th-act noprint" style="width:92px"></th>
       </tr></thead><tbody></tbody></table>
       <button class="addrow">+ Add to ${esc(st.toLowerCase())}</button>`}`;
     /* clicking a stage header marks where the meeting is up to */
@@ -1575,7 +1575,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-09-07a';
+const BOARD_VERSION='2026-09-13a';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
