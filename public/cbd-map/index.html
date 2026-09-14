@@ -1,0 +1,1010 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Christchurch CBD Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+  :root {
+    --navy: #0B568F;
+    --navy-deep: #083E67;
+    --gold: #FDB934;
+    --cyan: #1CA4DE;
+    --red: #E9212C;
+
+    --bg: #EAF0F4;
+    --surface: #FFFFFF;
+    --canvas: #F7F8F6;
+    --text: #16202B;
+    --text-muted: #5B6672;
+    --border: #D7DEE5;
+    --accent: var(--navy);
+    --accent-contrast: #FFFFFF;
+    --focus-ring: #1CA4DE;
+    --road: #9aa4b1;
+    --road-casing: #ffffff;
+    --label-halo: #ffffff;
+    --label-text: #0d2338;
+    --scrim: rgba(11, 20, 32, 0.45);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0A1420;
+      --surface: #111E2C;
+      --canvas: #0D1B29;
+      --text: #E7EEF5;
+      --text-muted: #93A2B3;
+      --border: #22313F;
+      --accent: var(--cyan);
+      --accent-contrast: #06202E;
+      --road: #48566a;
+      --road-casing: #0D1B29;
+      --label-halo: #0D1B29;
+      --label-text: #EAF3FA;
+      --scrim: rgba(0, 0, 0, 0.6);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0A1420;
+    --surface: #111E2C;
+    --canvas: #0D1B29;
+    --text: #E7EEF5;
+    --text-muted: #93A2B3;
+    --border: #22313F;
+    --accent: var(--cyan);
+    --accent-contrast: #06202E;
+    --road: #48566a;
+    --road-casing: #0D1B29;
+    --label-halo: #0D1B29;
+    --label-text: #EAF3FA;
+    --scrim: rgba(0, 0, 0, 0.6);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+  h1, h2, h3 { font-family: "Archivo", "Inter", sans-serif; text-wrap: balance; margin: 0; }
+  button { font-family: inherit; }
+  button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  /* ---------- top bar ---------- */
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex: 0 0 auto;
+    z-index: 20;
+  }
+  .topbar img.logo { height: 34px; width: auto; display: block; flex: 0 0 auto; }
+  .topbar .titles { min-width: 0; overflow: hidden; flex: 1 1 0%; }
+  .topbar h1 {
+    font-size: 17px; font-weight: 800; letter-spacing: 0.2px; line-height: 1.15; color: var(--navy-deep);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  :root:not([data-theme="light"]) .topbar h1 { color: var(--text); }
+  :root[data-theme="dark"] .topbar h1 { color: var(--text); }
+  .topbar p { margin: 1px 0 0; font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .topbar .spacer { flex: 0 0 0; }
+  .status-pill {
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    color: var(--accent);
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .status-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .status-pill.offline { color: var(--text-muted); background: color-mix(in srgb, var(--text-muted) 14%, transparent); }
+  .btn {
+    flex: 0 0 auto;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    padding: 7px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
+  .btn.primary:hover { filter: brightness(1.06); color: var(--accent-contrast); }
+  .btn.danger { color: var(--red); border-color: var(--red); background: transparent; }
+  .btn.danger:hover { background: color-mix(in srgb, var(--red) 10%, transparent); color: var(--red); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn:disabled:hover { border-color: var(--border); color: var(--text); }
+
+  /* ---------- map area ---------- */
+  .mapwrap { position: relative; flex: 1 1 auto; min-height: 0; background: var(--canvas); }
+  #mapsvg { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  #mapsvg.grabbing { cursor: grabbing; }
+  .building { stroke-width: 1; vector-effect: non-scaling-stroke; cursor: pointer; }
+  .building:hover { filter: brightness(0.94); }
+  :root:not([data-theme="light"]) .building:hover { filter: brightness(1.18); }
+  :root[data-theme="dark"] .building:hover { filter: brightness(1.18); }
+  .building.selected { stroke: var(--gold); stroke-width: 3; }
+  .park { fill: #A5C57D; stroke: #71943F; stroke-width: 0.6; vector-effect: non-scaling-stroke; }
+  :root:not([data-theme="light"]) .park { fill: #3f5c33; stroke: #547a44; }
+  :root[data-theme="dark"] .park { fill: #3f5c33; stroke: #547a44; }
+  .water { fill: #5FCBEC; stroke: #1CA4DE; stroke-width: 0.8; vector-effect: non-scaling-stroke; }
+  :root:not([data-theme="light"]) .water { fill: #124a63; stroke: #1CA4DE; }
+  :root[data-theme="dark"] .water { fill: #124a63; stroke: #1CA4DE; }
+  .water-line { fill: none; stroke: #1CA4DE; stroke-width: 3; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+  .road { fill: none; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+  .road-casing { stroke: var(--road-casing); }
+  .road-line { stroke: var(--road); }
+  .road-major-casing { stroke: var(--road-casing); }
+  .road-major-line { stroke: var(--navy); }
+  :root:not([data-theme="light"]) .road-major-line { stroke: var(--cyan); }
+  :root[data-theme="dark"] .road-major-line { stroke: var(--cyan); }
+  .roadlabel {
+    font-family: "Inter", sans-serif;
+    font-weight: 600;
+    fill: var(--label-text);
+    paint-order: stroke;
+    stroke: var(--label-halo);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+    text-anchor: middle;
+    pointer-events: none;
+  }
+  .bldglabel {
+    font-family: "Inter", sans-serif;
+    font-weight: 600;
+    fill: var(--label-text);
+    paint-order: stroke;
+    stroke: var(--label-halo);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+    text-anchor: middle;
+    dominant-baseline: middle;
+    pointer-events: none;
+  }
+  .bldglabel.custom { font-weight: 700; }
+  .bldglabel.custom tspan.pin { fill: var(--red); }
+
+  /* ---------- legend ---------- */
+  .legend {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 6px 20px var(--scrim);
+    max-width: 240px;
+    z-index: 10;
+    overflow: hidden;
+  }
+  .legend-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: var(--navy-deep);
+  }
+  :root:not([data-theme="light"]) .legend-head { color: var(--text); }
+  :root[data-theme="dark"] .legend-head { color: var(--text); }
+  .legend-head .chev { transition: transform 0.15s ease; color: var(--text-muted); }
+  .legend.collapsed .chev { transform: rotate(-90deg); }
+  .legend-body { padding: 0 12px 12px; display: grid; gap: 6px; }
+  .legend.collapsed .legend-body { display: none; }
+  .legend-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text); }
+  .swatch { width: 16px; height: 12px; border-radius: 2px; flex: 0 0 auto; border: 1px solid rgba(0,0,0,0.15); }
+
+  /* ---------- zoom controls ---------- */
+  .zoomctl {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    z-index: 10;
+  }
+  .zoomctl button {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 18px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 4px 12px var(--scrim);
+  }
+  .zoomctl button:hover { border-color: var(--accent); color: var(--accent); }
+
+  .hint {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 7px 14px;
+    font-size: 12px;
+    color: var(--text-muted);
+    box-shadow: 0 4px 14px var(--scrim);
+    z-index: 10;
+    white-space: nowrap;
+    transition: opacity 0.3s ease;
+  }
+  .hint strong { color: var(--text); font-weight: 600; }
+
+  /* ---------- editor panel ---------- */
+  .panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: 320px;
+    max-width: 86vw;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    box-shadow: -8px 0 24px var(--scrim);
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.22s ease;
+  }
+  .panel.open { transform: translateX(0); }
+  .panel-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 16px 16px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-head .lu-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+  .panel-head h2 { font-size: 18px; line-height: 1.25; }
+  .panel-close {
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 4px;
+    flex: 0 0 auto;
+  }
+  .panel-close:hover { color: var(--text); }
+  .panel-body { padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; flex: 1 1 auto; }
+  .field label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+  .field input[type="text"] {
+    width: 100%;
+    padding: 9px 11px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+  }
+  .field input[type="text"]:focus { border-color: var(--accent); }
+  .field .hintline { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+  .addr-line { font-size: 13px; color: var(--text-muted); }
+  .panel-actions { display: flex; gap: 8px; padding: 14px 16px; border-top: 1px solid var(--border); }
+  .panel-actions .btn { flex: 1 1 auto; }
+  .save-state { font-size: 12px; color: var(--text-muted); min-height: 16px; }
+  .save-state.ok { color: #2f8f4e; }
+  :root:not([data-theme="light"]) .save-state.ok { color: #6fd08c; }
+  :root[data-theme="dark"] .save-state.ok { color: #6fd08c; }
+
+  @media (max-width: 720px) {
+    .topbar p { display: none; }
+    .topbar h1 .longpart { display: none; }
+    .topbar h1 { font-size: 14.5px; letter-spacing: 0; }
+    .topbar .btn { padding: 7px 9px; font-size: 12px; }
+    .topbar { gap: 6px; padding: 8px 10px; }
+    .topbar img.logo { height: 26px; }
+    .status-pill { padding: 6px; }
+    .status-pill #statusText { display: none; }
+    .panel {
+      top: auto;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      width: auto;
+      max-width: none;
+      height: auto;
+      max-height: 70vh;
+      border-left: none;
+      border-top: 1px solid var(--border);
+      border-radius: 16px 16px 0 0;
+      transform: translateY(100%);
+    }
+    .panel.open { transform: translateY(0); }
+    .legend { max-width: 200px; }
+    .hint { max-width: 78vw; white-space: normal; text-align: center; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <img class="logo" src="colliers-logo.png" alt="Colliers International">
+  <div class="titles">
+    <h1>Christchurch CBD<span class="longpart"> &mdash; Building &amp; Street Map</span></h1>
+    <p>Click any building to add or edit its name</p>
+  </div>
+  <div class="spacer"></div>
+  <span class="status-pill" id="statusPill" title="Connecting&hellip;"><span class="dot"></span><span id="statusText">Connecting&hellip;</span></span>
+  <button class="btn" id="resetViewBtn" type="button">Reset view</button>
+</div>
+
+<div class="mapwrap" id="mapWrap">
+  <svg id="mapsvg" xmlns="http://www.w3.org/2000/svg"></svg>
+
+  <div class="hint" id="hint">Tip: <strong>scroll or pinch</strong> to zoom, <strong>drag</strong> to pan, <strong>click a building</strong> to label it</div>
+
+  <div class="legend" id="legend">
+    <div class="legend-head" id="legendToggle">
+      <span>Land use key</span>
+      <span class="chev">&#9662;</span>
+    </div>
+    <div class="legend-body" id="legendBody"></div>
+  </div>
+
+  <div class="zoomctl">
+    <button id="zoomInBtn" type="button" aria-label="Zoom in">+</button>
+    <button id="zoomOutBtn" type="button" aria-label="Zoom out">&minus;</button>
+  </div>
+</div>
+
+<aside class="panel" id="panel" aria-hidden="true">
+  <div class="panel-head">
+    <div>
+      <span class="lu-badge"><span class="swatch" id="panelSwatch"></span><span id="panelLu">Commercial</span></span>
+      <h2 id="panelTitle">Unnamed building</h2>
+      <div class="addr-line" id="panelAddr"></div>
+    </div>
+    <button class="panel-close" id="panelClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="panel-body">
+    <div class="field">
+      <label for="labelInput">Label shown on the map</label>
+      <input type="text" id="labelInput" maxlength="60" placeholder="e.g. Colliers Christchurch" autocomplete="off">
+      <div class="hintline" id="labelHint">Leave blank to remove a custom label.</div>
+    </div>
+  </div>
+  <div class="panel-actions">
+    <button class="btn danger" id="clearBtn" type="button" disabled>Clear</button>
+    <button class="btn primary" id="saveBtn" type="button">Save label</button>
+  </div>
+  <div class="save-state" id="saveState"></div>
+</aside>
+
+<script>
+(function () {
+  "use strict";
+
+  var LU_META = {
+    commercial:  { label: "Commercial",                 fill: "#FCD989", edge: "#C79A3E" },
+    retail:      { label: "Retailing activity",          fill: "#FFF428", edge: "#C7B800" },
+    apartments:  { label: "Apartments / residential",    fill: "#14B2C6", edge: "#0C7E8D" },
+    hotels:      { label: "Hotels / serviced apts",      fill: "#FFBB38", edge: "#C4860C" },
+    bars:        { label: "Bars",                        fill: "#FA832E", edge: "#B85A16" },
+    industrial:  { label: "Industrial",                  fill: "#B93794", edge: "#7F2367" },
+    clubs:       { label: "Clubs, sport, govt",          fill: "#7CA5D6", edge: "#4B70A3" },
+    development: { label: "Development / vacant",        fill: "#D5E4E7", edge: "#A9BDC2" },
+    parking:     { label: "Parking",                     fill: "#93DEFE", edge: "#4FA9CE" }
+  };
+  var LU_ORDER = ["commercial", "retail", "apartments", "hotels", "bars", "industrial", "clubs", "development", "parking"];
+
+  var svg = document.getElementById("mapsvg");
+  var mapWrap = document.getElementById("mapWrap");
+  var SVGNS = "http://www.w3.org/2000/svg";
+
+  var state = {
+    scale: 1, tx: 0, ty: 0,
+    fitScale: 1, minScale: 1, maxScale: 1,
+    worldW: 1000, worldH: 1000,
+    buildings: [], roads: [], water_polys: [], water_lines: [], parks: [],
+    byId: {},
+    overrides: {},          // id -> text (from db, or local-only fallback)
+    selectedId: null,
+    dbCol: null,
+    dragging: false, dragMoved: false, lastX: 0, lastY: 0,
+    pinch: null
+  };
+
+  var worldG, buildingsG, roadsG, parksG, waterG, labelsG;
+
+  function el(tag, attrs) {
+    var n = document.createElementNS(SVGNS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    return n;
+  }
+
+  function pathD(coords) {
+    var d = "M" + coords[0][0] + " " + coords[0][1];
+    for (var i = 1; i < coords.length; i++) d += "L" + coords[i][0] + " " + coords[i][1];
+    return d + "Z";
+  }
+  function lineD(coords) {
+    var d = "M" + coords[0][0] + " " + coords[0][1];
+    for (var i = 1; i < coords.length; i++) d += "L" + coords[i][0] + " " + coords[i][1];
+    return d;
+  }
+
+  function buildLegend() {
+    var body = document.getElementById("legendBody");
+    LU_ORDER.forEach(function (key) {
+      var m = LU_META[key];
+      var row = document.createElement("div");
+      row.className = "legend-row";
+      row.innerHTML = '<span class="swatch" style="background:' + m.fill + ';border-color:' + m.edge + '"></span><span>' + m.label + "</span>";
+      body.appendChild(row);
+    });
+  }
+
+  function displayName(b) {
+    var ov = state.overrides[b.id];
+    if (ov !== undefined) return ov; // "" means explicitly cleared -> unnamed
+    return b.n || "";
+  }
+
+  // ---------------- load data ----------------
+  Promise.all([
+    fetch("buildings.json").then(function (r) { return r.json(); }),
+    fetch("roads.json").then(function (r) { return r.json(); }),
+    fetch("features.json").then(function (r) { return r.json(); })
+  ]).then(function (results) {
+    var bdata = results[0], rdata = results[1], fdata = results[2];
+    state.worldW = bdata.meta.width;
+    state.worldH = bdata.meta.height;
+    state.buildings = bdata.buildings;
+    state.roads = rdata.roads;
+    state.water_polys = fdata.water_polys;
+    state.water_lines = fdata.water_lines;
+    state.parks = fdata.parks;
+    state.buildings.forEach(function (b) {
+      var xs = b.c.map(function (p) { return p[0]; });
+      var ys = b.c.map(function (p) { return p[1]; });
+      b.x0 = Math.min.apply(null, xs); b.x1 = Math.max.apply(null, xs);
+      b.y0 = Math.min.apply(null, ys); b.y1 = Math.max.apply(null, ys);
+      state.byId[b.id] = b;
+    });
+    init();
+  }).catch(function (err) {
+    console.error("Failed to load map data", err);
+    document.getElementById("hint").textContent = "Could not load map data. Try reloading the page.";
+  });
+
+  function init() {
+    buildLegend();
+    buildStaticGeometry();
+    fitToScreen();
+    render();
+    connectDb();
+    wireInteractions();
+    window.addEventListener("resize", function () {
+      fitToScreen(true);
+      render();
+    });
+  }
+
+  function buildStaticGeometry() {
+    worldG = el("g", { id: "world" });
+    svg.appendChild(worldG);
+
+    parksG = el("g", { id: "parks" });
+    state.parks.forEach(function (coords) {
+      parksG.appendChild(el("path", { d: pathD(coords), class: "park" }));
+    });
+    worldG.appendChild(parksG);
+
+    waterG = el("g", { id: "water" });
+    state.water_polys.forEach(function (coords) {
+      waterG.appendChild(el("path", { d: pathD(coords), class: "water" }));
+    });
+    state.water_lines.forEach(function (coords) {
+      waterG.appendChild(el("path", { d: lineD(coords), class: "water-line" }));
+    });
+    worldG.appendChild(waterG);
+
+    roadsG = el("g", { id: "roads" });
+    var casings = el("g", {});
+    var lines = el("g", {});
+    state.roads.forEach(function (r) {
+      var isMajor = r.cls === "major";
+      var w = isMajor ? 5 : (r.cls === "minor" ? 3 : 1.6);
+      casings.appendChild(el("path", {
+        d: lineD(r.c), class: "road " + (isMajor ? "road-major-casing" : "road-casing"),
+        "stroke-width": w + (isMajor ? 2.4 : 1.6)
+      }));
+    });
+    state.roads.forEach(function (r) {
+      var isMajor = r.cls === "major";
+      var w = isMajor ? 5 : (r.cls === "minor" ? 3 : 1.6);
+      lines.appendChild(el("path", {
+        d: lineD(r.c), class: "road " + (isMajor ? "road-major-line" : "road-line"),
+        "stroke-width": w
+      }));
+    });
+    roadsG.appendChild(casings);
+    roadsG.appendChild(lines);
+    worldG.appendChild(roadsG);
+
+    buildingsG = el("g", { id: "buildings" });
+    state.buildings.forEach(function (b) {
+      var m = LU_META[b.lu] || LU_META.commercial;
+      var p = el("path", {
+        d: pathD(b.c), class: "building", fill: m.fill,
+        stroke: m.edge, "data-id": b.id
+      });
+      p.addEventListener("click", function (ev) {
+        if (state.dragMoved) return;
+        selectBuilding(b.id);
+        ev.stopPropagation();
+      });
+      buildingsG.appendChild(p);
+      b._el = p;
+    });
+    worldG.appendChild(buildingsG);
+
+    labelsG = el("g", { id: "labels" });
+    worldG.appendChild(labelsG);
+
+    // road name labels (static; road network doesn't change)
+    var named = state.roads.filter(function (r) { return r.n && r.len > 60 && r.cls !== "service"; });
+    var seen = {};
+    named.forEach(function (r) {
+      var key = r.n;
+      seen[key] = seen[key] || 0;
+      if (seen[key] >= 2) return;
+      var coords = r.c;
+      var mid = coords[Math.floor(coords.length / 2)];
+      var i0 = Math.max(0, Math.floor(coords.length / 2) - 1);
+      var i1 = Math.min(coords.length - 1, Math.floor(coords.length / 2) + 1);
+      var dx = coords[i1][0] - coords[i0][0], dy = coords[i1][1] - coords[i0][1];
+      var angle = Math.atan2(dy, dx) * 180 / Math.PI;
+      if (angle > 90) angle -= 180;
+      if (angle < -90) angle += 180;
+      var t = el("text", {
+        x: mid[0], y: mid[1], class: "roadlabel", "font-size": 11,
+        transform: "rotate(" + angle.toFixed(1) + " " + mid[0] + " " + mid[1] + ")"
+      });
+      t.textContent = r.n.toUpperCase();
+      roadsG.appendChild(t);
+      seen[key]++;
+    });
+  }
+
+  // ---------------- view transform ----------------
+  function containerSize() {
+    return { w: mapWrap.clientWidth, h: mapWrap.clientHeight };
+  }
+
+  function fitToScreen(keepIfPossible) {
+    var sz = containerSize();
+    svg.setAttribute("viewBox", "0 0 " + sz.w + " " + sz.h);
+    var pad = 24;
+    var fit = Math.min((sz.w - pad * 2) / state.worldW, (sz.h - pad * 2) / state.worldH);
+    state.fitScale = fit;
+    state.minScale = fit * 0.85;
+    state.maxScale = fit * 45;
+    if (!keepIfPossible || !state._everFit) {
+      state.scale = fit;
+      state.tx = (sz.w - state.worldW * fit) / 2;
+      state.ty = (sz.h - state.worldH * fit) / 2;
+      state._everFit = true;
+    } else {
+      state.scale = clamp(state.scale, state.minScale, state.maxScale);
+    }
+  }
+
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  function applyTransform() {
+    worldG.setAttribute("transform", "translate(" + state.tx + " " + state.ty + ") scale(" + state.scale + ")");
+  }
+
+  var renderQueued = false;
+  function render() {
+    applyTransform();
+    if (!renderQueued) {
+      renderQueued = true;
+      requestAnimationFrame(function () {
+        renderQueued = false;
+        updateLabels();
+      });
+    }
+  }
+
+  function resetView() {
+    fitToScreen(false);
+    render();
+  }
+
+  // ---------------- label thinning + collision ----------------
+  function visibleWorldBounds() {
+    var sz = containerSize();
+    var x0 = -state.tx / state.scale, y0 = -state.ty / state.scale;
+    var x1 = (sz.w - state.tx) / state.scale, y1 = (sz.h - state.ty) / state.scale;
+    return { x0: x0, y0: y0, x1: x1, y1: y1 };
+  }
+
+  function updateLabels() {
+    while (labelsG.firstChild) labelsG.removeChild(labelsG.firstChild);
+
+    var vb = visibleWorldBounds();
+    var zoomRatio = state.scale / state.fitScale;
+    var candidates = [];
+    for (var i = 0; i < state.buildings.length; i++) {
+      var b = state.buildings[i];
+      if (b.x1 < vb.x0 || b.x0 > vb.x1 || b.y1 < vb.y0 || b.y0 > vb.y1) continue;
+      var name = displayName(b);
+      var hasOverride = state.overrides[b.id] !== undefined && state.overrides[b.id] !== "";
+      if (!name) continue;
+      var priority = b.a * (b.lm ? 6 : 1);
+      if (hasOverride) priority = 1e12 + b.a;
+      candidates.push({ b: b, name: name, priority: priority, custom: hasOverride });
+    }
+    candidates.sort(function (x, y) { return y.priority - x.priority; });
+
+    var maxLabels = Math.round(28 + zoomRatio * 55);
+    var fontPxScreen = 12;
+    var fontWorld = fontPxScreen / state.scale;
+    var placedBoxes = [];
+    var shown = 0;
+
+    for (var k = 0; k < candidates.length && shown < maxLabels; k++) {
+      var c = candidates[k];
+      var b2 = c.b;
+      var w = c.name.length * fontWorld * 0.56 + 6 / state.scale;
+      var h = fontWorld * 1.3;
+      var bx0 = b2.cx - w / 2, bx1 = b2.cx + w / 2;
+      var by0 = b2.cy - h / 2, by1 = b2.cy + h / 2;
+      var overlap = false;
+      for (var j = 0; j < placedBoxes.length; j++) {
+        var pb = placedBoxes[j];
+        if (!(bx1 < pb.x0 || bx0 > pb.x1 || by1 < pb.y0 || by0 > pb.y1)) { overlap = true; break; }
+      }
+      if (overlap) continue;
+      placedBoxes.push({ x0: bx0, x1: bx1, y0: by0, y1: by1 });
+      var t = el("text", {
+        x: b2.cx, y: b2.cy, class: "bldglabel" + (c.custom ? " custom" : ""), "font-size": fontWorld.toFixed(2)
+      });
+      t.textContent = c.name;
+      labelsG.appendChild(t);
+      shown++;
+    }
+  }
+
+  // ---------------- interactions ----------------
+  function wireInteractions() {
+    svg.addEventListener("pointerdown", function (ev) {
+      if (ev.button !== undefined && ev.button !== 0) return;
+      state.dragging = true;
+      state.dragMoved = false;
+      state.lastX = ev.clientX; state.lastY = ev.clientY;
+      svg.classList.add("grabbing");
+      svg.setPointerCapture(ev.pointerId);
+    });
+    svg.addEventListener("pointermove", function (ev) {
+      if (!state.dragging) return;
+      var dx = ev.clientX - state.lastX, dy = ev.clientY - state.lastY;
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) state.dragMoved = true;
+      state.tx += dx; state.ty += dy;
+      state.lastX = ev.clientX; state.lastY = ev.clientY;
+      render();
+    });
+    function endDrag(ev) {
+      state.dragging = false;
+      svg.classList.remove("grabbing");
+      if (!state.dragMoved) {
+        // click on empty background deselects
+        if (ev.target === svg) deselect();
+      }
+    }
+    svg.addEventListener("pointerup", endDrag);
+    svg.addEventListener("pointercancel", endDrag);
+
+    svg.addEventListener("wheel", function (ev) {
+      ev.preventDefault();
+      var rect = svg.getBoundingClientRect();
+      var mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+      var factor = Math.pow(1.0015, -ev.deltaY);
+      zoomAt(mx, my, factor);
+    }, { passive: false });
+
+    document.getElementById("zoomInBtn").addEventListener("click", function () {
+      var sz = containerSize();
+      zoomAt(sz.w / 2, sz.h / 2, 1.35);
+    });
+    document.getElementById("zoomOutBtn").addEventListener("click", function () {
+      var sz = containerSize();
+      zoomAt(sz.w / 2, sz.h / 2, 1 / 1.35);
+    });
+    document.getElementById("resetViewBtn").addEventListener("click", resetView);
+
+    document.getElementById("legendToggle").addEventListener("click", function () {
+      document.getElementById("legend").classList.toggle("collapsed");
+    });
+
+    document.getElementById("panelClose").addEventListener("click", deselect);
+    document.getElementById("saveBtn").addEventListener("click", saveLabel);
+    document.getElementById("clearBtn").addEventListener("click", clearLabel);
+    document.getElementById("labelInput").addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter") saveLabel();
+    });
+
+    var hint = document.getElementById("hint");
+    setTimeout(function () { hint.style.opacity = "0"; setTimeout(function () { hint.style.display = "none"; }, 350); }, 6000);
+  }
+
+  function zoomAt(px, py, factor) {
+    var newScale = clamp(state.scale * factor, state.minScale, state.maxScale);
+    var actualFactor = newScale / state.scale;
+    state.tx = px - (px - state.tx) * actualFactor;
+    state.ty = py - (py - state.ty) * actualFactor;
+    state.scale = newScale;
+    render();
+  }
+
+  // ---------------- selection & editing ----------------
+  function selectBuilding(id) {
+    if (state.selectedId && state.byId[state.selectedId]) {
+      state.byId[state.selectedId]._el.classList.remove("selected");
+    }
+    state.selectedId = id;
+    var b = state.byId[id];
+    b._el.classList.add("selected");
+    openPanel(b);
+  }
+
+  function deselect() {
+    if (state.selectedId && state.byId[state.selectedId]) {
+      state.byId[state.selectedId]._el.classList.remove("selected");
+    }
+    state.selectedId = null;
+    closePanel();
+  }
+
+  function openPanel(b) {
+    var panel = document.getElementById("panel");
+    var m = LU_META[b.lu] || LU_META.commercial;
+    document.getElementById("panelSwatch").style.background = m.fill;
+    document.getElementById("panelSwatch").style.borderColor = m.edge;
+    document.getElementById("panelLu").textContent = m.label;
+    var name = displayName(b);
+    document.getElementById("panelTitle").textContent = name || "Unnamed building";
+    document.getElementById("panelAddr").textContent = b.addr || "";
+    var input = document.getElementById("labelInput");
+    var ov = state.overrides[b.id];
+    input.value = ov !== undefined ? ov : (b.n || "");
+    input.placeholder = b.n ? b.n : "Add a name for this building";
+    document.getElementById("labelHint").textContent = b.n
+      ? ("OSM data has this building as \u201c" + b.n + "\u201d \u2014 editing here only changes what shows on this map.")
+      : "This building has no name in the source data yet.";
+    document.getElementById("clearBtn").disabled = ov === undefined;
+    document.getElementById("saveState").textContent = "";
+    document.getElementById("saveState").className = "save-state";
+    panel.classList.add("open");
+    panel.setAttribute("aria-hidden", "false");
+    setTimeout(function () { input.focus(); }, 50);
+  }
+
+  function closePanel() {
+    var panel = document.getElementById("panel");
+    panel.classList.remove("open");
+    panel.setAttribute("aria-hidden", "true");
+  }
+
+  function currentSelected() {
+    return state.selectedId ? state.byId[state.selectedId] : null;
+  }
+
+  function setSaveState(msg, ok) {
+    var s = document.getElementById("saveState");
+    s.textContent = msg;
+    s.className = "save-state" + (ok ? " ok" : "");
+  }
+
+  function saveLabel() {
+    var b = currentSelected();
+    if (!b) return;
+    var val = document.getElementById("labelInput").value.trim();
+    if (val === "") { clearLabel(); return; }
+    setSaveState("Saving\u2026", false);
+    applyOverrideLocally(b.id, val);
+    if (state.dbCol) {
+      state.dbCol.doc(b.id).set({ text: val, updatedAt: Date.now() }).then(function () {
+        setSaveState("Saved \u2014 visible to everyone with this link.", true);
+      }).catch(function (err) {
+        console.error(err);
+        setSaveState("Couldn't save \u2014 try again.", false);
+      });
+    } else {
+      setSaveState("Saved for this session only (not connected).", false);
+    }
+    document.getElementById("clearBtn").disabled = false;
+    document.getElementById("panelTitle").textContent = val;
+  }
+
+  function clearLabel() {
+    var b = currentSelected();
+    if (!b) return;
+    setSaveState("Clearing\u2026", false);
+    applyOverrideLocally(b.id, undefined);
+    document.getElementById("labelInput").value = b.n || "";
+    document.getElementById("panelTitle").textContent = b.n || "Unnamed building";
+    document.getElementById("clearBtn").disabled = true;
+    if (state.dbCol) {
+      state.dbCol.doc(b.id).delete().then(function () {
+        setSaveState("Custom label removed.", true);
+      }).catch(function (err) {
+        console.error(err);
+        setSaveState("Couldn't clear \u2014 try again.", false);
+      });
+    } else {
+      setSaveState("Cleared for this session only.", false);
+    }
+  }
+
+  function applyOverrideLocally(id, text) {
+    if (text === undefined) delete state.overrides[id];
+    else state.overrides[id] = text;
+    updateLabels();
+  }
+
+  // ---------------- db (shared, via Supabase) ----------------
+  // Project: mcurpiuaezilcnnuqvnm.supabase.co, table: cbd_map_labels
+  // Uses the public anon key (safe to expose client-side) \u2014 RLS on the
+  // table is what actually controls what anon can do. See the SQL
+  // migration supplied alongside this file.
+  var SUPABASE_URL = "https://mcurpiuaezilcnnuqvnm.supabase.co";
+  var SUPABASE_ANON_KEY = "REPLACE_WITH_SUPABASE_ANON_KEY";
+  var SUPABASE_TABLE = "cbd_map_labels";
+
+  function setStatus(text, offline) {
+    var pill = document.getElementById("statusPill");
+    var pillText = document.getElementById("statusText");
+    pillText.textContent = text;
+    pill.title = text;
+    pill.classList.toggle("offline", !!offline);
+  }
+
+  // Thin adapter giving the Supabase client the same doc()/onSnapshot()
+  // shape the rest of this file was already written against, so
+  // saveLabel()/clearLabel() above needed no changes.
+  function makeSupabaseCol(sb) {
+    function rowToChange(type, row) {
+      return {
+        type: type,
+        doc: {
+          id: row.building_id,
+          data: function () { return { text: row.text, updatedAt: row.updated_at }; }
+        }
+      };
+    }
+    return {
+      doc: function (id) {
+        return {
+          set: function (data) {
+            return sb.from(SUPABASE_TABLE).upsert({
+              building_id: id,
+              text: data.text,
+              updated_at: new Date(data.updatedAt).toISOString()
+            }, { onConflict: "building_id" });
+          },
+          delete: function () {
+            return sb.from(SUPABASE_TABLE).delete().eq("building_id", id);
+          }
+        };
+      },
+      onSnapshot: function (cb, errCb) {
+        sb.from(SUPABASE_TABLE).select("building_id,text,updated_at").then(function (res) {
+          if (res.error) { errCb && errCb(res.error); return; }
+          var changes = (res.data || []).map(function (row) { return rowToChange("added", row); });
+          cb({ docChanges: function () { return changes; } });
+
+          sb.channel("cbd_map_labels_changes")
+            .on("postgres_changes", { event: "*", schema: "public", table: SUPABASE_TABLE }, function (payload) {
+              var type = payload.eventType === "DELETE" ? "removed" : (payload.eventType === "INSERT" ? "added" : "modified");
+              var row = payload.eventType === "DELETE" ? payload.old : payload.new;
+              cb({ docChanges: function () { return [rowToChange(type, row)]; } });
+            })
+            .subscribe(function (status) {
+              if (status === "SUBSCRIBED") setStatus("Live \u2014 shared map", false);
+              else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") setStatus("Sync lost", true);
+            });
+        }).catch(function (err) { errCb && errCb(err); });
+      }
+    };
+  }
+
+  function connectDb() {
+    if (!window.supabase || typeof window.supabase.createClient !== "function") {
+      setStatus("Preview only", true);
+      return;
+    }
+    if (!SUPABASE_ANON_KEY || SUPABASE_ANON_KEY.indexOf("REPLACE_") === 0) {
+      setStatus("Preview only", true);
+      return;
+    }
+    var sb;
+    try {
+      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    } catch (err) {
+      console.error(err);
+      setStatus("Preview only", true);
+      return;
+    }
+    state.dbCol = makeSupabaseCol(sb);
+    setStatus("Connecting\u2026", true);
+    state.dbCol.onSnapshot(function (snap) {
+      snap.docChanges().forEach(function (ch) {
+        var id = ch.doc.id;
+        if (ch.type === "removed") {
+          delete state.overrides[id];
+        } else {
+          var data = ch.doc.data();
+          if (data && typeof data.text === "string") state.overrides[id] = data.text;
+        }
+        if (state.selectedId === id) {
+          var b = state.byId[id];
+          if (b) {
+            document.getElementById("panelTitle").textContent = displayName(b) || "Unnamed building";
+            var ov = state.overrides[id];
+            document.getElementById("labelInput").value = ov !== undefined ? ov : (b.n || "");
+            document.getElementById("clearBtn").disabled = ov === undefined;
+          }
+        }
+      });
+      updateLabels();
+    }, function (err) {
+      console.error("db subscription error", err);
+      setStatus("Sync lost", true);
+    });
+  }
+})();
+</script>
+</body>
+</html>
