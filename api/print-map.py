@@ -4,11 +4,15 @@ map PDF on demand, using whatever building-name overrides currently sit in
 Supabase's cbd_map_labels table (the same table the interactive web map at
 /cbd-map reads and writes).
 
-Deploy this at api/print-map.py in the repo root, alongside the pre-projected
-geometry in api/_map_data/ (print_buildings.json, print_roads.json,
-print_features.json, colliers-logo.png -- all produced once, offline, from
-the original OSM extracts, so this function needs no pyproj / OSM fetch at
-request time).
+The response is a 2-page PDF: page 1 is the building/street map (live
+names), page 2 is a full-bleed satellite/aerial view of the same area,
+meant to sit on the flip side when printed double-sided.
+
+Deploy this at api/print-map.py in the repo root, alongside the pre-built
+assets in api/_map_data/ (print_buildings.json, print_roads.json,
+print_features.json, colliers-logo.png, satellite-base.png -- all produced
+once, offline, so this function needs no pyproj / OSM / imagery fetch at
+request time -- only the live Supabase read for page 1's names).
 
 Reuses the SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY environment variables
 already configured in this Vercel project -- no new secrets needed. The
@@ -16,7 +20,7 @@ service-role key is used here, server-side only, specifically so this can
 read cbd_map_labels regardless of its RLS policy; it is never sent to the
 browser.
 
-GET /api/print-map -> streams back a PDF (Content-Type: application/pdf).
+GET /api/print-map -> streams back a 2-page PDF (Content-Type: application/pdf).
 """
 import datetime
 import json
@@ -36,6 +40,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
 import matplotlib.image as mpimg
+from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import Polygon as MplPolygon, Rectangle
 from matplotlib.collections import PolyCollection, LineCollection
 
@@ -193,10 +198,8 @@ def place_labels(buildings, overrides, xmin, xmax, ymin, ymax):
     return placed
 
 
-# ================= Rendering (ported from final_render_colliers.py) =================
-def render_pdf():
-    overrides = fetch_overrides()
-
+# ================= Page 1: the building map (ported from final_render_colliers.py) =================
+def build_map_figure(overrides):
     buildings_data = json.load(open(DATA_DIR / "print_buildings.json"))
     bbox = buildings_data["bbox"]
     buildings = buildings_data["buildings"]
@@ -442,9 +445,151 @@ def render_pdf():
     scale_ax.text(frac, y0 + 0.5, f"{bar_m} m", fontsize=5.5, family="sans-serif", ha="center", va="bottom", color="white", transform=scale_ax.transAxes)
     scale_ax.set_xlim(0, 1); scale_ax.set_ylim(0, 1)
 
+    return fig
+
+
+# ================= Page 2: full-bleed satellite view, same page size, no live data =================
+# Static aerial photo (Esri World Imagery) pre-fetched once and bundled as
+# _map_data/satellite-base.png, so this page needs no network access at
+# request time. Same A3 page setup, footer and grid reference as page 1;
+# logo sits in a tight keyline badge (no sidebar/legend -- doesn't apply to
+# a photo). See Jason's brief: "Keep the footer, keep the logo, removed the
+# sidebar" then "reduce the white box around the logo to a 1px keyline".
+SAT_XMIN, SAT_XMAX = 1569899.25, 1571575.04
+SAT_YMIN, SAT_YMAX = 5179593.85, 5180710.31
+
+
+def build_satellite_figure():
+    A3_W_MM, A3_H_MM = 420, 297
+    DPI = 300
+    fig_w_in, fig_h_in = A3_W_MM / 25.4, A3_H_MM / 25.4
+    fig = plt.figure(figsize=(fig_w_in, fig_h_in), dpi=DPI)
+    fig.patch.set_facecolor(NAVY)
+
+    MARGIN_TOP = 0.028
+    MARGIN_BOTTOM = 0.075
+    MARGIN_L = 0.024
+    MARGIN_R = 0.024
+    ax = fig.add_axes([MARGIN_L, MARGIN_BOTTOM, 1 - MARGIN_L - MARGIN_R, 1 - MARGIN_TOP - MARGIN_BOTTOM])
+
+    xmin, xmax, ymin, ymax = SAT_XMIN, SAT_XMAX, SAT_YMIN, SAT_YMAX
+    ax.set_xlim(xmin, xmax); ax.set_ylim(ymin, ymax)
+    ax.set_aspect("equal"); ax.axis("off")
+
+    sat_img = mpimg.imread(DATA_DIR / "satellite-base.png")
+    ax.imshow(sat_img, extent=(xmin, xmax, ymin, ymax), origin="upper", zorder=1)
+
+    # ---- neatline grid reference (same as page 1) ----
+    N_COLS, N_ROWS = 6, 7
+    col_edges = [xmin + i * (xmax - xmin) / N_COLS for i in range(N_COLS + 1)]
+    row_edges = [ymax - i * (ymax - ymin) / N_ROWS for i in range(N_ROWS + 1)]
+
+    ax_left, ax_bottom, ax_w, ax_h = ax.get_position().bounds
+    for i in range(N_COLS):
+        xc = (col_edges[i] + col_edges[i + 1]) / 2
+        fx = ax_left + (xc - xmin) / (xmax - xmin) * ax_w
+        fig.text(fx, ax_bottom + ax_h + 0.012, str(i + 1), fontsize=8, family="sans-serif", weight="bold",
+                  color="white", ha="center", va="bottom", zorder=35)
+        fig.text(fx, ax_bottom - 0.012, str(i + 1), fontsize=8, family="sans-serif", weight="bold",
+                  color="white", ha="center", va="top", zorder=35)
+    for i in range(N_ROWS):
+        yc = (row_edges[i] + row_edges[i + 1]) / 2
+        fy = ax_bottom + (yc - ymin) / (ymax - ymin) * ax_h
+        letter = string.ascii_uppercase[i]
+        fig.text(ax_left - 0.010, fy, letter, fontsize=8, family="sans-serif", weight="bold",
+                  color="white", ha="right", va="center", zorder=35)
+        fig.text(ax_left + ax_w + 0.010, fy, letter, fontsize=8, family="sans-serif", weight="bold",
+                  color="white", ha="left", va="center", zorder=35)
+
+    ax.add_patch(Rectangle((xmin, ymin), xmax - xmin, ymax - ymin, facecolor="none",
+                            edgecolor=NAVY, linewidth=1.6, zorder=30))
+
+    # ---- logo badge: tight white keyline around the logo, caption below on the photo ----
+    logo_img = mpimg.imread(DATA_DIR / "colliers-logo.png")
+    logo_aspect = logo_img.shape[1] / logo_img.shape[0]
+
+    BADGE_W = 0.150
+    BADGE_PAD = 0.010
+    badge_left = ax_left + ax_w - BADGE_PAD - BADGE_W
+    badge_top = ax_bottom + ax_h - BADGE_PAD
+
+    logo_margin_frac = 0.025
+    logo_w_fig = BADGE_W * (1 - 2 * logo_margin_frac)
+    logo_h_fig = (logo_w_fig * fig_w_in) / logo_aspect / fig_h_in
+    badge_h = logo_h_fig / (1 - 2 * logo_margin_frac)
+
+    badge_ax = fig.add_axes([badge_left, badge_top - badge_h, BADGE_W, badge_h], zorder=40)
+    badge_ax.set_xlim(0, 1); badge_ax.set_ylim(0, 1); badge_ax.axis("off")
+    badge_ax.add_patch(Rectangle((0, 0), 1, 1, transform=badge_ax.transAxes,
+                                  facecolor="white", edgecolor="white", linewidth=0.75, zorder=1))
+
+    logo_left_fig = badge_left + BADGE_W * logo_margin_frac
+    logo_bottom_fig = badge_top - badge_h + badge_h * logo_margin_frac
+    logo_ax = fig.add_axes([logo_left_fig, logo_bottom_fig, logo_w_fig, logo_h_fig], zorder=41)
+    logo_ax.imshow(logo_img)
+    logo_ax.axis("off")
+
+    fig.text(badge_left + BADGE_W / 2, badge_top - badge_h - 0.012, "CENTRAL CITY — AERIAL VIEW",
+              fontsize=4.6, weight="bold", family="sans-serif", color="white", ha="center", va="top", zorder=41,
+              path_effects=[pe.withStroke(linewidth=2.0, foreground=NAVY_DARK)])
+
+    # ---- footer band (identical structure to page 1) ----
+    fig.add_artist(Rectangle((0, 0), 1, MARGIN_BOTTOM, transform=fig.transFigure, facecolor=NAVY,
+                              edgecolor="none", zorder=20))
+    for i, c in enumerate([GOLD, CYAN, RED]):
+        fig.add_artist(Rectangle((0, MARGIN_BOTTOM - 0.006 - i * 0.006), 1, 0.005, transform=fig.transFigure,
+                                  facecolor=c, edgecolor="none", zorder=21))
+
+    fig.text(MARGIN_L, 0.038, "CHRISTCHURCH CBD — AERIAL / SATELLITE VIEW", fontsize=9, weight="bold",
+             family="sans-serif", color="white", ha="left", va="center", zorder=22)
+    fig.text(MARGIN_L, 0.020, "Imagery © Esri, Maxar, Earthstar Geographics and the GIS User Community  ·  "
+             "NZTM2000 projection (EPSG:2193)  ·  For reference only — not survey-accurate",
+             fontsize=5.8, family="sans-serif", color="#cfe3f0", ha="left", va="center", zorder=22)
+
+    month_year = datetime.date.today().strftime("%B %Y")
+    fig.text(1 - MARGIN_R, 0.029, month_year, fontsize=7.5, family="sans-serif",
+             color="white", weight="bold", ha="right", va="center", zorder=22)
+
+    na_ax = fig.add_axes([0.60, 0.010, 0.026, 0.040], zorder=22)
+    na_ax.axis("off"); na_ax.patch.set_alpha(0)
+    na_ax.set_xlim(0, 1); na_ax.set_ylim(0, 1)
+    na_ax.annotate("", xy=(0.5, 1.0), xytext=(0.5, 0.30),
+                   arrowprops=dict(arrowstyle="-|>", color="white", linewidth=1.6, mutation_scale=10))
+    na_ax.text(0.5, 0.06, "N", fontsize=7, weight="black", family="sans-serif", ha="center", va="bottom", color="white")
+
+    scale_ax = fig.add_axes([0.655, 0.016, 0.19, 0.020], zorder=22)
+    scale_ax.axis("off"); scale_ax.patch.set_alpha(0)
+    bar_m = 200
+    data_width = xmax - xmin
+    frac = bar_m / data_width
+    n_segs = 4
+    seg_frac = frac / n_segs
+    y0 = 0.5
+    for i in range(n_segs):
+        color = "white" if i % 2 == 0 else NAVY
+        scale_ax.add_patch(Rectangle((i * seg_frac, y0), seg_frac, 0.35, facecolor=color, edgecolor="white",
+                                      linewidth=0.7, transform=scale_ax.transAxes))
+    scale_ax.text(0, y0 + 0.5, "0", fontsize=5.5, family="sans-serif", ha="center", va="bottom", color="white", transform=scale_ax.transAxes)
+    scale_ax.text(frac, y0 + 0.5, f"{bar_m} m", fontsize=5.5, family="sans-serif", ha="center", va="bottom", color="white", transform=scale_ax.transAxes)
+    scale_ax.set_xlim(0, 1); scale_ax.set_ylim(0, 1)
+
+    return fig
+
+
+# ================= Combine both pages into one PDF =================
+def render_full_pdf():
+    overrides = fetch_overrides()
+
     buf = BytesIO()
-    fig.savefig(buf, format="pdf", facecolor=NAVY)
-    plt.close(fig)
+    with PdfPages(buf) as pdf:
+        map_fig = build_map_figure(overrides)
+        pdf.savefig(map_fig, facecolor=NAVY)
+        plt.close(map_fig)
+
+        sat_fig = build_satellite_figure()
+        pdf.savefig(sat_fig, facecolor=NAVY)
+        plt.close(sat_fig)
+
     buf.seek(0)
     return buf.read()
 
@@ -452,7 +597,7 @@ def render_pdf():
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
-            pdf_bytes = render_pdf()
+            pdf_bytes = render_full_pdf()
         except Exception as exc:
             self.send_response(500)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
