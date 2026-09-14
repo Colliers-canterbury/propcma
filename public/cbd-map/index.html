@@ -366,7 +366,7 @@
 <body>
 
 <div class="topbar">
-  <img class="logo" src="colliers-logo.png" alt="Colliers International">
+  <img class="logo" src="/cbd-map/colliers-logo.png" alt="Colliers International">
   <div class="titles">
     <h1>Christchurch CBD<span class="longpart"> &mdash; Building &amp; Street Map</span></h1>
     <p>Click any building to add or edit its name</p>
@@ -490,9 +490,9 @@
 
   // ---------------- load data ----------------
   Promise.all([
-    fetch("buildings.json").then(function (r) { return r.json(); }),
-    fetch("roads.json").then(function (r) { return r.json(); }),
-    fetch("features.json").then(function (r) { return r.json(); })
+    fetch("/cbd-map/buildings.json").then(function (r) { return r.json(); }),
+    fetch("/cbd-map/roads.json").then(function (r) { return r.json(); }),
+    fetch("/cbd-map/features.json").then(function (r) { return r.json(); })
   ]).then(function (results) {
     var bdata = results[0], rdata = results[1], fdata = results[2];
     state.worldW = bdata.meta.width;
