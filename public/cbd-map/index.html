@@ -119,6 +119,8 @@
   .status-pill.offline { color: var(--text-muted); background: color-mix(in srgb, var(--text-muted) 14%, transparent); }
   .btn {
     flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text);
@@ -128,6 +130,7 @@
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
+    text-decoration: none;
   }
   .btn:hover { border-color: var(--accent); color: var(--accent); }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
@@ -336,7 +339,7 @@
 
   @media (max-width: 720px) {
     .topbar p { display: none; }
-    .topbar h1 .longpart { display: none; }
+    .topbar .longpart { display: none; }
     .topbar h1 { font-size: 14.5px; letter-spacing: 0; }
     .topbar .btn { padding: 7px 9px; font-size: 12px; }
     .topbar { gap: 6px; padding: 8px 10px; }
@@ -373,6 +376,7 @@
   </div>
   <div class="spacer"></div>
   <span class="status-pill" id="statusPill" title="Connecting&hellip;"><span class="dot"></span><span id="statusText">Connecting&hellip;</span></span>
+  <a class="btn" id="printPdfBtn" href="/api/print-map" target="_blank" rel="noopener" title="Generates a fresh A3 PDF with the current names below &mdash; may take a few seconds">Print<span class="longpart"> A3 map</span></a>
   <button class="btn" id="resetViewBtn" type="button">Reset view</button>
 </div>
 
@@ -412,7 +416,7 @@
     </div>
   </div>
   <div class="panel-actions">
-    <button class="btn danger" id="clearBtn" type="button" disabled>Clear</button>
+    <button class="btn danger" id="clearBtn" type="button" disabled title="Revert to the original OSM name (or unnamed, if it has none)">Reset name</button>
     <button class="btn primary" id="saveBtn" type="button">Save label</button>
   </div>
   <div class="save-state" id="saveState"></div>
@@ -840,7 +844,7 @@
     input.value = ov !== undefined ? ov : (b.n || "");
     input.placeholder = b.n ? b.n : "Add a name for this building";
     document.getElementById("labelHint").textContent = b.n
-      ? ("OSM data has this building as \u201c" + b.n + "\u201d \u2014 editing here only changes what shows on this map.")
+      ? ("OSM data has this building as \u201c" + b.n + "\u201d \u2014 editing here only changes what shows on this map. Save this box empty to remove the name from the map entirely.")
       : "This building has no name in the source data yet.";
     document.getElementById("clearBtn").disabled = ov === undefined;
     document.getElementById("saveState").textContent = "";
@@ -870,21 +874,25 @@
     var b = currentSelected();
     if (!b) return;
     var val = document.getElementById("labelInput").value.trim();
-    if (val === "") { clearLabel(); return; }
-    setSaveState("Saving\u2026", false);
+    // An empty box is saved as an explicit "" override, which hides the
+    // name from the map entirely (see displayName()/updateLabels()) \u2014
+    // this is how a building's name gets deleted, distinct from "Clear"
+    // below, which removes the override and reverts to the OSM name.
+    var hiding = val === "";
+    setSaveState(hiding ? "Removing name\u2026" : "Saving\u2026", false);
     applyOverrideLocally(b.id, val);
     if (state.dbCol) {
       state.dbCol.doc(b.id).set({ text: val, updatedAt: Date.now() }).then(function () {
-        setSaveState("Saved \u2014 visible to everyone with this link.", true);
+        setSaveState(hiding ? "Name removed \u2014 hidden for everyone with this link." : "Saved \u2014 visible to everyone with this link.", true);
       }).catch(function (err) {
         console.error(err);
-        setSaveState("Couldn't save \u2014 try again.", false);
+        setSaveState(hiding ? "Couldn't remove \u2014 try again." : "Couldn't save \u2014 try again.", false);
       });
     } else {
-      setSaveState("Saved for this session only (not connected).", false);
+      setSaveState(hiding ? "Removed for this session only (not connected)." : "Saved for this session only (not connected).", false);
     }
     document.getElementById("clearBtn").disabled = false;
-    document.getElementById("panelTitle").textContent = val;
+    document.getElementById("panelTitle").textContent = hiding ? "Unnamed building" : val;
   }
 
   function clearLabel() {
