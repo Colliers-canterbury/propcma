@@ -520,12 +520,20 @@
     buildStaticGeometry();
     fitToScreen();
     render();
-    connectDb();
     wireInteractions();
     window.addEventListener("resize", function () {
       fitToScreen(true);
       render();
     });
+    // Wired last and fully isolated: nothing in the Supabase connection
+    // (missing library, bad key, network/RLS errors) can ever prevent
+    // the panel/save/clear buttons above from working.
+    try {
+      connectDb();
+    } catch (err) {
+      console.error("connectDb failed", err);
+      setStatus("Preview only", true);
+    }
   }
 
   function buildStaticGeometry() {
