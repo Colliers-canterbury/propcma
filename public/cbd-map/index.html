@@ -935,14 +935,24 @@
       doc: function (id) {
         return {
           set: function (data) {
+            // Supabase resolves (doesn't reject) even on a failed write —
+            // e.g. an RLS policy blocking it — returning {error: {...}}
+            // instead. Surface that as a rejection so saveLabel()'s
+            // .then()/.catch() actually reflects what happened.
             return sb.from(SUPABASE_TABLE).upsert({
               building_id: id,
               text: data.text,
               updated_at: new Date(data.updatedAt).toISOString()
-            }, { onConflict: "building_id" });
+            }, { onConflict: "building_id" }).then(function (res) {
+              if (res.error) { throw res.error; }
+              return res;
+            });
           },
           delete: function () {
-            return sb.from(SUPABASE_TABLE).delete().eq("building_id", id);
+            return sb.from(SUPABASE_TABLE).delete().eq("building_id", id).then(function (res) {
+              if (res.error) { throw res.error; }
+              return res;
+            });
           }
         };
       },
