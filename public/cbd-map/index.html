@@ -746,8 +746,20 @@
       state.dragging = false;
       svg.classList.remove("grabbing");
       if (!state.dragMoved) {
-        // click on empty background deselects
-        if (ev.target === svg) deselect();
+        // svg.setPointerCapture() above (needed for smooth dragging) has a
+        // side effect: the browser retargets the native "click" event to
+        // the svg element itself, so each building's own click listener
+        // never fires. Hit-test the actual release point directly instead
+        // — elementFromPoint does real hit-testing and isn't affected by
+        // pointer capture.
+        var hit = document.elementFromPoint(ev.clientX, ev.clientY);
+        var buildingEl = hit && hit.closest ? hit.closest(".building") : null;
+        var id = buildingEl && buildingEl.getAttribute("data-id");
+        if (id) {
+          selectBuilding(id);
+        } else if (hit === svg || ev.target === svg) {
+          deselect();
+        }
       }
     }
     svg.addEventListener("pointerup", endDrag);
