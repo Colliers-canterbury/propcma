@@ -5,6 +5,18 @@
 // POST /api/deal-sheets  { id?, form }        → create or save a draft
 //
 // All requests require  Authorization: Bearer <MSAL access token>.
+//
+// Sep 2026: the queue and drafts scopes (accounts.html's Queue and
+// Completed tabs share the queue scope — Completed is just
+// scope=queue&status=complete — and its Drafts filter uses the drafts
+// scope) now also select purchaser_name and the full form JSONB. Both
+// were previously omitted since neither view ever displayed them, but
+// accounts.html's free-text search (public/js/accounts.js,
+// matchesSearch()) needs purchaser_name to search by purchaser, and
+// needs form.vendor/purchaser/lessor/lessee's solicitorName/
+// solicitorFirm to search by solicitor — those aren't their own
+// columns, only reachable through form. The scope=mine query already
+// had purchaser_name (brokers' own deal list needed it already).
 
 import { requireUser, sendError, HttpError } from "../_lib/auth.js";
 import { supabase } from "../_lib/supabase.js";
@@ -30,7 +42,7 @@ async function list(req, res) {
     let q = supabase
       .from("deal_sheets")
       .select(
-        "id, file_no, deal_no, status, deal_type, salesperson, division, property_address, suburb, vendor_name, sale_price_ex_gst, total_invoice_ex_gst, unconditional_date, deposit_to_trust, confidential, submitted_at"
+        "id, file_no, deal_no, status, deal_type, salesperson, division, property_address, suburb, vendor_name, purchaser_name, sale_price_ex_gst, total_invoice_ex_gst, unconditional_date, deposit_to_trust, confidential, submitted_at, form"
       )
       .neq("status", "draft")
       .order("submitted_at", { ascending: false });
@@ -48,7 +60,7 @@ async function list(req, res) {
     const { data, error } = await supabase
       .from("deal_sheets")
       .select(
-        "id, status, deal_type, salesperson, division, property_address, suburb, vendor_name, total_invoice_ex_gst, deposit_to_trust, confidential, created_by, updated_at"
+        "id, status, deal_type, salesperson, division, property_address, suburb, vendor_name, purchaser_name, total_invoice_ex_gst, deposit_to_trust, confidential, created_by, updated_at, form"
       )
       .eq("status", "draft")
       .order("updated_at", { ascending: false });
