@@ -432,12 +432,14 @@
     apartments:  { label: "Apartments / residential",    fill: "#14B2C6", edge: "#0C7E8D" },
     hotels:      { label: "Hotels / serviced apts",      fill: "#FFBB38", edge: "#C4860C" },
     bars:        { label: "Bars",                        fill: "#FA832E", edge: "#B85A16" },
-    industrial:  { label: "Industrial",                  fill: "#B93794", edge: "#7F2367" },
     clubs:       { label: "Clubs, sport, govt",          fill: "#7CA5D6", edge: "#4B70A3" },
     development: { label: "Development / vacant",        fill: "#D5E4E7", edge: "#A9BDC2" },
     parking:     { label: "Parking",                     fill: "#93DEFE", edge: "#4FA9CE" }
+    // "industrial" removed from the key -- LU_META[b.lu] || LU_META.commercial
+    // below already falls back to commercial for any building still tagged
+    // that way, so nothing renders uncoloured.
   };
-  var LU_ORDER = ["commercial", "retail", "apartments", "hotels", "bars", "industrial", "clubs", "development", "parking"];
+  var LU_ORDER = ["commercial", "retail", "apartments", "hotels", "bars", "clubs", "development", "parking"];
 
   var svg = document.getElementById("mapsvg");
   var mapWrap = document.getElementById("mapWrap");
