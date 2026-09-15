@@ -1,368 +1,399 @@
-// /public/js/api.js
-// Data layer used by both pages. In DEMO_MODE it runs against an
-// in-memory mock backend (below) so the UI is fully clickable
-// with zero setup; otherwise it calls /api/deal-sheets/*.
+// /api/deal-sheets/[id]/[action].js
+//
+// POST /api/deal-sheets/:id/submit                     (broker, own draft)
+// POST /api/deal-sheets/:id/invoice-client              (accounts/manager) — step 1
+// POST /api/deal-sheets/:id/assign-deal-number { dealNo }(accounts/manager) — step 2
+// POST /api/deal-sheets/:id/complete { comment }         (accounts/manager) — step 3
+// POST /api/deal-sheets/:id/return  { note }             (accounts/manager)
+// POST /api/deal-sheets/:id/receipt { receiptNo }         (accounts/manager)
+//
+// Accounts processing is three steps, each its own button on
+// accounts.html:
+//   1. Invoiced Client   — submitted        -> invoiced          (no deal number yet)
+//   2. Assign Deal Number — invoiced        -> deposit_received  (deal number entered)
+//   3. Mark as complete  — deposit_received -> complete          (optional comment,
+//                          visible to the office admin on admin.html; this is also
+//                          where the deal is written into PropCMA/Excel — see complete())
+//
+// Every transition writes a deal_sheet_events row with the acting
+// user's oid — the audit trail for REAA/AML record-keeping.
 
-(function () {
-  const cfg = window.DealSheetConfig;
+import { requireUser, sendError, HttpError } from "../../_lib/auth.js";
+import { supabase } from "../../_lib/supabase.js";
+import { computeDerived, validateForSubmit } from "../../_lib/deals.js";
+import { computeLeaseDerived, validateLeaseForSubmit } from "../../_lib/leases.js";
+import { notifyAccounts, notifyMarketingListingSold } from "../../_lib/graph.js";
+import { pushToPropCMA } from "../../_lib/propcma.js";
+import { appendToExcel } from "../../_lib/excel.js";
 
-  // ───────────────────────── live client ─────────────────────
-  async function call(path, { method = "GET", body } = {}) {
-    const token = await window.DealSheetAuth.getToken();
-    const res = await fetch(`${cfg.apiBase}/api/deal-sheets${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(body ? { "Content-Type": "application/json" } : {}),
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    let data = null;
-    try { data = await res.json(); } catch { /* empty */ }
-    if (!res.ok) {
-      const err = new Error(data?.error || `Request failed (${res.status})`);
-      err.status = res.status;
-      err.missing = data?.missing;
-      throw err;
+export default async function handler(req, res) {
+  try {
+    if (req.method !== "POST") {
+      res.setHeader("Allow", "POST");
+      return res.status(405).end();
     }
-    return data;
+    const { id, action } = req.query;
+
+    const { data: deal, error } = await supabase
+      .from("deal_sheets")
+      .select("*")
+      .eq("id", id)
+      .single();
+    if (error || !deal) throw new HttpError(404, "Deal sheet not found");
+
+    switch (action) {
+      case "submit":            return await submit(req, res, deal);
+      case "invoice-client":    return await invoiceClient(req, res, deal);
+      case "assign-deal-number":return await assignDealNumber(req, res, deal);
+      case "complete":          return await complete(req, res, deal);
+      case "return":            return await returnToBroker(req, res, deal);
+      case "receipt":           return await setReceiptNo(req, res, deal);
+      case "trust-deposit":     return await setTrustDeposit(req, res, deal);
+      case "checklist":         return await setChecklistItem(req, res, deal);
+      default: throw new HttpError(404, `Unknown action: ${action}`);
+    }
+  } catch (e) {
+    sendError(res, e);
+  }
+}
+
+async function transition(deal, patch, actor, note = null) {
+  const { data, error } = await supabase
+    .from("deal_sheets")
+    .update(patch)
+    .eq("id", deal.id)
+    .eq("status", deal.status) // optimistic guard against races
+    .select("*")
+    .single();
+  if (error || !data)
+    throw new HttpError(409, "Deal sheet changed state — refresh and retry");
+
+  await supabase.from("deal_sheet_events").insert({
+    deal_id: deal.id,
+    actor,
+    from_status: deal.status,
+    to_status: patch.status || deal.status,
+    note,
+  });
+  return data;
+}
+
+// ---------- broker: submit ----------
+async function submit(req, res, deal) {
+  const user = await requireUser(req);
+  if (deal.created_by !== user.oid) throw new HttpError(403, "Not your deal sheet");
+  if (!["draft", "rejected"].includes(deal.status))
+    throw new HttpError(409, `Cannot submit from status '${deal.status}'`);
+
+  // Validate with the module matching this deal's type.
+  const isLease = deal.deal_type === "lease";
+  const derived = isLease ? computeLeaseDerived(deal.form) : computeDerived(deal.form);
+  const missing = isLease
+    ? validateLeaseForSubmit(deal.form, derived)
+    : validateForSubmit(deal.form, derived);
+  if (missing.length)
+    return res.status(422).json({ error: "Not ready to submit", missing });
+
+  const updated = await transition(
+    deal,
+    { status: "submitted", submitted_at: new Date().toISOString() },
+    user.oid,
+    "Submitted by broker"
+  );
+
+  // CC the brokers on the deal so they know it's been filed.
+  // Brokers with no email on record are skipped, not an error.
+  let ccEmails = [];
+  const codes = deal.form?.ownership?.salespeople || [];
+  if (codes.length) {
+    const { data: rows } = await supabase
+      .from("brokers").select("email").in("code", codes);
+    ccEmails = (rows || []).map((r) => r.email).filter(Boolean);
   }
 
-  const live = {
-    listMine: () => call("?scope=mine"),
-    saveDraft: (form, id, dealType) =>
-      call("", { method: "POST", body: { form, id, dealType } }),
-    submit: (id) => call(`/${id}/submit`, { method: "POST" }),
-    get: (id) => call(`/${id}`),
-    deleteDeal: (id) => call(`/${id}`, { method: "DELETE" }),
-    getQueue: (status) => call(`?scope=queue${status ? `&status=${status}` : ""}`),
-    getDrafts: () => call(`?scope=drafts`),
-    invoiceClient: (id) => call(`/${id}/invoice-client`, { method: "POST" }),
-    assignDealNumber: (id, dealNo) => call(`/${id}/assign-deal-number`, { method: "POST", body: { dealNo } }),
-    markComplete: (id, comment) => call(`/${id}/complete`, { method: "POST", body: { comment } }),
-    setReceipt: (id, receiptNo) => call(`/${id}/receipt`, { method: "POST", body: { receiptNo } }),
-    setTrustDeposit: (id, { dateReceived, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue } = {}) =>
-      call(`/${id}/trust-deposit`, { method: "POST", body: { dateReceived, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue } }),
-    setChecklistItem: (id, key, value) => call(`/${id}/checklist`, { method: "POST", body: { key, value } }),
-    returnToBroker: (id, note) => call(`/${id}/return`, { method: "POST", body: { note } }),
+  const emailed = await notifyAccounts(updated, ccEmails); // logs, never throws
+  return res.status(200).json({ ok: true, status: "submitted", emailed });
+}
 
-    // ---- attachments ----
-    //
-    // Files upload DIRECTLY to Supabase Storage, not through our own
-    // Vercel function — Vercel Functions cap request bodies at 4.5 MB
-    // at the platform level, well below what a real document (scanned
-    // agreements, valuations, etc.) can run to. Three steps:
-    //   1. ask our API for a signed upload URL (tiny JSON)
-    //   2. hand the file to the Supabase SDK, which uploads it straight
-    //      to Supabase Storage using that URL (never touches our function)
-    //   3. tell our API the upload succeeded, so it can record it (tiny JSON)
-    async _directUpload(id, { slot, description }, file) {
-      const token = await window.DealSheetAuth.getToken();
-      const authHeaders = { Authorization: `Bearer ${token}` };
+// ---------- accounts step 1: Invoiced Client ----------
+// No deal number required at this step — that's step 2.
+async function invoiceClient(req, res, deal) {
+  const user = await requireUser(req, ["accounts", "manager"]);
+  if (deal.status !== "submitted")
+    throw new HttpError(409, `Cannot invoice from status '${deal.status}'`);
 
-      // 1) get a signed upload URL
-      const initParams = new URLSearchParams({ op: "init", fileName: file.name });
-      if (slot) initParams.set("slot", slot);
-      if (description != null) initParams.set("description", description);
-      const initRes = await fetch(
-        `${cfg.apiBase}/api/deal-sheets/${id}/attachments?${initParams}`,
-        { headers: authHeaders }
-      );
-      const init = await initRes.json().catch(() => null);
-      if (!initRes.ok) throw new Error(init?.error || `Could not start upload (${initRes.status})`);
+  const updated = await transition(deal, { status: "invoiced" }, user.oid, "Invoiced client");
 
-      // 2) upload the bytes straight to storage, via the Supabase SDK —
-      // a raw fetch PUT to the signed URL does NOT work on its own; the
-      // storage API still requires a valid project key on the request
-      // even with a signed token, and the SDK handles that correctly.
-      if (!window.DealSheetStorage) {
-        throw new Error("Storage isn't configured — check js/storage-config.js has your Supabase URL and anon key set.");
-      }
-      const { error: putErr } = await window.DealSheetStorage.storage
-        .from(window.DEAL_STORAGE_BUCKET)
-        .uploadToSignedUrl(init.path, init.token, file);
-      if (putErr) throw new Error(`Upload to storage failed: ${putErr.message}`);
+  // Tell marketing the property is off the market so they can pull the
+  // listing from ReNet. Non-fatal — a mail hiccup must not block the
+  // invoice step; the outcome is recorded in the audit trail either way,
+  // same pattern as the PropCMA/Excel writes in complete() below.
+  const marketingNotified = await notifyMarketingListingSold(updated);
+  await supabase.from("deal_sheet_events").insert({
+    deal_id: deal.id,
+    actor: user.oid,
+    from_status: "invoiced",
+    to_status: "invoiced",
+    note: marketingNotified
+      ? "Marketing notified to remove listing from ReNet"
+      : "Marketing ReNet notification FAILED — remove listing manually",
+  });
 
-      // 3) record the attachment now that the file is in place
-      const confirmRes = await fetch(`${cfg.apiBase}/api/deal-sheets/${id}/attachments`, {
-        method: "POST",
-        headers: { ...authHeaders, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          slot: init.slot, kind: init.kind, path: init.path,
-          fileName: file.name, contentType: file.type, sizeBytes: file.size,
-          description,
-        }),
-      });
-      const data = await confirmRes.json().catch(() => null);
-      if (!confirmRes.ok) throw new Error(data?.error || `Could not record upload (${confirmRes.status})`);
-      return data;
-    },
-    uploadAttachment(id, slot, file) {
-      return this._directUpload(id, { slot }, file);
-    },
-    removeAttachment: (id, slot) => call(`/${id}/attachments?slot=${encodeURIComponent(slot)}`, { method: "DELETE" }),
+  return res.status(200).json({ ok: true, status: "invoiced", marketingNotified });
+}
 
-    // Accounts: an extra supporting document with a required description,
-    // rather than a fixed checklist slot.
-    uploadExtraAttachment(id, description, file) {
-      return this._directUpload(id, { description }, file);
-    },
+// ---------- accounts step 2: Assign Deal Number ----------
+async function assignDealNumber(req, res, deal) {
+  const user = await requireUser(req, ["accounts", "manager"]);
+  if (deal.status !== "invoiced")
+    throw new HttpError(409, `Cannot assign a deal number from status '${deal.status}'`);
 
-    // ---- reference data / settings ----
-    listBrokers: () => call("/settings?type=brokers"),
-    listAllBrokers: () => call("/settings?type=allBrokers"),
-    listAdmins: () => call("/settings?type=admins"),
-    saveBroker: (b) => call("/settings", { method: "POST", body: { type: "broker", ...b } }),
-    saveAdmin: (a) => call("/settings", { method: "POST", body: { type: "admin", ...a } }),
-    removeBroker: (code) => call(`/settings?type=broker&code=${encodeURIComponent(code)}`, { method: "DELETE" }),
-    removeAdmin: (oid) => call(`/settings?type=admin&oid=${encodeURIComponent(oid)}`, { method: "DELETE" }),
+  const { dealNo } = req.body || {};
+  if (!dealNo) throw new HttpError(400, "dealNo is required");
 
-    // ---- print ----
-    // Opens the server-rendered printable page in a new tab. The token
-    // can't ride in a header for a plain window.open, so the page is
-    // fetched and written into the new window instead.
-    async openPrint(id) {
-      const token = await window.DealSheetAuth.getToken();
-      const w = window.open("", "_blank");
-      if (!w) { alert("Please allow pop-ups to print."); return; }
-      w.document.write("<p style=\"font-family:Segoe UI,Arial,sans-serif;padding:20px\">Preparing print view…</p>");
-      const res = await fetch(`${cfg.apiBase}/api/deal-sheets/${id}/print`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) { w.document.body.innerHTML = "<p>Could not load the print view.</p>"; return; }
-      const html = await res.text();
-      w.document.open(); w.document.write(html); w.document.close();
-    },
-    // returns { url } — a short-lived signed download link
-    attachmentUrl: (id, slot, opts = {}) =>
-      call(`/${id}/attachments?slot=${encodeURIComponent(slot)}${opts.view ? "&mode=view" : ""}`),
+  await transition(
+    deal,
+    { status: "deposit_received", deal_no: dealNo, processed_by: user.oid },
+    user.oid,
+    `Deal ${dealNo} assigned`
+  );
+  return res.status(200).json({ ok: true, status: "deposit_received" });
+}
 
-    // ---- letters ----
-    // Downloads a merged, editable .docx letter (Early Release — Vendor/
-    // Purchaser, or the Disbursement letter — see api/_lib/letters.js).
-    // Same new-tab-then-fetch trick as openPrint, since the auth token
-    // can't ride in a header for a plain window.open/navigation.
-    async openLetter(id, type, label) {
-      const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
-        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-      const token = await window.DealSheetAuth.getToken();
-      const w = window.open("", "_blank");
-      if (!w) { alert("Please allow pop-ups to open the letter."); return; }
-      w.document.write(`<p style="font-family:Segoe UI,Arial,sans-serif;padding:20px">Preparing ${esc(label || "letter")}…</p>`);
-      let res;
-      try {
-        res = await fetch(`${cfg.apiBase}/api/deal-sheets/${id}/letter?type=${encodeURIComponent(type)}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      } catch (e) {
-        w.document.body.innerHTML = `<p style="font-family:Segoe UI,Arial,sans-serif;padding:20px">Could not reach the server: ${esc(e.message)}</p>`;
-        return;
-      }
-      if (!res.ok) {
-        let msg = "Could not generate the letter.";
-        try { const data = await res.json(); if (data?.error) msg = data.error; } catch { /* empty */ }
-        w.document.body.innerHTML = `<p style="font-family:Segoe UI,Arial,sans-serif;padding:20px">${esc(msg)}</p>`;
-        return;
-      }
-      const blob = await res.blob();
-      const cd = res.headers.get("Content-Disposition") || "";
-      const match = /filename="?([^";]+)"?/i.exec(cd);
-      const filename = match ? match[1] : "letter.docx";
-      const url = URL.createObjectURL(blob);
-      w.document.open();
-      w.document.write(`<p style="font-family:Segoe UI,Arial,sans-serif;padding:20px">Your letter is ready — <a href="${url}" download="${esc(filename)}" id="dl">click here to download</a> if it doesn't start automatically.</p>`);
-      w.document.close();
-      const a = w.document.getElementById("dl");
-      if (a) a.click();
-    },
+// ---------- accounts step 3: Mark as complete ----------
+// This is also where the deal is written into PropCMA's comparables
+// and the Excel workbook — moved here (from the old single "invoice"
+// step) because "complete" is now the true terminal, fully-processed
+// state under the new workflow.
+async function complete(req, res, deal) {
+  const user = await requireUser(req, ["accounts", "manager"]);
+  if (deal.status !== "deposit_received")
+    throw new HttpError(409, `Cannot complete from status '${deal.status}'`);
+
+  const comment = String(req.body?.comment ?? "").trim();
+
+  const updated = await transition(
+    deal,
+    { status: "complete", accounts_comment: comment || null },
+    user.oid,
+    comment ? `Marked complete — ${comment}` : "Marked complete"
+  );
+
+  // #10 — Confidential / Private Sale deals are excluded from PropCMA and
+  // the Excel comparables sheet entirely. Completion still processes; we
+  // simply don't publish the deal as a market comparable.
+  const isConfidential = !!(updated.confidential || updated.form?.confidential);
+
+  if (isConfidential) {
+    await supabase.from("deal_sheet_events").insert({
+      deal_id: deal.id,
+      actor: user.oid,
+      from_status: "complete",
+      to_status: "complete",
+      note: "Marked Confidential / Private Sale — excluded from PropCMA and Excel comparables",
+    });
+  }
+
+  // Write the completed sale into PropCMA's comparables data as a NEW
+  // row. Deliberately non-fatal: the deal is already marked complete,
+  // and a failed comparable write must not roll that back or block
+  // accounts. The outcome is recorded in the audit trail either way.
+  const pushed = isConfidential
+    ? { ok: false, skipped: true }
+    : await pushToPropCMA(updated);
+  if (!isConfidential) {
+    await supabase.from("deal_sheet_events").insert({
+      deal_id: deal.id,
+      actor: user.oid,
+      from_status: "complete",
+      to_status: "complete",
+      note: pushed.ok
+        ? `Added to PropCMA comparables (properties id ${pushed.id})`
+        : `PropCMA comparable write FAILED — needs manual entry: ${pushed.error}`,
+    });
+  }
+
+  if (pushed.ok) {
+    await supabase.from("deal_sheets")
+      .update({ propcma_property_id: pushed.id }).eq("id", deal.id);
+  }
+
+  // Also append the sale to the Sales Data Colliers.xlsx workbook.
+  // Reuses the same ds_ id and broker names so Excel and Supabase match.
+  // Non-fatal for the same reason; recorded in the audit trail.
+  let excelResult = { ok: false, skipped: true };
+  if (pushed.ok && !isConfidential) {
+    const { data: brokerRows } = await supabase.from("brokers").select("code, first_name");
+    const brokerNames = Object.fromEntries((brokerRows || []).map((b) => [b.code, b.first_name]));
+    excelResult = await appendToExcel(updated, pushed.id, brokerNames);
+    await supabase.from("deal_sheet_events").insert({
+      deal_id: deal.id,
+      actor: user.oid,
+      from_status: "complete",
+      to_status: "complete",
+      note: excelResult.ok
+        ? `Added to Sales Data Colliers.xlsx (row ${excelResult.row})`
+        : `Excel write FAILED — needs manual entry: ${excelResult.error}`,
+    });
+  }
+
+  return res.status(200).json({ ok: true, status: "complete", propcma: pushed, excel: excelResult });
+}
+
+// ---------- accounts: return to broker with a reason ----------
+// Scoped to the two earliest post-submission states — once a deal
+// number is assigned (deposit_received) it's too far along to bounce
+// back this way.
+async function returnToBroker(req, res, deal) {
+  const user = await requireUser(req, ["accounts", "manager"]);
+  if (!["submitted", "invoiced"].includes(deal.status))
+    throw new HttpError(409, `Cannot return from status '${deal.status}'`);
+
+  const note = (req.body?.note || "").trim();
+  if (!note) throw new HttpError(400, "A reason (note) is required");
+
+  await transition(deal, { status: "rejected" }, user.oid, `Returned to broker: ${note}`);
+  return res.status(200).json({ ok: true, status: "rejected" });
+}
+
+/**
+ * Accounts updates the Trust Deposit Receipt No. Editable at ANY status.
+ * The value lives inside the form JSONB (form.deposit.receiptNo), so we
+ * read-modify-write that object rather than a top-level column.
+ */
+async function setReceiptNo(req, res, deal) {
+  const user = await requireUser(req, ["accounts", "manager"]);
+  const { receiptNo } = req.body || {};
+  const value = String(receiptNo ?? "").trim();
+
+  const form = { ...(deal.form || {}) };
+  form.deposit = { ...(form.deposit || {}), receiptNo: value };
+
+  const { error } = await supabase
+    .from("deal_sheets")
+    .update({ form })
+    .eq("id", deal.id);
+  if (error) throw new HttpError(500, "Could not save receipt number");
+
+  await supabase.from("deal_sheet_events").insert({
+    deal_id: deal.id,
+    actor: user.oid,
+    from_status: deal.status,
+    to_status: deal.status,
+    note: value ? `Trust receipt no. set to ${value}` : "Trust receipt no. cleared",
+  });
+
+  return res.status(200).json({ ok: true, receiptNo: value });
+}
+
+/**
+ * Accounts adds or edits a trust deposit — including on a deal the
+ * office admin never flagged as a trust deal. This happens: a deposit
+ * can land in the trust account without the admin knowing at the time
+ * the deal sheet was filed, so accounts spots it later from the bank
+ * feed and records it here. Editable at any status after submission.
+ *
+ * Sets BOTH the top-level deposit_to_trust column AND
+ * form.depositToTrust — the column drives what accounts.html shows,
+ * but the form is what gets rewritten on every save while a deal is
+ * still editable (draft/rejected). If only the column were set and
+ * the deal were later returned to the broker and resubmitted, her
+ * form (still showing the box unticked) would silently overwrite the
+ * column back to false on the next save. Updating both keeps the
+ * correction in place regardless of what happens afterward.
+ *
+ * Also captures the date the deposit was received, and the three
+ * fields the Disbursement letter otherwise leaves blank for finance
+ * to type in by hand: who the balance was paid to, the trust account
+ * number, and the balance due amount (see api/_lib/letters.js /
+ * letter-templates.js). All four feed straight into the Disbursement
+ * letter merge — dateReceived as "Deposit Received on {depositDate}",
+ * the other three as balancePaidTo/trustAccountNo/balanceDue.
+ */
+async function setTrustDeposit(req, res, deal) {
+  const user = await requireUser(req, ["accounts", "manager"]);
+  if (deal.status === "draft")
+    throw new HttpError(409, "Cannot record a trust deposit on a draft — the office admin is still preparing it");
+
+  const { dateReceived, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue } = req.body || {};
+  const dateReceivedValue = String(dateReceived ?? "").trim();
+  const amountValue = String(amount ?? "").trim();
+  const receiptValue = String(receiptNo ?? "").trim();
+  const notesValue = String(notes ?? "").trim();
+  const balancePaidToValue = String(balancePaidTo ?? "").trim();
+  const trustAccountNoValue = String(trustAccountNo ?? "").trim();
+  const balanceDueValue = String(balanceDue ?? "").trim();
+
+  const form = { ...(deal.form || {}) };
+  form.deposit = {
+    ...(form.deposit || {}),
+    dateReceived: dateReceivedValue,
+    amount: amountValue, receiptNo: receiptValue, notes: notesValue,
+    balancePaidTo: balancePaidToValue, trustAccountNo: trustAccountNoValue, balanceDue: balanceDueValue,
   };
+  form.depositToTrust = true;
 
-  // ───────────────────────── demo backend ────────────────────
-  const demoBrokers = [
-    { code:"AS", first_name:"Angus", email:null, active:true },
-    { code:"AB", first_name:"Annabelle", email:null, active:true },
-    { code:"CK", first_name:"Christian", email:"christian@example.com", active:true },
-    { code:"OS", first_name:"Oliver", email:"oliver@example.com", active:true },
-    { code:"SS", first_name:"Sam", email:null, active:true },
-    { code:"TL", first_name:"Tom", email:null, active:true },
-    { code:"WF", first_name:"Will", email:null, active:true },
-  ];
-  const demoAdmins = [
-    { oid:"demo-1", email:"breanna.hodges@collierscanterbury.com", display_name:"Breanna Hodges", role:"office_admin", active:true },
-    { oid:"demo-2", email:"anna.small@collierscanterbury.com", display_name:"Anna Small", role:"office_admin", active:true },
-    { oid:"demo-3", email:"nishu.singh@collierscanterbury.com", display_name:"Nishu Singh", role:"accounts", active:true },
-  ];
+  const wasFlagged = !!deal.deposit_to_trust;
+  const { error } = await supabase
+    .from("deal_sheets")
+    .update({ form, deposit_to_trust: true })
+    .eq("id", deal.id);
+  if (error) throw new HttpError(500, "Could not save trust deposit");
 
-  const demoStore = {
-    seq: 1043,
-    deals: [
-      {
-        id: "ds-1042", status: "submitted", submitted_at: "2026-07-13T09:12:00",
-        salesperson: "OS", division: "Industrial",
-        property_address: "76 Columbia Ave", suburb: "Hornby",
-        vendor_name: "Kay Margot Hodge and Paget & Associates Trustees Ltd",
-        purchaser_name: "Southbase Property Holdings Ltd",
-        unconditional_date: "2026-07-08",
-        sale_price_ex_gst: 1965000, total_invoice_ex_gst: 136590.27,
-        deposit_to_trust: true, confidential: false,
-        file_no: "", deal_no: "",
-        form: { depositToTrust: true, deposit: { amount: "171766.88", receiptNo: "1436758", method: "Direct credit" },
-          checklist: { agencyAgreement: true, unconditionalConfirmation: true, salePriceConfirmation: true, marketingReport: true, spAgreement: true } },
-        splits: [
-          { party_type: "salesperson", party_name: "Oliver", split_pct: 50, split_amount: 68295.13 },
-          { party_type: "salesperson", party_name: "Christian", split_pct: 25, split_amount: 34147.57 },
-          { party_type: "salesperson", party_name: "Sam", split_pct: 25, split_amount: 34147.57 },
-        ],
-        attachments: [
-          { slot: "agencyAgreement", file_name: "Agency_Agreement_Columbia_Ave.pdf", content_type: "application/pdf", size_bytes: 284000 },
-          { slot: "salePriceConfirmation", file_name: "SP_Agreement_p1.pdf", content_type: "application/pdf", size_bytes: 156000 },
-        ],
-        events: [{ created_at: "2026-07-13T09:12:00", note: "Submitted by broker", to_status: "submitted" }],
-      },
-      {
-        id: "ds-1041", status: "processing", submitted_at: "2026-07-11T15:40:00",
-        salesperson: "CK", division: "Office",
-        property_address: "112 Victoria St", suburb: "Christchurch Central",
-        vendor_name: "Victoria House Investments Ltd", purchaser_name: null,
-        unconditional_date: "2026-07-04",
-        sale_price_ex_gst: 3250000, total_invoice_ex_gst: 92500,
-        deposit_to_trust: false, confidential: true,
-        file_no: "F-26-118", deal_no: "D-3072",
-        form: { depositToTrust: false,
-          checklist: { agencyAgreement: true, unconditionalConfirmation: true, salePriceConfirmation: true, marketingReport: true } },
-        splits: [{ party_type: "salesperson", party_name: "CK", split_pct: 100, split_amount: 92500 }],
-        events: [
-          { created_at: "2026-07-11T15:40:00", note: "Submitted by broker", to_status: "submitted" },
-          { created_at: "2026-07-12T08:55:00", note: "File F-26-118 / Deal D-3072 assigned", to_status: "processing" },
-        ],
-      },
-    ],
-  };
+  await supabase.from("deal_sheet_events").insert({
+    deal_id: deal.id,
+    actor: user.oid,
+    from_status: deal.status,
+    to_status: deal.status,
+    note: wasFlagged
+      ? `Trust deposit updated: $${amountValue || "0"}, receipt ${receiptValue || "—"}`
+      : `Trust deposit added by accounts (not flagged by office admin): $${amountValue || "0"}, receipt ${receiptValue || "—"}`,
+  });
 
-  const clone = (o) => JSON.parse(JSON.stringify(o));
-  const delay = (v) => new Promise((r) => setTimeout(() => r(clone(v)), 150));
-  const findDeal = (id) => demoStore.deals.find((d) => d.id === id);
+  return res.status(200).json({
+    ok: true, dateReceived: dateReceivedValue, amount: amountValue, receiptNo: receiptValue, notes: notesValue,
+    balancePaidTo: balancePaidToValue, trustAccountNo: trustAccountNoValue, balanceDue: balanceDueValue,
+  });
+}
 
-  const demo = {
-    listMine: () => delay(demoStore.deals.map(({ id, status, property_address, vendor_name, total_invoice_ex_gst }) =>
-      ({ id, status, property_address, vendor_name, total_invoice_ex_gst }))),
-    saveDraft: (form, id, dealType) => {
-      let d = id && findDeal(id);
-      if (!d) {
-        d = { id: `ds-${demoStore.seq++}`, status: "draft", splits: [], events: [] };
-        demoStore.deals.unshift(d);
-      }
-      d.form = clone(form);
-      d.property_address = (form.property?.address || "").trim();
-      d.vendor_name = form.vendor?.name || "";
-      return delay({ id: d.id, status: d.status });
-    },
-    submit: (id) => {
-      const d = findDeal(id);
-      d.status = "submitted";
-      d.submitted_at = new Date().toISOString();
-      d.events.push({ created_at: d.submitted_at, note: "Submitted by broker", to_status: "submitted" });
-      return delay({ ok: true, status: "submitted", emailed: true });
-    },
-    get: (id) => delay(findDeal(id)),
-    deleteDeal: (id) => {
-      const i = demoStore.deals.findIndex((d) => d.id === id);
-      if (i >= 0) demoStore.deals.splice(i, 1);
-      return delay({ ok: true });
-    },
-    getQueue: (status) =>
-      delay(demoStore.deals.filter((d) => d.status !== "draft" && (!status || d.status === status))),
-    getDrafts: () => delay(demoStore.deals.filter((d) => d.status === "draft")),
-    setReceipt: (id, receiptNo) => {
-      const d = findDeal(id);
-      d.form = d.form || {}; d.form.deposit = { ...(d.form.deposit || {}), receiptNo };
-      return delay({ ok: true, receiptNo });
-    },
-    setTrustDeposit: (id, { dateReceived, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue } = {}) => {
-      const d = findDeal(id);
-      d.form = d.form || {}; d.form.deposit = { ...(d.form.deposit || {}), dateReceived, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue };
-      d.deposit_to_trust = true;
-      return delay({ ok: true, dateReceived, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue });
-    },
-    setChecklistItem: (id, key, value) => {
-      const d = findDeal(id);
-      d.form = d.form || {}; d.form.checklist = { ...(d.form.checklist || {}), [key]: !!value };
-      return delay({ ok: true, key, value: !!value });
-    },
-    invoiceClient: (id) => {
-      const d = findDeal(id);
-      d.status = "invoiced";
-      d.events.push({ created_at: new Date().toISOString(), note: "Invoiced client", to_status: "invoiced" });
-      return delay({ ok: true });
-    },
-    assignDealNumber: (id, dealNo) => {
-      const d = findDeal(id);
-      d.status = "deposit_received"; d.deal_no = dealNo;
-      d.events.push({ created_at: new Date().toISOString(), note: `Deal ${dealNo} assigned`, to_status: "deposit_received" });
-      return delay({ ok: true });
-    },
-    markComplete: (id, comment) => {
-      const d = findDeal(id);
-      d.status = "complete"; d.accounts_comment = comment || null;
-      d.events.push({ created_at: new Date().toISOString(), note: comment ? `Marked complete — ${comment}` : "Marked complete", to_status: "complete" });
-      return delay({ ok: true });
-    },
-    returnToBroker: (id, note) => {
-      const d = findDeal(id);
-      d.status = "rejected";
-      d.events.push({ created_at: new Date().toISOString(), note: `Returned to broker: ${note}`, to_status: "rejected" });
-      return delay({ ok: true });
-    },
+/**
+ * Accounts marks a mandatory checklist item complete (or clears it),
+ * directly on accounts.html — without needing to bounce the deal back
+ * to the broker for something she can confirm or attach herself.
+ * Editable while the deal is somewhere between submitted and complete
+ * — not on a draft (still the broker's own work), and not once a
+ * deal is fully complete (nothing left to unblock at that point).
+ */
+const CHECKLIST_KEYS = new Set([
+  "agencyAgreement", "unconditionalConfirmation", "executedAgreement", "amlComplete",
+  "spAgreement", "marketingReport", "leaseValueConfirmation", "leaseDeed",
+  "appraisals", "salePriceConfirmation", "tenancySchedule",
+]);
 
-    // ---- attachments (demo: metadata only, no real storage) ----
-    uploadAttachment: (id, slot, file) => {
-      const d = findDeal(id);
-      if (d) { d.form = d.form || {}; d.form.attachments = d.form.attachments || {}; d.form.attachments[slot] = { name: file.name, path: `demo/${id}/${slot}`, size: file.size }; }
-      return delay({ slot, name: file.name, path: `demo/${id}/${slot}`, size: file.size });
-    },
-    removeAttachment: (id, slot) => {
-      const d = findDeal(id);
-      if (d && d.form && d.form.attachments) delete d.form.attachments[slot];
-      if (d && d.attachments) d.attachments = d.attachments.filter((a) => a.slot !== slot);
-      return delay({ ok: true });
-    },
-    uploadExtraAttachment: (id, description, file) => {
-      const d = findDeal(id);
-      const slot = `extra_${Math.random().toString(36).slice(2)}`;
-      const row = { id: slot, slot, kind: "extra", description, file_name: file.name,
-        size_bytes: file.size, uploaded_at: new Date().toISOString() };
-      if (d) { d.attachments = d.attachments || []; d.attachments.push(row); }
-      return delay({ id: slot, slot, name: file.name, description, size: file.size });
-    },
-    attachmentUrl: (id, slot, opts) => delay({ url: "#demo-file-" + slot }),
+async function setChecklistItem(req, res, deal) {
+  const user = await requireUser(req, ["accounts", "manager"]);
+  if (!["submitted", "invoiced", "deposit_received"].includes(deal.status))
+    throw new HttpError(409, `Cannot edit the checklist from status '${deal.status}'`);
 
-    listBrokers: () => delay(demoBrokers.filter((b) => b.active)),
-    listAllBrokers: () => delay(demoBrokers),
-    listAdmins: () => delay(demoAdmins),
-    saveBroker: (b) => {
-      const i = demoBrokers.findIndex((x) => x.code === b.code.toUpperCase());
-      const row = { code: b.code.toUpperCase(), first_name: b.firstName, email: b.email || null, active: true };
-      if (i >= 0) demoBrokers[i] = row; else demoBrokers.push(row);
-      demoBrokers.sort((a, z) => a.first_name.localeCompare(z.first_name));
-      return delay({ ok: true });
-    },
-    saveAdmin: (a) => {
-      const i = demoAdmins.findIndex((x) => x.oid === a.oid);
-      const row = { oid: a.oid, email: a.email || null, display_name: a.displayName || null, role: a.role || "office_admin", active: true };
-      if (i >= 0) demoAdmins[i] = row; else demoAdmins.push(row);
-      return delay({ ok: true });
-    },
-    removeBroker: (code) => {
-      const b = demoBrokers.find((x) => x.code === code); if (b) b.active = false;
-      return delay({ ok: true });
-    },
-    removeAdmin: (oid) => {
-      const a = demoAdmins.find((x) => x.oid === oid); if (a) a.active = false;
-      return delay({ ok: true });
-    },
-    openPrint: () => alert("Print preview isn't available in demo mode."),
-    openLetter: () => alert("Letters aren't available in demo mode."),
-  };
+  const { key, value } = req.body || {};
+  if (!CHECKLIST_KEYS.has(key)) throw new HttpError(400, "Invalid checklist item");
 
-  window.DealSheetApi = cfg.DEMO_MODE ? demo : live;
-})();
+  const form = { ...(deal.form || {}) };
+  form.checklist = { ...(form.checklist || {}), [key]: !!value };
+
+  const { error } = await supabase
+    .from("deal_sheets")
+    .update({ form })
+    .eq("id", deal.id);
+  if (error) throw new HttpError(500, "Could not save checklist item");
+
+  await supabase.from("deal_sheet_events").insert({
+    deal_id: deal.id,
+    actor: user.oid,
+    from_status: deal.status,
+    to_status: deal.status,
+    note: `Checklist — ${key} marked ${value ? "complete" : "incomplete"} by accounts`,
+  });
+
+  return res.status(200).json({ ok: true, key, value: !!value });
+}
