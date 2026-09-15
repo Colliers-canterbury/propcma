@@ -66,7 +66,21 @@
   const state = { tab: "queue", queue: [], completed: [], drafts: [], selectedId: null, deal: null,
     completedViewId: null,
     filter: "all", note: "", completeComment: "", pendingNums: {},
-    brokers: [], admins: [], userRole: "" };
+    brokers: [], admins: [], userRole: "",
+    queueSearch: "", completedSearch: "",
+    completedSort: { key: "submitted_at", dir: "desc" } };
+
+  // Free-text search shared by the Queue and Completed lists — matches
+  // property, vendor/purchaser, salesperson, division and deal number.
+  // Multi-word queries are ANDed (each word must appear somewhere), so
+  // e.g. "smith rolleston" finds a deal with vendor Smith on a Rolleston
+  // Street property even though the words aren't adjacent.
+  function matchesSearch(d, q) {
+    if (!q || !q.trim()) return true;
+    const hay = [d.property_address, d.vendor_name, d.purchaser_name, d.salesperson, d.division, d.deal_no]
+      .map((v) => String(v || "").toLowerCase()).join(" ");
+    return q.trim().toLowerCase().split(/\s+/).every((term) => hay.includes(term));
+  }
 
   async function loadQueue() {
     state.queue = await api.getQueue();
@@ -138,13 +152,17 @@
   function render() {
     const showingDrafts = state.filter === "drafts";
     const queueItems = state.queue.filter((d) => d.status !== "complete")
-      .filter((d) => state.filter === "all" || d.status === state.filter);
+      .filter((d) => state.filter === "all" || d.status === state.filter)
+      .filter((d) => matchesSearch(d, state.queueSearch));
+    const draftsMatched = state.drafts.filter((d) => matchesSearch(d, state.queueSearch));
     // "All" shows the active queue first, then drafts at the bottom.
-    // "Drafts" shows only drafts.
+    // "Drafts" shows only drafts. Search (state.queueSearch) is an
+    // additional filter layered on top of whichever status filter is
+    // active, same as the status buttons.
     const shown = showingDrafts
-      ? state.drafts
+      ? draftsMatched
       : state.filter === "all"
-        ? [...queueItems, ...state.drafts]
+        ? [...queueItems, ...draftsMatched]
         : queueItems;
 
     $("app").innerHTML = `
@@ -165,6 +183,11 @@
       ${state.tab !== "queue" ? `<div id="tabBody"></div>` : `
       <div class="layout accounts">
         <aside class="queue">
+          <div class="queueSearchBar" style="margin-bottom:8px">
+            <input id="queueSearch" type="search" value="${esc(state.queueSearch)}"
+              placeholder="Search property, vendor, salesperson, deal no…"
+              style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #DCE2EC;border-radius:6px;font:inherit" />
+          </div>
           <div class="filters">
             ${["all","submitted","invoiced","deposit_received","rejected"].map((s) =>
               `<button class="fbtn ${state.filter===s?"on":""}" data-filter="${s}">${s==="all"?"All":META[s].label}</button>`).join("")}
@@ -176,7 +199,7 @@
             <div class="rowSub">${esc(d.salesperson||"")} · ${esc(d.division||"")} · $${fmt(d.total_invoice_ex_gst)} to invoice
               ${d.deposit_to_trust?'<span class="trustDot"> · TRUST</span>':""}
               ${d.confidential?'<span class="confDot"> · CONFIDENTIAL</span>':""}</div></button>`).join("")
-            || `<p class="empty">${showingDrafts?"No drafts in progress.":"No deal sheets in this state."}</p>`}
+            || `<p class="empty">${state.queueSearch.trim() ? "No deal sheets match your search." : showingDrafts?"No drafts in progress.":"No deal sheets in this state."}</p>`}
         </aside>
         <main id="detail"></main>
       </div>`}`;
@@ -191,6 +214,16 @@
       });
 
     if (state.tab === "queue") {
+      const qsEl = $("queueSearch");
+      if (qsEl) qsEl.oninput = () => {
+        const cursor = qsEl.selectionStart;
+        state.queueSearch = qsEl.value;
+        render();
+        // Full re-render replaces the input element, so refocus and put
+        // the cursor back where it was or every keystroke drops focus.
+        const fresh = $("queueSearch");
+        if (fresh) { fresh.focus(); fresh.setSelectionRange(cursor, cursor); }
+      };
       $("app").querySelectorAll("[data-filter]").forEach((b) =>
         b.onclick = async () => {
           state.filter = b.dataset.filter;
@@ -227,13 +260,46 @@
       return;
     }
 
-    const rows = [...state.completed].sort((a, b) =>
-      new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
-    $("tabBody").innerHTML = rows.length ? `
+    // Column headers double as sort controls — click to sort by that
+    // column, click again to flip direction. Defaults to newest-first
+    // by Date, matching the previous fixed sort.
+    const COLS = [
+      { key: "property_address", label: "Property" },
+      { key: "vendor_name", label: "Vendor" },
+      { key: "salesperson", label: "Salespeople" },
+      { key: "total_invoice_ex_gst", label: "Invoiced", cls: "r" },
+      { key: "deal_no", label: "Deal no." },
+      { key: "submitted_at", label: "Date" },
+    ];
+    const NUMERIC = new Set(["total_invoice_ex_gst"]);
+    const DATE = new Set(["submitted_at"]);
+    const { key: sortKey, dir: sortDir } = state.completedSort;
+    const mul = sortDir === "asc" ? 1 : -1;
+    const rows = state.completed
+      .filter((d) => matchesSearch(d, state.completedSearch))
+      .sort((a, b) => {
+        let av = a[sortKey], bv = b[sortKey];
+        if (NUMERIC.has(sortKey)) { av = Number(av || 0); bv = Number(bv || 0); }
+        else if (DATE.has(sortKey)) { av = new Date(av || 0).getTime(); bv = new Date(bv || 0).getTime(); }
+        else { av = String(av || "").toLowerCase(); bv = String(bv || "").toLowerCase(); }
+        if (av < bv) return -1 * mul;
+        if (av > bv) return 1 * mul;
+        return 0;
+      });
+    const arrow = (k) => k === sortKey ? (sortDir === "asc" ? " ▲" : " ▼") : "";
+
+    $("tabBody").innerHTML = `
+      <div class="compSearchBar" style="margin-bottom:8px">
+        <input id="completedSearch" type="search" value="${esc(state.completedSearch)}"
+          placeholder="Search property, vendor, salesperson, deal no…"
+          style="width:100%;max-width:360px;box-sizing:border-box;padding:8px 10px;border:1px solid #DCE2EC;border-radius:6px;font:inherit" />
+      </div>
+      ${state.completed.length ? `
       <table class="compTable">
-        <thead><tr><th>Property</th><th>Vendor</th><th>Salespeople</th>
-          <th class="r">Invoiced</th><th>Deal no.</th><th>Date</th><th colspan="2"></th></tr></thead>
-        <tbody>${rows.map((d) => `<tr>
+        <thead><tr>${COLS.map((c) =>
+          `<th class="sortable ${c.cls||""}" data-sort="${c.key}" style="cursor:pointer;user-select:none" title="Sort by ${esc(c.label)}">${esc(c.label)}${arrow(c.key)}</th>`).join("")}
+          <th colspan="2"></th></tr></thead>
+        <tbody>${rows.length ? rows.map((d) => `<tr>
           <td><strong>${esc(d.property_address || "—")}</strong></td>
           <td>${esc(d.vendor_name || "—")}</td>
           <td>${esc(d.salesperson || "—")}</td>
@@ -242,8 +308,31 @@
           <td>${d.submitted_at ? new Date(d.submitted_at).toLocaleDateString("en-NZ",{day:"2-digit",month:"short",year:"numeric"}) : "—"}</td>
           <td class="r"><button class="linkBtn" data-view="${d.id}">View</button></td>
           <td class="r"><button class="linkBtn" data-print="${d.id}">Print</button></td>
-        </tr>`).join("")}</tbody></table>`
-      : `<p class="empty">No completed deals yet.</p>`;
+        </tr>`).join("") : `<tr><td colspan="8" class="empty">No completed deals match your search.</td></tr>`}</tbody></table>`
+      : `<p class="empty">No completed deals yet.</p>`}`;
+
+    const csEl = $("completedSearch");
+    if (csEl) csEl.oninput = () => {
+      const cursor = csEl.selectionStart;
+      state.completedSearch = csEl.value;
+      renderCompleted();
+      // Full re-render replaces the input element, so refocus and put
+      // the cursor back where it was or every keystroke drops focus.
+      const fresh = $("completedSearch");
+      if (fresh) { fresh.focus(); fresh.setSelectionRange(cursor, cursor); }
+    };
+    $("tabBody").querySelectorAll("[data-sort]").forEach((th) =>
+      th.onclick = () => {
+        const k = th.dataset.sort;
+        if (state.completedSort.key === k) {
+          state.completedSort = { key: k, dir: state.completedSort.dir === "asc" ? "desc" : "asc" };
+        } else {
+          // First click on a new column: dates/amounts default to
+          // newest/highest-first, text columns default A→Z.
+          state.completedSort = { key: k, dir: (NUMERIC.has(k) || DATE.has(k)) ? "desc" : "asc" };
+        }
+        renderCompleted();
+      });
     $("tabBody").querySelectorAll("[data-print]").forEach((b) =>
       b.onclick = () => api.openPrint(b.dataset.print));
     $("tabBody").querySelectorAll("[data-view]").forEach((b) =>
