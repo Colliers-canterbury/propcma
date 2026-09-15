@@ -77,9 +77,29 @@
   // Street property even though the words aren't adjacent.
   function matchesSearch(d, q) {
     if (!q || !q.trim()) return true;
-    const hay = [d.property_address, d.vendor_name, d.purchaser_name, d.salesperson, d.division, d.deal_no]
-      .map((v) => String(v || "").toLowerCase()).join(" ");
+    // Also reaches into form.vendor/purchaser/lessor/lessee (name +
+    // solicitor name/firm) when present, so solicitor searches work
+    // wherever the list response happens to include the form JSONB —
+    // harmless no-op where it doesn't.
+    const f = d.form || {};
+    const party = (obj) => obj ? [obj.name, obj.solicitorName, obj.solicitorFirm] : [];
+    const hay = [
+      d.property_address, d.vendor_name, d.purchaser_name, d.salesperson, d.division, d.deal_no,
+      ...party(f.vendor), ...party(f.purchaser), ...party(f.lessor), ...party(f.lessee),
+    ].map((v) => String(v || "").toLowerCase()).join(" ");
     return q.trim().toLowerCase().split(/\s+/).every((term) => hay.includes(term));
+  }
+
+  // Formats a party's solicitor for display: "Name — Firm" with the
+  // email as a mailto link when present. Used in the Deal section below.
+  function solicitorLine(party) {
+    party = party || {};
+    const name = party.solicitorName || "";
+    const firm = party.solicitorFirm || "";
+    const email = party.solicitorEmail || "";
+    const label = [name, firm].filter(Boolean).join(" — ");
+    if (!label && !email) return "—";
+    return `${esc(label || "—")}${email ? ` <a href="mailto:${esc(email)}" class="dim">${esc(email)}</a>` : ""}`;
   }
 
   async function loadQueue() {
@@ -485,7 +505,9 @@
           <h3>Deal</h3>
           <dl>
             <div><dt>${d.deal_type === "lease" ? "Lessor" : "Vendor"}</dt><dd>${esc(d.vendor_name||"—")}</dd></div>
+            <div><dt>${d.deal_type === "lease" ? "Lessor's solicitor" : "Vendor's solicitor"}</dt><dd>${solicitorLine(d.deal_type === "lease" ? f.lessor : f.vendor)}</dd></div>
             <div><dt>${d.deal_type === "lease" ? "Lessee" : "Purchaser"}</dt><dd>${esc(d.purchaser_name||"—")}</dd></div>
+            <div><dt>${d.deal_type === "lease" ? "Lessee's solicitor" : "Purchaser's solicitor"}</dt><dd>${solicitorLine(d.deal_type === "lease" ? f.lessee : f.purchaser)}</dd></div>
             <div><dt>${d.deal_type === "lease" ? "Commencement" : "Unconditional"}</dt><dd>${esc(
               d.deal_type === "lease"
                 ? (d.form?.lease?.commencementDate || d.unconditional_date || "—")
