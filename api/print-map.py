@@ -63,10 +63,12 @@ LU = {
     "Apartments":  ("#14B2C6", "#0C7E8D"),
     "Hotels":      ("#FFBB38", "#C4860C"),
     "Bars":        ("#FA832E", "#B85A16"),
-    "Industrial":  ("#B93794", "#7F2367"),
     "Clubs":       ("#7CA5D6", "#4B70A3"),
     "Development": ("#D5E4E7", "#A9BDC2"),
     "Parking":     ("#93DEFE", "#4FA9CE"),
+    # "Industrial" removed from the key -- any building classified that way
+    # (e.g. substations) now just renders with the Commercial colour via the
+    # LU.get(lu, LU["Commercial"]) fallback below, so nothing goes uncoloured.
 }
 PARK_FILL, PARK_EDGE   = "#A5C57D", "#71943F"
 WATER_FILL, WATER_EDGE = "#5FCBEC", "#1CA4DE"
@@ -365,7 +367,7 @@ def build_map_figure(overrides):
 
     legend_items = [
         "Commercial", "Retailing Activity", "Apartments / Residential", "Hotels / Serviced Apts",
-        "Bars", "Industrial", "Clubs / Sport / Govt", "Development / Vacant Sites",
+        "Bars", "Clubs / Sport / Govt", "Development / Vacant Sites",
         "Parks / Gardens", "Parking",
     ]
     name_to_color = dict(LU)
@@ -376,7 +378,7 @@ def build_map_figure(overrides):
             "Commercial": "Commercial", "Retailing Activity": "Retail",
             "Apartments / Residential": "Apartments", "Hotels / Serviced Apts": "Hotels",
             "Bars": "Bars", "Development / Vacant Sites": "Development", "Parks / Gardens": "Parks / Gardens",
-            "Parking": "Parking", "Industrial": "Industrial", "Clubs / Sport / Govt": "Clubs",
+            "Parking": "Parking", "Clubs / Sport / Govt": "Clubs",
         }
         k = key_map[label]
         return name_to_color.get(k, LU.get(k))
