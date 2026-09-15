@@ -437,6 +437,10 @@
           </dl>`}
           ${!isDraft ? `<h3>Trust deposit</h3>
           ${d.deposit_to_trust ? `<dl>
+            <div><dt>Date Deposit Received</dt><dd>
+              <span class="receiptEdit">
+                <input type="date" id="trustDateReceived" value="${esc(d.form?.deposit?.dateReceived||"")}" />
+              </span></dd></div>
             <div><dt>Amount</dt><dd>
               <span class="receiptEdit">
                 <input id="trustAmount" value="${esc(d.form?.deposit?.amount||"")}" placeholder="0.00" />
@@ -468,6 +472,7 @@
           <p class="note">Not flagged as a trust deposit by the office admin. If a deposit has come through to the trust account, add it here.</p>
           <button id="addTrustBtn" class="linkBtn">+ Add trust deposit</button>
           <div id="addTrustForm" class="hidden">
+            <label class="fld"><span class="lbl">Date Deposit Received</span><input type="date" id="trustDateReceived" /></label>
             <div class="grid" style="margin-top:8px">
               <label class="fld"><span class="lbl">Amount (excl GST)</span><input id="trustAmount" placeholder="0.00" /></label>
               <label class="fld"><span class="lbl">Receipt no.</span><input id="trustReceiptNo" placeholder="Enter receipt no." /></label>
@@ -627,6 +632,7 @@
 
     const trustSave = $("trustSave");
     if (trustSave) trustSave.onclick = async () => {
+      const dateReceived = ($("trustDateReceived")?.value || "").trim();
       const amount = ($("trustAmount").value || "").trim();
       const receiptNo = ($("trustReceiptNo").value || "").trim();
       const notes = ($("trustNotes")?.value || "").trim();
@@ -637,9 +643,9 @@
       trustSave.disabled = true;
       if (tst) tst.textContent = "Saving…";
       try {
-        await api.setTrustDeposit(state.deal.id, { amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue });
+        await api.setTrustDeposit(state.deal.id, { dateReceived, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue });
         state.deal.form = state.deal.form || {};
-        state.deal.form.deposit = { ...(state.deal.form.deposit || {}), amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue };
+        state.deal.form.deposit = { ...(state.deal.form.deposit || {}), dateReceived, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue };
         state.deal.deposit_to_trust = true;
         if (tst) tst.textContent = "Saved ✓";
         render();
