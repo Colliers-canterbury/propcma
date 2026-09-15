@@ -41,8 +41,8 @@
     assignDealNumber: (id, dealNo) => call(`/${id}/assign-deal-number`, { method: "POST", body: { dealNo } }),
     markComplete: (id, comment) => call(`/${id}/complete`, { method: "POST", body: { comment } }),
     setReceipt: (id, receiptNo) => call(`/${id}/receipt`, { method: "POST", body: { receiptNo } }),
-    setTrustDeposit: (id, { amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue } = {}) =>
-      call(`/${id}/trust-deposit`, { method: "POST", body: { amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue } }),
+    setTrustDeposit: (id, { dateReceived, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue } = {}) =>
+      call(`/${id}/trust-deposit`, { method: "POST", body: { dateReceived, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue } }),
     setChecklistItem: (id, key, value) => call(`/${id}/checklist`, { method: "POST", body: { key, value } }),
     returnToBroker: (id, note) => call(`/${id}/return`, { method: "POST", body: { note } }),
 
@@ -278,11 +278,11 @@
       d.form = d.form || {}; d.form.deposit = { ...(d.form.deposit || {}), receiptNo };
       return delay({ ok: true, receiptNo });
     },
-    setTrustDeposit: (id, { amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue } = {}) => {
+    setTrustDeposit: (id, { dateReceived, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue } = {}) => {
       const d = findDeal(id);
-      d.form = d.form || {}; d.form.deposit = { ...(d.form.deposit || {}), amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue };
+      d.form = d.form || {}; d.form.deposit = { ...(d.form.deposit || {}), dateReceived, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue };
       d.deposit_to_trust = true;
-      return delay({ ok: true, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue });
+      return delay({ ok: true, dateReceived, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue });
     },
     setChecklistItem: (id, key, value) => {
       const d = findDeal(id);
