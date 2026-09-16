@@ -36,6 +36,26 @@
     rejected:         { label: "Returned",           cls: "rej" },
   };
 
+  // The "deposit_received" workflow stage starts the moment accounts
+  // assigns a deal number (see action.js assignDealNumber()) — that's a
+  // step-2-of-3 marker, not proof a trust deposit has actually come in.
+  // Until accounts fills in both the trust deposit Amount and Receipt no.
+  // fields, showing the purple "Deposit Received" pill is misleading (a
+  // deal can sit in this status with no trust deposit at all, e.g. a
+  // lease with nothing to deposit yet). So the pill only reads "Deposit
+  // Received" once both fields are actually filled in; before that it
+  // shows "Deal Number Assigned" instead — same underlying status, same
+  // actions available, just an accurate label.
+  const depositLogged = (d) => {
+    const dep = (d.form || {}).deposit || {};
+    return !!(String(dep.amount ?? "").trim() && String(dep.receiptNo ?? "").trim());
+  };
+  const statusMeta = (d) => {
+    if (d.status === "deposit_received" && !depositLogged(d))
+      return { label: "Deal Number Assigned", cls: "proc" };
+    return META[d.status] || { cls: "pillDraft", label: "Draft" };
+  };
+
   // Merged-letter downloads (see api/deal-sheets/[id]/letter.js). The two
   // Early Release letters use Vendor/Purchaser wording and only apply to
   // sale deals; the Disbursement letter works for both (it swaps in
@@ -215,7 +235,7 @@
           </div>
           ${shown.map((d) => `<button class="row ${state.selectedId===d.id?"sel":""}" data-id="${d.id}">
             <div class="rowTop"><strong>${d.deal_type==="lease"?`<span class="typePill lease">Lease</span> `:""}${esc(d.property_address||"—")}</strong>
-              <span class="pill ${(META[d.status]||{cls:"pillDraft"}).cls}">${(META[d.status]||{label:"Draft"}).label}</span></div>
+              <span class="pill ${statusMeta(d).cls}">${statusMeta(d).label}</span></div>
             <div class="rowSub">${esc(d.salesperson||"")} · ${esc(d.division||"")} · $${fmt(d.total_invoice_ex_gst)} to invoice
               ${d.deposit_to_trust?'<span class="trustDot"> · TRUST</span>':""}
               ${d.confidential?'<span class="confDot"> · CONFIDENTIAL</span>':""}</div></button>`).join("")
@@ -470,7 +490,7 @@
     const extraAttachments = allAttachments.filter((a) => a.kind === "extra");
 
     el.className = "detail";
-    const meta = META[d.status] || { cls: "pillDraft", label: "Draft" };
+    const meta = statusMeta(d);
     const isDraft = d.status === "draft";
     // Accounts can complete/attach a missing mandatory item herself,
     // rather than always having to bounce the deal back to the broker
