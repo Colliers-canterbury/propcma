@@ -15,6 +15,15 @@
 //                          visible to the office admin on admin.html; this is also
 //                          where the deal is written into PropCMA/Excel — see complete())
 //
+// Sep 2026: step 2's "deposit_received" status can now also be reached
+// by recording the trust deposit itself — see setTrustDeposit() below.
+// Whichever happens first (a deal number is assigned, or the trust
+// deposit's Amount + Receipt no. are both entered) advances the deal to
+// deposit_received; the other can then happen in either order. Marking
+// complete (step 3) still requires a deal number, so if the deposit
+// arrives first, assignDealNumber() is broadened to also accept a deal
+// already at deposit_received (see below) rather than only "invoiced".
+//
 // Every transition writes a deal_sheet_events row with the acting
 // user's oid — the audit trail for REAA/AML record-keeping.
 
@@ -143,10 +152,17 @@ async function invoiceClient(req, res, deal) {
 }
 
 // ---------- accounts step 2: Assign Deal Number ----------
+// Accepts a deal already at "deposit_received" too — the trust deposit
+// can now push a deal into that status ahead of the deal number (see
+// setTrustDeposit()), so assigning the number afterward must still work.
+// The status patch is a no-op in that case; only deal_no/processed_by
+// actually change.
 async function assignDealNumber(req, res, deal) {
   const user = await requireUser(req, ["accounts", "manager"]);
-  if (deal.status !== "invoiced")
+  if (!["invoiced", "deposit_received"].includes(deal.status))
     throw new HttpError(409, `Cannot assign a deal number from status '${deal.status}'`);
+  if (deal.deal_no)
+    throw new HttpError(409, "A deal number has already been assigned");
 
   const { dealNo } = req.body || {};
   if (!dealNo) throw new HttpError(400, "dealNo is required");
@@ -169,6 +185,11 @@ async function complete(req, res, deal) {
   const user = await requireUser(req, ["accounts", "manager"]);
   if (deal.status !== "deposit_received")
     throw new HttpError(409, `Cannot complete from status '${deal.status}'`);
+  // The trust deposit can now advance a deal to deposit_received ahead
+  // of the deal number (see setTrustDeposit()) — don't let it be marked
+  // complete until a deal number actually exists.
+  if (!deal.deal_no)
+    throw new HttpError(409, "Assign a deal number before marking this deal complete");
 
   const comment = String(req.body?.comment ?? "").trim();
 
@@ -309,6 +330,10 @@ async function setReceiptNo(req, res, deal) {
  * letter-templates.js). All four feed straight into the Disbursement
  * letter merge — dateReceived as "Deposit Received on {depositDate}",
  * the other three as balancePaidTo/trustAccountNo/balanceDue.
+ *
+ * Sep 2026: filling in both Amount and Receipt no. while the deal is at
+ * "invoiced" now also advances it straight to "deposit_received" — see
+ * the transition() call at the end of this function.
  */
 async function setTrustDeposit(req, res, deal) {
   const user = await requireUser(req, ["accounts", "manager"]);
@@ -350,9 +375,30 @@ async function setTrustDeposit(req, res, deal) {
       : `Trust deposit added by accounts (not flagged by office admin): $${amountValue || "0"}, receipt ${receiptValue || "—"}`,
   });
 
+  // Recording both the amount and the receipt no. is what actually
+  // confirms the deposit landed in trust, so that's what should move the
+  // deal into "Deposit Received" — not, as before, only assigning a deal
+  // number (see assignDealNumber()), which is really a separate, unrelated
+  // piece of data-entry that can now happen before or after this. Only
+  // auto-advances from "invoiced": a deal not yet invoiced shouldn't skip
+  // that step, and one already at deposit_received/complete/etc. is left
+  // alone (idempotent — re-saving the same deposit details twice must not
+  // re-fire a transition or error).
+  let statusOut = deal.status;
+  if (amountValue && receiptValue && deal.status === "invoiced") {
+    const updated = await transition(
+      deal,
+      { status: "deposit_received" },
+      user.oid,
+      `Trust deposit recorded ($${amountValue}, receipt ${receiptValue}) — deposit received`
+    );
+    statusOut = updated.status;
+  }
+
   return res.status(200).json({
     ok: true, dateReceived: dateReceivedValue, amount: amountValue, receiptNo: receiptValue, notes: notesValue,
     balancePaidTo: balancePaidToValue, trustAccountNo: trustAccountNoValue, balanceDue: balanceDueValue,
+    status: statusOut,
   });
 }
 
