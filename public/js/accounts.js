@@ -715,16 +715,17 @@
               <button class="ghost" id="returnBtn">Return to broker</button>
             </div>` : ""}
 
-          ${d.status==="invoiced" ? `
+          ${(d.status==="invoiced" || (d.status==="deposit_received" && !d.deal_no)) ? `
             <label class="fld"><span class="lbl">Deal no.</span>
               <input id="dealNo" value="${esc(state.pendingNums.dealNo)}" placeholder="e.g. D-3073" /></label>
             <button class="primary" id="assignDealNoBtn">Assign Deal Number</button>
+            ${d.status==="invoiced" ? `
             <div class="returnBox">
               <textarea id="returnNote" rows="2" placeholder="Reason for returning to broker…">${esc(state.note)}</textarea>
               <button class="ghost" id="returnBtn">Return to broker</button>
-            </div>` : ""}
+            </div>` : `<p class="note">Trust deposit recorded — assign a deal number to continue.</p>`}` : ""}
 
-          ${d.status==="deposit_received" ? `
+          ${(d.status==="deposit_received" && d.deal_no) ? `
             <label class="fld"><span class="lbl">Comments <span class="dim">(optional — visible to the office admin)</span></span>
               <textarea id="completeComment" rows="3" placeholder="Any notes for the office admin…">${esc(state.completeComment)}</textarea></label>
             <button class="primary" id="completeBtn">Mark as complete</button>` : ""}
@@ -786,11 +787,13 @@
       if (tst) tst.textContent = "Saving…";
       try {
         await api.setTrustDeposit(state.deal.id, { dateReceived, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue });
-        state.deal.form = state.deal.form || {};
-        state.deal.form.deposit = { ...(state.deal.form.deposit || {}), dateReceived, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue };
-        state.deal.deposit_to_trust = true;
         if (tst) tst.textContent = "Saved ✓";
-        render();
+        // Entering both the amount and receipt no. can advance the deal
+        // to "Deposit Received" server-side (see action.js
+        // setTrustDeposit) — refresh from the server rather than only
+        // patching form.deposit locally, so the status pill and the
+        // Queue sidebar/filter pick up the change immediately.
+        await refresh();
       } catch (e) {
         if (tst) tst.textContent = "Failed — try again";
       } finally {
