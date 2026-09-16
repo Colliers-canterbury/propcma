@@ -305,7 +305,13 @@ function renderBoard(target){
         catch(err){ console.error('row failed:', d, err); }
       });
       sec.querySelector('.addrow').onclick=()=>{
-        const d={id:'tmp'+Date.now(),s:st,a:'',tn:'',lt:'',t:'',td:/^uncondition/i.test(st)?TODAY():'',f:0,pr:'',b:'',st:'',aml:'',inv:false,isNew:true};
+        /* brokerFilter is '' on the Pipeline tab and the selected code on
+           Broker Pipeline (cleared on tab switch, line ~1586). Seeding
+           the broker field from it matters more than it looks: a new row
+           with no broker fails the visibleDeals() filter, so the
+           renderBoard() below would delete it from view the instant it
+           was created. Add other brokers in the Broker cell as usual. */
+        const d={id:'tmp'+Date.now(),s:st,a:'',tn:'',lt:'',t:'',td:/^uncondition/i.test(st)?TODAY():'',f:0,pr:'',b:brokerFilter,st:'',aml:'',inv:false,isNew:true};
         S().deals.push(d);renderBoard();renderTally();
         const c=wrap.querySelector(`[data-id="${d.id}"] [contenteditable]`);if(c)c.focus();
       };
@@ -393,10 +399,16 @@ function dealRow(d){
       : `<input type="date" class="dateinput" value="${esc(d.td)}">${
           (!d.td && d.t) ? `<span class="legacy">${esc(d.t)}</span>` : ''}${
           pt(d.td?printDate(d.td):d.t)}`}</td>
+    ${/* Broker view used to show the share as read-only text, which left
+          no way to enter a fee on a deal created from this tab. The full
+          fee is now editable here as it is on Pipeline, with the broker's
+          share underneath when the deal is shared. Stage totals and the
+          tally still use shareOf(), so the headline figures are unchanged. */''}
     ${brokerFilter
-      ? `<td class="num sharecell">${d.f?money(shareOf(d,brokerFilter)):'—'}${
-          brokersOf(d).length>1
-            ? `<span class="fullfee">of ${money(d.f)}</span>` : ''}</td>`
+      ? `<td class="num sharecell"><div contenteditable data-k="f" data-ph="0">${
+          d.f?(+d.f).toLocaleString():''}</div>${
+          brokersOf(d).length>1 && d.f
+            ? `<span class="fullfee">${money(shareOf(d,brokerFilter))} share</span>` : ''}</td>`
       : `<td class="num"><div contenteditable data-k="f" data-ph="0">${
           d.f?(+d.f).toLocaleString():''}</div></td>`}
     ${(S().options||{}).show_probability
@@ -1658,7 +1670,7 @@ async function loadBoard(){
   renderAll();
 }
 
-const BOARD_VERSION='2026-09-14a';
+const BOARD_VERSION='2026-09-16a';
 console.info('deal-board.js', BOARD_VERSION);
 
 /* Sanity check — a truncated or partial file should say so plainly
