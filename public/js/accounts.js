@@ -286,20 +286,29 @@
     const COLS = [
       { key: "property_address", label: "Property" },
       { key: "vendor_name", label: "Vendor" },
+      { key: "trustAmount", label: "Trust Deposit Amount", cls: "r" },
+      { key: "trustReceiptNo", label: "Trust Deposit Receipt No." },
       { key: "salesperson", label: "Salespeople" },
       { key: "total_invoice_ex_gst", label: "Invoiced", cls: "r" },
       { key: "deal_no", label: "Deal no." },
       { key: "submitted_at", label: "Date" },
     ];
-    const NUMERIC = new Set(["total_invoice_ex_gst"]);
+    const NUMERIC = new Set(["total_invoice_ex_gst", "trustAmount"]);
     const DATE = new Set(["submitted_at"]);
+    // Trust deposit amount/receipt no. aren't their own columns on the
+    // deal — they live in form.deposit, so sorting/rendering those two
+    // needs a lookup rather than a plain d[key] access.
+    const sortValueOf = (d, key) =>
+      key === "trustAmount" ? d.form?.deposit?.amount
+      : key === "trustReceiptNo" ? d.form?.deposit?.receiptNo
+      : d[key];
     const { key: sortKey, dir: sortDir } = state.completedSort;
     const mul = sortDir === "asc" ? 1 : -1;
     const rows = state.completed
       .filter((d) => matchesSearch(d, state.completedSearch))
       .sort((a, b) => {
-        let av = a[sortKey], bv = b[sortKey];
-        if (NUMERIC.has(sortKey)) { av = Number(av || 0); bv = Number(bv || 0); }
+        let av = sortValueOf(a, sortKey), bv = sortValueOf(b, sortKey);
+        if (NUMERIC.has(sortKey)) { av = num(av); bv = num(bv); }
         else if (DATE.has(sortKey)) { av = new Date(av || 0).getTime(); bv = new Date(bv || 0).getTime(); }
         else { av = String(av || "").toLowerCase(); bv = String(bv || "").toLowerCase(); }
         if (av < bv) return -1 * mul;
@@ -322,13 +331,15 @@
         <tbody>${rows.length ? rows.map((d) => `<tr>
           <td><strong>${esc(d.property_address || "—")}</strong></td>
           <td>${esc(d.vendor_name || "—")}</td>
+          <td class="r mono">${d.form?.deposit?.amount ? "$" + fmt(d.form.deposit.amount) : "—"}</td>
+          <td>${esc(d.form?.deposit?.receiptNo || "—")}</td>
           <td>${esc(d.salesperson || "—")}</td>
           <td class="r mono">$${fmt(d.total_invoice_ex_gst)}</td>
           <td>${esc(d.deal_no || "—")}</td>
           <td>${d.submitted_at ? new Date(d.submitted_at).toLocaleDateString("en-NZ",{day:"2-digit",month:"short",year:"numeric"}) : "—"}</td>
           <td class="r"><button class="linkBtn" data-view="${d.id}">View</button></td>
           <td class="r"><button class="linkBtn" data-print="${d.id}">Print</button></td>
-        </tr>`).join("") : `<tr><td colspan="8" class="empty">No completed deals match your search.</td></tr>`}</tbody></table>`
+        </tr>`).join("") : `<tr><td colspan="10" class="empty">No completed deals match your search.</td></tr>`}</tbody></table>`
       : `<p class="empty">No completed deals yet.</p>`}`;
 
     const csEl = $("completedSearch");
