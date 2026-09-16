@@ -282,7 +282,13 @@
       const d = findDeal(id);
       d.form = d.form || {}; d.form.deposit = { ...(d.form.deposit || {}), dateReceived, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue };
       d.deposit_to_trust = true;
-      return delay({ ok: true, dateReceived, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue });
+      // Mirrors action.js setTrustDeposit(): both fields filled in while
+      // still "invoiced" advances the deal to "deposit_received".
+      if (String(amount || "").trim() && String(receiptNo || "").trim() && d.status === "invoiced") {
+        d.status = "deposit_received";
+        d.events.push({ created_at: new Date().toISOString(), note: `Trust deposit recorded ($${amount}, receipt ${receiptNo}) — deposit received`, to_status: "deposit_received" });
+      }
+      return delay({ ok: true, dateReceived, amount, receiptNo, notes, balancePaidTo, trustAccountNo, balanceDue, status: d.status });
     },
     setChecklistItem: (id, key, value) => {
       const d = findDeal(id);
