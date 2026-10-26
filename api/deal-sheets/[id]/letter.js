@@ -10,11 +10,15 @@
 // then sends it themselves — same as the manual process today, just
 // starting from a filled-in draft instead of a blank template.
 //
-// accounts/manager only, same as the rest of accounts.html's actions.
+// accounts/manager can generate any letter. The office admin who filed
+// the deal (admin.html) can generate the two Early Release letters once
+// the deal has been submitted — not while it's a draft or returned.
 
 import { requireUser, sendError, HttpError } from "../../_lib/auth.js";
 import { supabase } from "../../_lib/supabase.js";
 import { buildLetter, letterFilename, availableLetters } from "../../_lib/letters.js";
+
+const EARLY_RELEASE = ["vendor", "purchaser"];
 
 export default async function handler(req, res) {
   try {
@@ -22,12 +26,22 @@ export default async function handler(req, res) {
       res.setHeader("Allow", "GET");
       return res.status(405).end();
     }
-    await requireUser(req, ["accounts", "manager"]);
+    const user = await requireUser(req);
     const { id, type } = req.query;
 
     const { data: deal, error } = await supabase
       .from("deal_sheets").select("*").eq("id", id).single();
     if (error || !deal) throw new HttpError(404, "Deal sheet not found");
+
+    const isStaff = ["accounts", "manager"].includes(user.role);
+    if (!isStaff) {
+      const isOwner = deal.created_by === user.oid;
+      if (!isOwner) throw new HttpError(403, "Not permitted");
+      if (!EARLY_RELEASE.includes(type))
+        throw new HttpError(403, "Only the Early Release letters are available here");
+      if (["draft", "rejected"].includes(deal.status))
+        throw new HttpError(400, "Early Release letters are available once the deal sheet has been submitted");
+    }
 
     if (!availableLetters(deal.deal_type).includes(type)) {
       throw new HttpError(400, `"${type}" isn't available for a ${deal.deal_type || "sale"} deal`);

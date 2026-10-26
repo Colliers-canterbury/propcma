@@ -17,6 +17,31 @@
     rejected:         { label: "Returned",           cls: "rej" },
   };
 
+  // Early Release letters (same merged .docx as the Letters menu on
+  // accounts.html — see api/deal-sheets/[id]/letter.js). Sale deals only,
+  // and only once the deal sheet has been submitted.
+  const EARLY_RELEASE_LETTERS = [
+    { type: "vendor",    label: "Early Release (Vendor)" },
+    { type: "purchaser", label: "Early Release (Purchaser)" },
+  ];
+  function earlyReleaseCell(d) {
+    if (d.deal_type === "lease" || ["draft", "rejected"].includes(d.status))
+      return `<span class="dim">—</span>`;
+    return `<details class="lettersMenu" style="display:inline-block;position:relative">
+      <summary class="linkBtn" style="cursor:pointer">Early release letter</summary>
+      <div style="position:absolute;left:0;top:100%;margin-top:4px;background:#fff;border:1px solid #DCE2EC;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.14);padding:4px;min-width:210px;z-index:20;text-align:left">
+        ${EARLY_RELEASE_LETTERS.map((li) => `<button type="button" class="letterItem" data-deal="${d.id}" data-letter="${li.type}" data-label="${esc(li.label)}"
+          style="display:block;width:100%;text-align:left;background:none;border:0;padding:8px 10px;font:inherit;font-size:13px;cursor:pointer;border-radius:4px;color:inherit">${esc(li.label)}</button>`).join("")}
+      </div>
+    </details>`;
+  }
+  // Close any open letters menu on an outside click — added once, not per-render.
+  document.addEventListener("click", (e) => {
+    document.querySelectorAll("details.lettersMenu[open]").forEach((m) => {
+      if (!m.contains(e.target)) m.open = false;
+    });
+  });
+
   const state = { deals: [], filter: "all", userName: "" };
 
   async function load() {
@@ -57,11 +82,12 @@
       </div>
 
       ${shown.length ? `<table class="compTable">
-        <thead><tr><th>Property</th><th>Type</th><th>Vendor / Landlord</th><th>Purchaser / Tenant</th><th class="r">To invoice</th>
+        <thead><tr><th>Property</th><th>Early release letter</th><th>Type</th><th>Vendor / Landlord</th><th>Purchaser / Tenant</th><th class="r">To invoice</th>
           <th>Updated</th><th>Status</th><th></th></tr></thead>
         <tbody>${shown.map((d) => `<tr data-open="${d.id}" data-type="${d.deal_type || "sale"}">
           <td><strong>${esc(d.property_address || "(no address)")}</strong>
             ${d.accounts_comment ? `<div class="acctComment">💬 ${esc(d.accounts_comment)}</div>` : ""}</td>
+          <td>${earlyReleaseCell(d)}</td>
           <td><span class="typePill ${d.deal_type === "lease" ? "lease" : "sale"}">${d.deal_type === "lease" ? "Lease" : "Sale"}</span></td>
           <td>${esc(d.vendor_name || "—")}</td>
           <td>${esc(d.purchaser_name || "—")}</td>
@@ -94,6 +120,19 @@
       });
     $("app").querySelectorAll("[data-print]").forEach((b) =>
       b.onclick = (e) => { e.stopPropagation(); api.openPrint(b.dataset.print); });
+    // The row itself opens the deal, so keep clicks in the letters menu from reaching it.
+    $("app").querySelectorAll("details.lettersMenu").forEach((m) =>
+      m.addEventListener("click", (e) => {
+        e.stopPropagation();
+        document.querySelectorAll("details.lettersMenu[open]").forEach((o) => { if (o !== m) o.open = false; });
+      }));
+    $("app").querySelectorAll(".letterItem").forEach((b) =>
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const menu = b.closest("details.lettersMenu");
+        if (menu) menu.open = false;
+        api.openLetter(b.dataset.deal, b.dataset.letter, b.dataset.label);
+      });
     $("app").querySelectorAll("[data-open]").forEach((tr) =>
       tr.onclick = () => location.href = `${tr.dataset.type === "lease" ? "lease-sheet.html" : "deal-sheet.html"}?id=${tr.dataset.open}`);
   }
