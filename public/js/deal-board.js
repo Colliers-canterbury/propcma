@@ -1008,7 +1008,7 @@ function rankingsPastePanel(){
         (bad.length?`<p class="warn">Not matched to a broker code: ${bad.map(esc).join(', ')}. `+
           `These will be left out.</p>`:'')+
         (r.source==='graph'
-          ? `<p class="muted">From ${esc(r.file||'the master')} \u203a ${esc(r.sheet||'Summary')}`+
+          ? `<p class="muted">From ${esc(r.file_location||r.file||'the master')} \u203a ${esc(r.sheet||'Summary')}`+
             (r.file_saved_at?`, last saved ${esc(new Date(r.file_saved_at).toLocaleString('en-NZ',
               {day:'numeric',month:'short',hour:'numeric',minute:'2-digit'}))}`+
               (r.file_saved_by?` by ${esc(r.file_saved_by)}`:''):'')+`.</p>`

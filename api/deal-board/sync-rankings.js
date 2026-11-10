@@ -279,17 +279,24 @@ async function graphToken() {
 }
 
 // Where the master lives. It sits on the Admin site, which the PropCMA
-// app registration already has a Sites.Selected read grant on. The id
-// is the sourcedoc= GUID from the file's SharePoint URL; it survives a
-// rename or move. If it does not resolve, the file is looked for by
-// name instead. Every value can be overridden in Vercel without a code
-// change. RANKINGS_SITE_ID / RANKINGS_ITEM_ID (the old variable names)
-// still work if they were ever set.
+// app registration already has a Sites.Selected read grant on.
+//
+// docId is the sourcedoc={...} GUID from the file's SharePoint address
+// bar. That is SharePoint's document id (listItemUniqueId), NOT a Graph
+// driveItem id, so it cannot be opened directly. Instead every file with
+// the master's name is found and only the one whose
+// sharepointIds.listItemUniqueId equals docId is read. A same-named copy
+// elsewhere on the site (a backup, last year's) is never picked.
+//
+// Every value can be overridden in Vercel. RANKINGS_ITEM_ID, if set, is
+// a real Graph driveItem id and is tried first.
 const MASTER = {
   host: process.env.RANKINGS_SP_HOST || "cjch.sharepoint.com",
   sitePath: process.env.RANKINGS_SP_SITE_PATH || "/sites/Admin",
   siteId: process.env.RANKINGS_SITE_ID || null,
-  itemId: process.env.RANKINGS_ITEM_ID || "52A063E9-043C-4D02-AD9C-130403FD4016",
+  itemId: process.env.RANKINGS_ITEM_ID || null,
+  docId: (process.env.RANKINGS_DOC_ID || "52A063E9-043C-4D02-AD9C-130403FD4016")
+    .replace(/[{}]/g, "").trim().toLowerCase(),
   fileName: process.env.RANKINGS_FILE_NAME || "FF Main Report - DO NOT AMEND.xlsx",
   sheet: process.env.RANKINGS_SHEET || "Summary",
 };
@@ -312,11 +319,23 @@ async function graphGet(token, url, what) {
 const sameName = (a, b) =>
   String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
 
-// Finds the master and returns { driveId, item }. Tries, in order:
-//   (a) the sourcedoc GUID, on each document library of the site
-//   (b) the file name, in each library's root and two folder levels down
-// Search is not used: it relies on the search index, which is unreliable
-// under Sites.Selected (see api/_lib/excel.js).
+const ITEM_FIELDS = "id,name,folder,file,lastModifiedDateTime,lastModifiedBy,sharepointIds,parentReference";
+
+const docIdOf = (item) =>
+  String(item?.sharepointIds?.listItemUniqueId || "").replace(/[{}]/g, "").trim().toLowerCase();
+
+// "Documents / FINANCE / FF Main Report - DO NOT AMEND.xlsx"
+function locationOf(driveName, item) {
+  const p = String(item?.parentReference?.path || "").replace(/^.*?root:\/?/, "");
+  return [driveName, ...p.split("/").filter(Boolean).map(decodeURIComponent), item?.name]
+    .filter(Boolean).join(" / ");
+}
+
+// Finds the master and returns { driveId, item, foundBy, location }.
+//   (a) RANKINGS_ITEM_ID, if set (a Graph driveItem id)
+//   (b) library search for the name, keeping only the docId match
+//   (c) walk the libraries' folders, keeping only the docId match
+// Never falls back to "any file with that name".
 async function findMaster(token) {
   const siteId = MASTER.siteId || (await graphGet(token,
     `${GRAPH}/sites/${MASTER.host}:${MASTER.sitePath}?$select=id`, "resolve site")).id;
@@ -325,42 +344,75 @@ async function findMaster(token) {
     `${GRAPH}/sites/${siteId}/drives?$select=id,name`, "list libraries")).value || [];
   if (!drives.length) throw new HttpError(502, "No document libraries found on the SharePoint site");
 
-  const sel = "$select=id,name,lastModifiedDateTime,lastModifiedBy";
   const attempts = [];
+  const sameNamed = []; // { drive, item } - reported if the exact file is never found
+  const consider = (d, item) => {
+    if (!item || item.folder || !sameName(item.name, MASTER.fileName)) return null;
+    if (docIdOf(item) === MASTER.docId) return { driveId: d.id, item, location: locationOf(d.name, item) };
+    if (!sameNamed.some((x) => x.item.id === item.id)) sameNamed.push({ drive: d, item });
+    return null;
+  };
 
   if (MASTER.itemId) {
-    const id = MASTER.itemId.replace(/[{}]/g, "");
     for (const d of drives) {
       try {
-        const item = await graphGet(token, `${GRAPH}/drives/${d.id}/items/${id}?${sel}`, "by id");
-        if (item?.id) return { driveId: d.id, item, foundBy: "id" };
-      } catch (e) { attempts.push(`${d.name} by id: ${e.status || e.message}`); }
+        const item = await graphGet(token,
+          `${GRAPH}/drives/${d.id}/items/${MASTER.itemId}?$select=${ITEM_FIELDS}`, "by item id");
+        if (item?.id && !item.folder) {
+          return { driveId: d.id, item, foundBy: "item id", location: locationOf(d.name, item) };
+        }
+      } catch (e) { attempts.push(`${d.name} by item id: ${e.status || e.message}`); }
     }
   }
 
+  const q = MASTER.fileName.replace(/\.xlsx$/i, "").replace(/'/g, "''");
+  for (const d of drives) {
+    try {
+      const hits = (await graphGet(token,
+        `${GRAPH}/drives/${d.id}/root/search(q='${encodeURIComponent(q)}')?$select=${ITEM_FIELDS}&$top=50`,
+        "search")).value || [];
+      for (const h of hits) {
+        const m = consider(d, h);
+        if (m) return { ...m, foundBy: "document id (search)" };
+      }
+    } catch (e) { attempts.push(`${d.name} search: ${e.status || e.message}`); }
+  }
+
   // Bounded so a large library cannot run the function out of time.
-  let budget = 150;
+  let budget = 300;
   for (const d of drives) {
     let level = [{ id: "root" }];
-    for (let depth = 0; depth < 3 && level.length; depth++) {
+    for (let depth = 0; depth < 6 && level.length && budget > 0; depth++) {
       const next = [];
       for (const folder of level) {
         if (--budget < 0) break;
         let kids;
         try {
           kids = (await graphGet(token,
-            `${GRAPH}/drives/${d.id}/items/${folder.id}/children?$select=id,name,folder,lastModifiedDateTime,lastModifiedBy&$top=500`,
+            `${GRAPH}/drives/${d.id}/items/${folder.id}/children?$select=${ITEM_FIELDS}&$top=999`,
             "list folder")).value || [];
         } catch (e) { attempts.push(`${d.name} list: ${e.status || e.message}`); continue; }
-        const hit = kids.find((k) => !k.folder && sameName(k.name, MASTER.fileName));
-        if (hit) return { driveId: d.id, item: hit, foundBy: "name" };
+        for (const k of kids) {
+          const m = consider(d, k);
+          if (m) return { ...m, foundBy: "document id" };
+        }
         next.push(...kids.filter((k) => k.folder));
       }
       level = next;
     }
   }
 
-  console.error("rankings: master not found", { attempts: attempts.slice(0, 10) });
+  console.error("rankings: master not found", {
+    docId: MASTER.docId,
+    sameNamed: sameNamed.map((x) => ({ at: locationOf(x.drive.name, x.item), docId: docIdOf(x.item) })),
+    attempts: attempts.slice(0, 10),
+  });
+  if (sameNamed.length) {
+    throw new HttpError(502,
+      `Found ${sameNamed.length} file${sameNamed.length === 1 ? "" : "s"} called "${MASTER.fileName}" ` +
+      `(${sameNamed.map((x) => locationOf(x.drive.name, x.item)).slice(0, 3).join("; ")}) ` +
+      `but none is the master itself, so nothing was read. Use the paste option.`);
+  }
   throw new HttpError(502,
     `Could not find "${MASTER.fileName}" on the SharePoint site. Use the paste option.`);
 }
@@ -420,7 +472,7 @@ async function handleGraph(req, res) {
   const commit = isCron || !req.query.dry;
   const { depts, nameMap } = await loadRefs();
   const token = await graphToken();
-  const { driveId, item, foundBy } = await findMaster(token);
+  const { driveId, item, foundBy, location } = await findMaster(token);
   const { sheet, rows } = await readSheet(token, driveId, item.id);
 
   const parsed = parseMaster(rows);
@@ -439,9 +491,9 @@ async function handleGraph(req, res) {
     sheet,
     file_saved_at: item.lastModifiedDateTime || null,
     file_saved_by: item.lastModifiedBy?.user?.displayName || null,
-    // Found by name means the id lookup missed: set RANKINGS_ITEM_ID to
-    // item_id in Vercel to skip the folder walk on later runs.
+    file_location: location,
     found_by: foundBy,
+    // Set RANKINGS_ITEM_ID to this in Vercel to skip the search on later runs.
     item_id: item.id,
     pasted_rows: rows.length,
     pasted_width: Math.max(0, ...rows.map((r) => r.length)),
