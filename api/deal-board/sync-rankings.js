@@ -76,23 +76,44 @@ const UNIT_BLOCKS = {
   "retail": "retail",
 };
 
+// The Summary tab holds the current year's table at the top, and below
+// it earlier years' tables (each titled "Revenue Summary" again), GST
+// Inclusive and F/Fees sections. Only the FIRST table is read: parsing
+// stops at the next title row or the first unit heading seen twice.
+// Without that, a broker in several years' tables is overwritten by a
+// figure further down the sheet (Nov 2026: Courtney's 2026 total was
+// replaced by a lower one from below).
+//
+// The year comes from the table itself (cell A2 - "2026"), not the
+// clock, so early in January last year's figures are still filed
+// under last year until finance starts the new table.
+const STOP_AFTER_UNITS = /^(revenue summary|gst|f\/fees)/i;
+const YEAR_CELL = /^(19|20)\d{2}$/;
+
 function parseMaster(rows) {
-  const out = {};
+  const units = {};
   let unit = null;
+  let year = null;
   for (const row of rows) {
     const label = String(row[COL.name] ?? "").trim();
     if (!label) continue;
     const key = label.toLowerCase();
 
-    if (UNIT_BLOCKS[key]) { unit = UNIT_BLOCKS[key]; out[unit] = out[unit] || []; continue; }
+    if (!unit && YEAR_CELL.test(label)) { year = year || Number(label); continue; }
+
+    if (UNIT_BLOCKS[key]) {
+      if (units[UNIT_BLOCKS[key]]) break;          // next table starts
+      unit = UNIT_BLOCKS[key]; units[unit] = []; continue;
+    }
+    if (unit && (STOP_AFTER_UNITS.test(label) || YEAR_CELL.test(label))) break;
     if (/^(sub-?total|total|%|other|ytd)/i.test(label)) continue;
     if (!unit) continue;
 
     const fees = num(row[COL.fees]);
     if (fees === null) continue;
-    out[unit].push({ name: label, fees, budget: num(row[COL.budget]) });
+    units[unit].push({ name: label, fees, budget: num(row[COL.budget]) });
   }
-  return out;
+  return { units, year };
 }
 
 // Excel puts tab-separated text on the clipboard. Cells containing a
@@ -117,18 +138,21 @@ function parsePaste(text) {
 // broker, never deleted, so a partial paste updates what it covers and
 // leaves the rest alone.
 async function applyParsed(parsed, depts, nameMap, commit) {
-  const year = new Date().getFullYear();
+  const year = parsed.year || new Date().getFullYear();
   const results = [];
+  const fromSheet = new Set(Object.values(UNIT_BLOCKS));
 
-  for (const dept of depts) {
-    const block = parsed[dept.slug];
+  // Departments the sheet does not cover (e.g. management, a rollup)
+  // are left out rather than reported as "nothing found".
+  for (const dept of depts.filter((d) => fromSheet.has(d.slug))) {
+    const block = parsed.units[dept.slug];
     if (!block) { results.push({ slug: dept.slug, skipped: "no block found" }); continue; }
 
     const upserts = [];
     const unmatched = [];
     for (const r of block) {
       const code = nameMap[r.name.toLowerCase()];
-      if (!code) { unmatched.push(r.name); continue; }
+      if (!code) { if (!unmatched.includes(r.name)) unmatched.push(r.name); continue; }
       upserts.push({
         department_id: dept.id,
         broker_code: code,
@@ -215,7 +239,7 @@ async function handlePaste(req, res) {
   }
 
   const parsed = parseMaster(rows);
-  const found = Object.keys(parsed);
+  const found = Object.keys(parsed.units);
   if (!found.length) {
     throw new HttpError(400,
       "No unit headings found in column A. Expected Commercial Sales, " +
@@ -231,6 +255,7 @@ async function handlePaste(req, res) {
     committed: !!commit,
     pasted_rows: rows.length,
     pasted_width: width,
+    year: parsed.year || new Date().getFullYear(),
     results,
   });
 }
@@ -476,7 +501,7 @@ async function handleGraph(req, res) {
   const { sheet, rows } = await readSheet(token, driveId, item.id);
 
   const parsed = parseMaster(rows);
-  if (!Object.keys(parsed).length) {
+  if (!Object.keys(parsed.units).length) {
     throw new HttpError(502,
       `Read ${rows.length} rows from ${sheet} but found no unit headings in column A. ` +
       `Has the Summary layout changed?`);
@@ -497,6 +522,7 @@ async function handleGraph(req, res) {
     item_id: item.id,
     pasted_rows: rows.length,
     pasted_width: Math.max(0, ...rows.map((r) => r.length)),
+    year: parsed.year || new Date().getFullYear(),
     results,
   });
 }
