@@ -238,12 +238,23 @@ async function handlePaste(req, res) {
 // ── GET: Microsoft Graph ────────────────────────────────
 
 async function graphToken() {
-  const env = {
+  // The same app registration and settings as api/_lib/graph.js (accounts
+  // emails) and the Operations Manual roster sync: MS_TENANT_ID /
+  // MS_CLIENT_ID / MS_CLIENT_SECRET. The older GRAPH_* names are still
+  // honoured if all three are ever set.
+  const useGraphNames = ["GRAPH_TENANT_ID", "GRAPH_CLIENT_ID", "GRAPH_CLIENT_SECRET"]
+    .every((k) => process.env[k] && String(process.env[k]).trim());
+  const env = useGraphNames ? {
     GRAPH_TENANT_ID: process.env.GRAPH_TENANT_ID,
     GRAPH_CLIENT_ID: process.env.GRAPH_CLIENT_ID,
     GRAPH_CLIENT_SECRET: process.env.GRAPH_CLIENT_SECRET,
+  } : {
+    GRAPH_TENANT_ID: process.env.MS_TENANT_ID,
+    GRAPH_CLIENT_ID: process.env.MS_CLIENT_ID,
+    GRAPH_CLIENT_SECRET: process.env.MS_CLIENT_SECRET,
   };
-  const missing = Object.entries(env).filter(([, v]) => !v || !String(v).trim()).map(([k]) => k);
+  const missing = Object.entries(env).filter(([, v]) => !v || !String(v).trim())
+    .map(([k]) => k.replace("GRAPH_", useGraphNames ? "GRAPH_" : "MS_"));
   if (missing.length) throw new HttpError(500, `Not configured: ${missing.join(", ")}`);
 
   const res = await fetch(
