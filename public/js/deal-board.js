@@ -994,7 +994,7 @@ function rankingsPastePanel(){
       const lines=rows.map(x=>{
         const name=LABEL[x.slug]||x.slug;
         if(x.error)   return `<li class="bad">${name}: could not save</li>`;
-        if(x.skipped) return `<li class="warn">${name}: nothing found in the paste</li>`;
+        if(x.skipped) return `<li class="warn">${name}: nothing found${r.source==='graph'?'':' in the paste'}</li>`;
         const un=(x.unmatched||[]).length;
         return `<li>${name}: <b>${x.updated}</b> broker${x.updated===1?'':'s'}, `+
                `${money(x.total_fees)}`+
@@ -1004,7 +1004,8 @@ function rankingsPastePanel(){
       /* Unrecognised names are the failure that hides: the run looks
          clean and that broker simply never appears. Name them. */
       const bad=rows.reduce((a,x)=>a.concat(x.unmatched||[]),[]);
-      out.innerHTML=`<ul class="pastelist">${lines.join('')}</ul>`+
+      out.innerHTML=(r.year?`<p class="muted" style="margin:0 0 6px">${esc(String(r.year))} figures</p>`:'')+
+        `<ul class="pastelist">${lines.join('')}</ul>`+
         (bad.length?`<p class="warn">Not matched to a broker code: ${bad.map(esc).join(', ')}. `+
           `These will be left out.</p>`:'')+
         (r.source==='graph'
