@@ -925,9 +925,9 @@ async function renderRankings(){
       <td class="pc">${totBudget?totPct.toFixed(0)+'%':''}</td>
     </tr></tfoot></table></section>`;
 
-  /* The master report carries in-file IRM, so the server cannot read it
-     over Graph - see the note at the top of sync-rankings.js. Desktop
-     Excel can, which makes copy-and-paste the one route that works.
+  /* Rankings sync from the master every morning on their own (see
+     sync-rankings.js). This panel fetches on demand, or takes a paste
+     if SharePoint cannot be read.
      NOTE: this panel has now been lost twice to whole-file rewrites of
      deal-board.js. If it is missing again, look for rankingsPastePanel
      below before assuming a cache problem. */
@@ -937,14 +937,19 @@ async function renderRankings(){
   });
 }
 
-/* Paste-in for the rankings, replacing the Graph sync. Resolves true
-   if anything was written. */
+/* Update the rankings now: fetch from SharePoint, or paste. Either way
+   the figures are checked before anything is written. Resolves true if
+   anything was written. */
 function rankingsPastePanel(){
   return new Promise(resolve=>{
     const ov=document.createElement('div');
     ov.className='pasteov';
     ov.innerHTML=`<div class="pastecard" role="dialog" aria-label="Update rankings">
       <h2>Update rankings from the master report</h2>
+      <p class="pastelead">Rankings update from <b>FF Main Report</b> automatically each morning.
+        To update now, fetch the latest saved version from SharePoint:</p>
+      <div class="pastebtns pastefetch"><button data-a="fetch">Fetch from SharePoint</button></div>
+      <p class="pastelead">Or, if that fails, paste it in:</p>
       <ol class="pastesteps">
         <li>Open <b>FF Main Report - DO NOT AMEND.xlsx</b> in Excel on your computer.</li>
         <li>Go to the <b>Summary</b> sheet.</li>
@@ -964,6 +969,10 @@ function rankingsPastePanel(){
     const box=ov.querySelector('.pastebox');
     const out=ov.querySelector('.pasteout');
     const bCheck=ov.querySelector('[data-a="check"]');
+    const bFetch=ov.querySelector('[data-a="fetch"]');
+    /* What Update rankings will commit: the paste, or a fresh read of
+       the master. */
+    let mode='paste';
     const bCommit=ov.querySelector('[data-a="commit"]');
     let wrote=false;
 
@@ -975,7 +984,7 @@ function rankingsPastePanel(){
 
     /* Any edit invalidates a previous check, so nobody can check one
        paste and then commit a different one. */
-    box.oninput=()=>{bCommit.disabled=true;out.innerHTML=''};
+    box.oninput=()=>{bCommit.disabled=true;out.innerHTML='';mode='paste'};
 
     const LABEL={investment:'Investment',industrial:'Industrial',
                  leasing:'Office Leasing',retail:'Retail'};
@@ -998,14 +1007,42 @@ function rankingsPastePanel(){
       out.innerHTML=`<ul class="pastelist">${lines.join('')}</ul>`+
         (bad.length?`<p class="warn">Not matched to a broker code: ${bad.map(esc).join(', ')}. `+
           `These will be left out.</p>`:'')+
-        `<p class="muted">${r.pasted_rows} rows read, ${r.pasted_width} columns wide.</p>`;
+        (r.source==='graph'
+          ? `<p class="muted">From ${esc(r.file||'the master')} \u203a ${esc(r.sheet||'Summary')}`+
+            (r.file_saved_at?`, last saved ${esc(new Date(r.file_saved_at).toLocaleString('en-NZ',
+              {day:'numeric',month:'short',hour:'numeric',minute:'2-digit'}))}`+
+              (r.file_saved_by?` by ${esc(r.file_saved_by)}`:''):'')+`.</p>`
+          : `<p class="muted">${r.pasted_rows} rows read, ${r.pasted_width} columns wide.</p>`);
     }
+
+    bFetch.onclick=async()=>{
+      bFetch.disabled=true; bFetch.textContent='Fetching\u2026';
+      bCommit.disabled=true;
+      try{
+        const r=await DealBoardApi.syncRankings(false);
+        if(r.skipped){
+          out.innerHTML=`<p class="warn">${esc(r.skipped)}</p>`;
+        }else{
+          report(r);
+          const any=(r.results||[]).some(x=>x.updated>0);
+          mode='graph';
+          bCommit.disabled=!any;
+          if(!any) out.innerHTML+='<p class="warn">Nothing to update from the master.</p>';
+        }
+      }catch(e){
+        out.innerHTML=`<p class="bad">${esc(e.status===401||e.status===403
+          ? 'You need manager access to update the rankings'
+          : (e.message||'Could not read the master'))}</p>`;
+      }
+      bFetch.disabled=false; bFetch.textContent='Fetch from SharePoint';
+    };
 
     bCheck.onclick=async()=>{
       if(!box.value.trim()){out.innerHTML='<p class="warn">Nothing pasted yet.</p>';return}
       bCheck.disabled=true; bCheck.textContent='Checking\u2026';
       try{
         const r=await DealBoardApi.pasteRankings(box.value,false);
+        mode='paste';
         report(r);
         const any=(r.results||[]).some(x=>x.updated>0);
         bCommit.disabled=!any;
@@ -1021,7 +1058,9 @@ function rankingsPastePanel(){
     bCommit.onclick=async()=>{
       bCommit.disabled=true; bCommit.textContent='Updating\u2026';
       try{
-        const r=await DealBoardApi.pasteRankings(box.value,true);
+        const r=mode==='graph'
+          ? await DealBoardApi.syncRankings(true)
+          : await DealBoardApi.pasteRankings(box.value,true);
         const n=(r.results||[]).reduce((a,x)=>a+(x.updated||0),0);
         wrote=true;
         toast(`Updated ${n} broker${n===1?'':'s'}`);

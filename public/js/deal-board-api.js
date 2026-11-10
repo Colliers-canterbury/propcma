@@ -60,10 +60,11 @@
 
     // The sync is its own function, not under the /api/deal-board
     // handler, so it is called directly rather than through call().
-    async syncRankings() {
+    // commit=false is a preview (?dry=1): read the master, write nothing.
+    async syncRankings(commit) {
       const token = await window.DealSheetAuth.getToken();
       const res = await fetch(
-        `${cfg.apiBase}/api/deal-board/sync-rankings?force=1`,
+        `${cfg.apiBase}/api/deal-board/sync-rankings?force=1${commit ? "" : "&dry=1"}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const data = await res.json().catch(() => null);
@@ -75,10 +76,8 @@
       return data;
     },
 
-    // Rows pasted out of Excel go to the same endpoint by POST. The
-    // master report carries in-file IRM, so the server cannot read it
-    // over Graph - desktop Excel can, which makes paste the one route
-    // that works. commit=false is a dry run: the server parses and
+    // Rows pasted out of Excel go to the same endpoint by POST - the
+    // fallback if the SharePoint read fails. commit=false is a dry run: the server parses and
     // reports back, and writes nothing.
     async pasteRankings(text, commit) {
       const token = await window.DealSheetAuth.getToken();

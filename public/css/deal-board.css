@@ -517,6 +517,8 @@ body.proj select.ltpick{font-size:.88em}
 .pasteout .bad{color:var(--red)}
 .pasteout .muted{color:var(--ink-3);font-size:11.5px;margin:8px 0 0}
 .pastebtns{display:flex;gap:6px;justify-content:flex-end;margin-top:16px}
+.pastelead{margin:0 0 8px;color:var(--ink-2);line-height:1.5}
+.pastefetch{justify-content:flex-start;margin:0 0 14px}
 .pastebtns .go{background:var(--navy);border-color:var(--navy);color:#fff}
 .pastebtns .go:hover{background:#1b3070;color:#fff}
 .pastebtns button[disabled]{opacity:.45;cursor:default}
